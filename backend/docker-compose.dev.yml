@@ -1,0 +1,11 @@
+# Local development only. Publishes Postgres on the host so you can run the API
+# directly with `npm run dev` against the containerised database.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# NEVER use this file on the Oracle VM — it exposes the database port.
+#
+# Testing from a real phone on your LAN? Run the API with `npm run dev` instead of
+# in Docker — Express binds all interfaces, while the container is loopback-only.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5433:5432"

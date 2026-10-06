@@ -1,0 +1,46 @@
+# Pinned so the project isn't named after the directory ("backend"). Without this,
+# any other compose project in a folder called "backend" shares this namespace and
+# its containers show up here as removable "orphans".
+name: matrimony
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-matrimony}
+      POSTGRES_USER: ${DB_USER:-matrimony}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-matrimony}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Optional settings (ANTHROPIC_API_KEY, OTP_*, MSG91_*) come straight from .env;
+    # the explicit values below still win.
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${DB_USER:-matrimony}:${DB_PASSWORD}@db:5432/${DB_NAME:-matrimony}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      PORT: 3000
+    volumes:
+      - ./uploads:/app/uploads
+    ports:
+      # Bound to loopback: the only way in is through Caddy on 443. Without the
+      # host prefix Docker publishes on 0.0.0.0 and punches through the firewall.
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  pgdata:

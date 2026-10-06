@@ -1,0 +1,52 @@
+name: gandharva
+description: "Gandharva — Connecting Hearts, Creating Families. The customer app of the Mediator matrimony network."
+publish_to: 'none'
+
+version: 1.4.0+5
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  dio: ^5.11.0
+  flutter_secure_storage: ^11.0.0
+  provider: ^6.1.5+1
+  url_launcher: ^6.3.2
+  image_picker: ^1.2.3
+  cached_network_image: ^3.4.1
+  intl: ^0.20.3
+  shared_preferences: ^2.5.5
+  http_parser: ^4.1.2
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo/logo.png
+
+  # Poppins for text, Playfair Display for the wordmark and headlines (both OFL).
+  # Bundled so the app never depends on the network for type.
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+    - family: Playfair Display
+      fonts:
+        - asset: assets/fonts/PlayfairDisplay.ttf
