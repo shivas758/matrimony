@@ -24,7 +24,7 @@ Map<String, dynamic> guestMeJson() => {
       'pending_agent_change': null,
       'access': 'guest',
       'profiles': [],
-      'max_profiles': 5,
+      'max_profiles': 1,
       'profile_fee_inr': 150,
       'payment_provider': 'mock',
       'unlock': {'agent_linked': false, 'profile_registered': false, 'paid': false, 'approved': false},
@@ -82,7 +82,7 @@ void main() {
       expect(c.access, 'guest');
       expect(c.profiles, isEmpty);
       expect(c.hasProfile, isFalse);
-      expect(c.maxProfiles, 5);
+      expect(c.maxProfiles, 1);
       expect(c.profileFeeInr, 150);
       expect(c.paymentProvider, 'mock');
       expect(c.canLinkAgent, isTrue);
@@ -123,6 +123,8 @@ void main() {
       expect(Customer.fromJson({...guestMeJson(), 'status': 'suspended'}).canLinkAgent, isFalse);
       final full = Customer.fromJson({...activeMeJson(), 'max_profiles': 4});
       expect(full.canAddProfile, isFalse);
+      final one = Customer.fromJson({...activeMeJson(), 'max_profiles': 1, 'profiles': [(activeMeJson()['profiles'] as List).first]});
+      expect(one.canAddProfile, isFalse, reason: 'one profile per customer (SPEC §9.17)');
     });
 
     test('a v1.0-style me (no v2.2 keys) still parses', () {
@@ -137,6 +139,7 @@ void main() {
       final c = Customer.fromJson(j);
       expect(c.access, 'guest');
       expect(c.profiles, isEmpty);
+      expect(c.maxProfiles, 1, reason: 'one profile per customer (SPEC §9.17)');
       expect(c.profileFeeInr, isNull, reason: 'never invent a fee');
       expect(c.unlock.agentLinked, isFalse);
     });

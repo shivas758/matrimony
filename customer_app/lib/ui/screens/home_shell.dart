@@ -14,7 +14,7 @@ import 'more_screen.dart';
 import 'my_profile/my_profiles_screen.dart';
 
 /// Bottom-nav shell for every signed-in customer except a suspended one:
-/// Browse · Interested · My profiles · More (SPEC §9.12). When the account's
+/// Browse · Interested · My profile · More (SPEC §9.12 / §9.17). When the account's
 /// access changes (guest ↔ full), Browse and Interested reload. While it is
 /// shown the notifications poller runs (every 60 s and on returning to the
 /// foreground — SPEC §9.15); it stops when the shell goes away (logout).
@@ -116,7 +116,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           NavigationDestination(
             icon: Icon(Icons.account_circle_outlined),
             selectedIcon: Icon(Icons.account_circle_rounded),
-            label: S.myProfiles,
+            label: S.myProfile,
           ),
           NavigationDestination(
             icon: Icon(Icons.menu_rounded),

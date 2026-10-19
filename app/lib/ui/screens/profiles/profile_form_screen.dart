@@ -16,6 +16,7 @@ import '../../../state/auth_state.dart';
 import '../../../state/masters_state.dart';
 import '../../strings.dart';
 import '../../widgets/common.dart';
+import '../../widgets/photo_picker.dart';
 
 /// Add or edit a profile (SPEC §5 screen 5). Pops `true` when saved.
 class ProfileFormScreen extends StatefulWidget {
@@ -31,7 +32,6 @@ class ProfileFormScreen extends StatefulWidget {
 
 class _ProfileFormScreenState extends State<ProfileFormScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _picker = ImagePicker();
 
   late final TextEditingController _name;
   late final TextEditingController _subcaste;
@@ -245,9 +245,20 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       showSnack(context, 'Maximum ${AppConfig.maxPhotos} photos', error: true);
       return;
     }
-    final picked = await _picker.pickMultiImage(imageQuality: 92, limit: remaining);
-    if (picked.isEmpty) return;
+    // Camera or gallery, then the crop / rotate editor (SPEC §9.17).
+    final picked = await PhotoPicker.pick(context, remaining: remaining);
+    if (picked.isEmpty || !mounted) return;
     setState(() => _newPhotos.addAll(picked.take(remaining)));
+  }
+
+  /// Re-opens the editor on a photo that is not uploaded yet.
+  Future<void> _editNewPhoto(XFile file) async {
+    final edited = await PhotoPicker.edit(context, file);
+    if (edited == null || !mounted) return;
+    setState(() {
+      final i = _newPhotos.indexOf(file);
+      if (i >= 0) _newPhotos[i] = edited;
+    });
   }
 
   Future<void> _pickDob() async {
@@ -642,6 +653,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
                 onAdd: _pickPhotos,
                 onRemoveExisting: _deleteExistingPhoto,
                 onRemoveNew: (f) => setState(() => _newPhotos.remove(f)),
+                onEditNew: _editNewPhoto,
               ),
               const SizedBox(height: 24),
               const SectionHeader(S.basicDetails),
@@ -1596,6 +1608,7 @@ class _PhotoStrip extends StatelessWidget {
     required this.onAdd,
     required this.onRemoveExisting,
     required this.onRemoveNew,
+    required this.onEditNew,
   });
 
   final List<ProfilePhoto> existing;
@@ -1604,12 +1617,15 @@ class _PhotoStrip extends StatelessWidget {
   final ValueChanged<ProfilePhoto> onRemoveExisting;
   final ValueChanged<XFile> onRemoveNew;
 
+  /// Opens the editor again on a photo that is not uploaded yet (SPEC §9.17).
+  final ValueChanged<XFile> onEditNew;
+
   @override
   Widget build(BuildContext context) {
     final api = context.read<ApiClient>();
     final theme = Theme.of(context);
 
-    Widget tile(Widget child, VoidCallback onRemove) => Stack(
+    Widget tile(Widget child, VoidCallback onRemove, {VoidCallback? onEdit}) => Stack(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -1619,6 +1635,7 @@ class _PhotoStrip extends StatelessWidget {
               top: -6,
               right: -6,
               child: IconButton(
+                tooltip: S.removePhoto,
                 icon: const CircleAvatar(
                   radius: 12,
                   backgroundColor: Colors.black54,
@@ -1627,6 +1644,20 @@ class _PhotoStrip extends StatelessWidget {
                 onPressed: onRemove,
               ),
             ),
+            if (onEdit != null)
+              Positioned(
+                bottom: -6,
+                right: -6,
+                child: IconButton(
+                  tooltip: S.editPhoto,
+                  icon: const CircleAvatar(
+                    radius: 12,
+                    backgroundColor: Colors.black54,
+                    child: Icon(Icons.crop_rotate_rounded, size: 14, color: Colors.white),
+                  ),
+                  onPressed: onEdit,
+                ),
+              ),
           ],
         );
 
@@ -1661,7 +1692,11 @@ class _PhotoStrip extends StatelessWidget {
           ],
           for (final file in added) ...[
             const SizedBox(width: 10),
-            tile(Image.file(File(file.path), fit: BoxFit.cover), () => onRemoveNew(file)),
+            tile(
+              Image.file(File(file.path), fit: BoxFit.cover),
+              () => onRemoveNew(file),
+              onEdit: () => onEditNew(file),
+            ),
           ],
         ],
       ),

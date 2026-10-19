@@ -37,9 +37,9 @@ class EmptyState extends StatelessWidget {
             Container(
               width: 84,
               height: 84,
-              decoration: const BoxDecoration(color: AppColors.roseLight, shape: BoxShape.circle),
+              decoration: const BoxDecoration(color: AppColors.goldLight, shape: BoxShape.circle),
               alignment: Alignment.center,
-              child: Icon(icon, size: 38, color: AppColors.maroon),
+              child: Icon(icon, size: 38, color: AppColors.wine),
             ),
             const SizedBox(height: 18),
             Text(title, style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
@@ -87,15 +87,21 @@ class AuthedPhoto extends StatelessWidget {
     required this.url,
     required this.api,
     this.fit = BoxFit.cover,
+    this.alignment = faceAnchor,
     this.width,
     this.height,
     this.placeholderInitials,
   });
 
+  /// Where a filled (cover) frame anchors the photo: its upper part, so a
+  /// face stays in view when a tall photo is trimmed to a card (SPEC §9.17).
+  static const faceAnchor = Alignment(0, -0.6);
+
   /// Absolute URL (see [ApiClient.absoluteUrl]); null shows the placeholder.
   final String? url;
   final ApiClient api;
   final BoxFit fit;
+  final Alignment alignment;
   final double? width;
   final double? height;
   final String? placeholderInitials;
@@ -108,6 +114,7 @@ class AuthedPhoto extends StatelessWidget {
       imageUrl: url!,
       httpHeaders: {'Authorization': 'Bearer $token'},
       fit: fit,
+      alignment: alignment,
       width: width,
       height: height,
       fadeInDuration: const Duration(milliseconds: 150),
@@ -124,7 +131,7 @@ class AuthedPhoto extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [AppColors.maroonLight, AppColors.maroon],
+          colors: [AppColors.wineLight, AppColors.wine],
         ),
       ),
       alignment: Alignment.center,
@@ -132,7 +139,7 @@ class AuthedPhoto extends StatelessWidget {
           ? const SizedBox(
               width: 22,
               height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.roseGold),
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold),
             )
           : (placeholderInitials != null && placeholderInitials!.isNotEmpty
               ? Text(
@@ -142,10 +149,10 @@ class AuthedPhoto extends StatelessWidget {
                     fontSize: 34,
                     fontWeight: FontWeight.w600,
                     fontVariations: [FontVariation('wght', 600)],
-                    color: AppColors.roseGold,
+                    color: AppColors.gold,
                   ),
                 )
-              : const Icon(Icons.person_rounded, size: 44, color: AppColors.roseGold)),
+              : const Icon(Icons.person_rounded, size: 44, color: AppColors.gold)),
     );
   }
 }
@@ -241,13 +248,13 @@ class SectionHeader extends StatelessWidget {
             width: 3,
             height: 14,
             margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(color: AppColors.roseGold, borderRadius: BorderRadius.circular(2)),
+            decoration: BoxDecoration(color: AppColors.gold, borderRadius: BorderRadius.circular(2)),
           ),
           Expanded(
             child: Text(
               title.toUpperCase(),
               style: theme.textTheme.labelMedium?.copyWith(
-                color: AppColors.maroon,
+                color: AppColors.wine,
                 letterSpacing: 1.1,
                 fontWeight: FontWeight.w700,
               ),
@@ -312,9 +319,9 @@ class FactTile extends StatelessWidget {
           Container(
             width: 36,
             height: 36,
-            decoration: BoxDecoration(color: AppColors.roseLight, borderRadius: BorderRadius.circular(10)),
+            decoration: BoxDecoration(color: AppColors.goldLight, borderRadius: BorderRadius.circular(10)),
             alignment: Alignment.center,
-            child: Icon(icon, size: 18, color: AppColors.maroon),
+            child: Icon(icon, size: 18, color: AppColors.wine),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -503,7 +510,7 @@ class NoticeCard extends StatelessWidget {
     required this.icon,
     required this.title,
     this.body,
-    this.tint = AppColors.maroon,
+    this.tint = AppColors.wine,
     this.action,
     this.child,
   });
@@ -618,7 +625,7 @@ class AgentRow extends StatelessWidget {
         Container(
           width: 46,
           height: 46,
-          decoration: BoxDecoration(color: AppColors.roseLight, borderRadius: BorderRadius.circular(14)),
+          decoration: BoxDecoration(color: AppColors.goldLight, borderRadius: BorderRadius.circular(14)),
           alignment: Alignment.center,
           child: Text(
             initialsOf(agent.fullName),
@@ -627,7 +634,7 @@ class AgentRow extends StatelessWidget {
               fontSize: 17,
               fontWeight: FontWeight.w600,
               fontVariations: [FontVariation('wght', 600)],
-              color: AppColors.maroonDeep,
+              color: AppColors.wineDeep,
             ),
           ),
         ),
@@ -639,7 +646,7 @@ class AgentRow extends StatelessWidget {
               Row(
                 children: [
                   Expanded(child: Text(agent.fullName, style: theme.textTheme.titleMedium)),
-                  if (label != null) StatusChip(label: label!, color: AppColors.roseDark),
+                  if (label != null) StatusChip(label: label!, color: AppColors.goldDark),
                 ],
               ),
               if (agent.agencyLine != null)

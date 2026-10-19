@@ -40,9 +40,9 @@ class ProfileChipRow extends StatelessWidget {
           icon: p.isBride ? Icons.female_rounded : Icons.male_rounded,
         ),
         if (p.ageDobLine != null)
-          StatusChip(label: p.ageDobLine!, color: AppColors.maroon, icon: Icons.cake_outlined),
+          StatusChip(label: p.ageDobLine!, color: AppColors.wine, icon: Icons.cake_outlined),
         if (p.communityLine != null)
-          StatusChip(label: p.communityLine!, color: AppColors.roseDark, icon: Icons.groups_rounded),
+          StatusChip(label: p.communityLine!, color: AppColors.goldDark, icon: Icons.groups_rounded),
         if (p.isNri)
           StatusChip(label: p.nriLabel ?? S.nri, color: _nriColor, icon: Icons.public_rounded),
         ...trailing,
@@ -206,15 +206,15 @@ class SharedDetailsCard extends StatelessWidget {
     final days = daysLeft;
 
     return SurfaceCard(
-      color: AppColors.roseLight.withValues(alpha: 0.45),
-      borderColor: AppColors.roseGold.withValues(alpha: 0.6),
+      color: AppColors.goldLight.withValues(alpha: 0.45),
+      borderColor: AppColors.gold.withValues(alpha: 0.6),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.lock_open_rounded, size: 18, color: AppColors.maroon),
+              const Icon(Icons.lock_open_rounded, size: 18, color: AppColors.wine),
               const SizedBox(width: 8),
               Expanded(child: Text(S.sharedDetailsTitle, style: theme.textTheme.titleSmall)),
               if (!own && days != null)

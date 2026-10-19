@@ -207,7 +207,7 @@ class _InterestTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w700,
-                            color: AppColors.maroon,
+                            color: AppColors.wine,
                           ),
                         ),
                         if (line.isNotEmpty) ...[
@@ -219,7 +219,7 @@ class _InterestTile extends StatelessWidget {
                           Text(
                             S.forProfile(interest.fromProfile!.fullName),
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: AppColors.roseDark,
+                              color: AppColors.goldDark,
                               fontWeight: FontWeight.w600,
                             ),
                           ),

@@ -91,7 +91,7 @@ async function registrationLink(agent) {
   const whatsapp_text =
     `Namaste! This is ${who}. Please fill in this registration form so I can add your profile ` +
     `and start looking for matches:\n${url}\n\n` +
-    'After submitting, install the Gandharva app and log in with the same mobile number to browse profiles.';
+    'After submitting, install the MILI app and log in with the same mobile number to browse profiles.';
   return { url, whatsapp_text };
 }
 

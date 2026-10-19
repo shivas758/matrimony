@@ -459,7 +459,7 @@ sudo rsync -a ~/backups/uploads-mirror/ ~/matrimony-agents/backend/uploads/
 docker compose restart api
 ```
 
-## 10. Build the APKs — Mediator for agents, Gandharva for customers
+## 10. Build the APKs — Mediator for agents, MILI for customers
 
 **On your PC**, pointed at the live domain:
 
@@ -468,7 +468,7 @@ cd app            # Mediator (agents)
 flutter build apk --release --target-platform android-arm,android-arm64 \
   --dart-define=API_BASE_URL=https://your-domain.example.com
 
-cd ../customer_app   # Gandharva (customers)
+cd ../customer_app   # MILI (customers)
 flutter build apk --release --target-platform android-arm,android-arm64 \
   --dart-define=API_BASE_URL=https://your-domain.example.com
 ```
@@ -479,7 +479,7 @@ details). You approve them under **More → Admin → Pending agents**.
 
 Agents send `customer_app/build/app/outputs/flutter-apk/app-release.apk` to their customers,
 or share their registration-form link from **Clients → Registration form**. A customer who
-installs Gandharva signs up with their number (OTP) and the agent's mobile number; the agent
+installs MILI signs up with their number (OTP) and the agent's mobile number; the agent
 approves them under **Clients**.
 
 The domain is compiled into both APKs, so if you ever change the domain you must rebuild
@@ -513,16 +513,17 @@ The API is down for the few minutes the image rebuilds (longer on a 1 GB Micro).
 database dump: `VM_HOST=ubuntu@YOUR_PUBLIC_IP ./deploy/update.sh`.
 
 **Schema changes** go in `backend/db/migrations/` as numbered, idempotent files and are applied
-by the loop above. `001_subcastes.sql` is the first; `008_push_devices.sql` (push notification devices) is the
-latest. `007_delete_requests_cash.sql` added delete requests for paid customer profiles and cash
+by the loop above. `001_subcastes.sql` is the first; `009_one_profile_per_customer.sql` (one profile per
+customer — a unique index, skipped with a NOTICE if a customer already owns several) is the latest.
+`008_push_devices.sql` added push notification devices. `007_delete_requests_cash.sql` added delete requests for paid customer profiles and cash
 payments recorded by agents. `006_guest_mode_payments.sql`
-added Gandharva guest mode, the ₹150 registration fee and up to 5 profiles per customer. 006 grandfathers the
+added guest mode in the customer app (then called Gandharva, now MILI), the ₹150 registration fee and up to 5 profiles per customer (one since 009). 006 grandfathers the
 customer profiles that exist when it first runs as paid; re-running it later changes nothing.
 
 **OTP for signups and customer logins** — the backend ships with `OTP_PROVIDER=mock`: no SMS is
 sent, the code is always `123456` and both apps show it as a hint. That is fine for testing with
 your own agents but means anyone can sign up a customer with any number, so switch to real SMS
-before opening Gandharva to the public:
+before opening MILI to the public:
 
 ```bash
 nano .env          # OTP_PROVIDER=msg91  MSG91_AUTH_KEY=...  MSG91_TEMPLATE_ID=...  MSG91_SENDER=...
@@ -531,13 +532,13 @@ docker compose up -d
 
 Since v2.2 (SPEC §9.12) a customer who signs up is a **guest** straight away and can scroll
 profile cards — primary photo (watermarked), age, job, caste and package, never names or
-contacts. With the mock OTP that means anyone who installs Gandharva can see those cards under
+contacts. With the mock OTP that means anyone who installs MILI can see those cards under
 any number, so turn on real SMS before sharing the app widely. Opening a profile still needs an
 agent's approval and a paid profile.
 
 **Registration fee (₹150 per customer profile)** — ships with `PAYMENT_PROVIDER=mock`: the app
 shows a test checkout (*Pay ₹150* / *Simulate failure*) and nothing is charged. `PROFILE_FEE_INR`
-changes the amount, `MAX_CUSTOMER_PROFILES` the per-customer limit (default 5). To take real
+changes the amount. Each customer registers one profile (SPEC §9.17 — fixed, not an env setting). To take real
 payments later: create a Razorpay account, then
 
 ```bash
@@ -545,7 +546,7 @@ nano .env          # PAYMENT_PROVIDER=razorpay  RAZORPAY_KEY_ID=rzp_live_...  RA
 docker compose up -d
 ```
 
-— but only together with a Gandharva app update that includes the Razorpay Checkout plugin (the
+— but only together with a MILI app update that includes the Razorpay Checkout plugin (the
 current app refuses non-mock payments and tells the customer to contact their agent). The
 backend's Razorpay path (order creation + signature check) is written but has not been tested
 against a live Razorpay account yet.
@@ -558,7 +559,7 @@ it on. One-time setup (free, ~15 minutes, on your PC):
    Analytics not needed.
 2. In the project: *Add app → Android*, package name `com.matrimonyagents.matrimony_agents`
    (Mediator). Skip the "download google-services.json" and SDK steps. Repeat for
-   `com.matrimonyagents.gandharva` (Gandharva).
+   `com.matrimonyagents.gandharva` (MILI — the package id kept its old name).
 3. *Project settings → General*: note the **Project ID**, the **Web API key**, and for each
    Android app its **App ID** (`1:1234…:android:…`). *Project settings → Cloud Messaging*: note
    the **Sender ID**.

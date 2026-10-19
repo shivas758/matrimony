@@ -15,6 +15,7 @@ import '../../../state/masters_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/photo_picker.dart';
 
 /// The registration form in the paper's order (SPEC §9.11 Gandharva 5):
 /// Basic → Birth → Community → Appearance → Education table → Work & income →
@@ -41,7 +42,6 @@ class ProfileFormScreen extends StatefulWidget {
 
 class _ProfileFormScreenState extends State<ProfileFormScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _picker = ImagePicker();
 
   late final TextEditingController _name;
   late final TextEditingController _birthPlace;
@@ -271,9 +271,20 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       showSnack(context, S.maxPhotos(AppConfig.maxPhotos), error: true);
       return;
     }
-    final picked = await _picker.pickMultiImage(imageQuality: 92, limit: remaining);
-    if (picked.isEmpty) return;
+    // Camera or gallery, then the crop / rotate editor (SPEC §9.17).
+    final picked = await PhotoPicker.pick(context, remaining: remaining);
+    if (picked.isEmpty || !mounted) return;
     setState(() => _newPhotos.addAll(picked.take(remaining)));
+  }
+
+  /// Re-opens the editor on a photo that is not uploaded yet.
+  Future<void> _editNewPhoto(XFile file) async {
+    final edited = await PhotoPicker.edit(context, file);
+    if (edited == null || !mounted) return;
+    setState(() {
+      final i = _newPhotos.indexOf(file);
+      if (i >= 0) _newPhotos[i] = edited;
+    });
   }
 
   Future<void> _pickDob() async {
@@ -821,7 +832,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text(S.nriSwitch),
-                secondary: const Icon(Icons.flight_takeoff_rounded, color: AppColors.maroonLight),
+                secondary: const Icon(Icons.flight_takeoff_rounded, color: AppColors.wineLight),
                 value: _isNri,
                 onChanged: (v) => setState(() => _isNri = v),
               ),
@@ -988,6 +999,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
                 onAdd: _pickPhotos,
                 onRemoveExisting: _deleteExistingPhoto,
                 onRemoveNew: (f) => setState(() => _newPhotos.remove(f)),
+                onEditNew: _editNewPhoto,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 20),
@@ -1376,6 +1388,7 @@ class _PhotoStrip extends StatelessWidget {
     required this.onAdd,
     required this.onRemoveExisting,
     required this.onRemoveNew,
+    required this.onEditNew,
   });
 
   final List<ProfilePhoto> existing;
@@ -1384,12 +1397,15 @@ class _PhotoStrip extends StatelessWidget {
   final ValueChanged<ProfilePhoto> onRemoveExisting;
   final ValueChanged<XFile> onRemoveNew;
 
+  /// Opens the editor again on a photo that is not uploaded yet (SPEC §9.17).
+  final ValueChanged<XFile> onEditNew;
+
   @override
   Widget build(BuildContext context) {
     final api = context.read<ApiClient>();
     final theme = Theme.of(context);
 
-    Widget tile(Widget child, VoidCallback onRemove) => Stack(
+    Widget tile(Widget child, VoidCallback onRemove, {VoidCallback? onEdit}) => Stack(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -1408,6 +1424,20 @@ class _PhotoStrip extends StatelessWidget {
                 onPressed: onRemove,
               ),
             ),
+            if (onEdit != null)
+              Positioned(
+                bottom: -6,
+                right: -6,
+                child: IconButton(
+                  tooltip: S.editPhoto,
+                  icon: const CircleAvatar(
+                    radius: 12,
+                    backgroundColor: Colors.black54,
+                    child: Icon(Icons.crop_rotate_rounded, size: 14, color: Colors.white),
+                  ),
+                  onPressed: onEdit,
+                ),
+              ),
           ],
         );
 
@@ -1442,7 +1472,11 @@ class _PhotoStrip extends StatelessWidget {
           ],
           for (final file in added) ...[
             const SizedBox(width: 10),
-            tile(Image.file(File(file.path), fit: BoxFit.cover), () => onRemoveNew(file)),
+            tile(
+              Image.file(File(file.path), fit: BoxFit.cover),
+              () => onRemoveNew(file),
+              onEdit: () => onEditNew(file),
+            ),
           ],
         ],
       ),
@@ -1511,7 +1545,7 @@ class _HeightPickerDialogState extends State<_HeightPickerDialog> {
           const SizedBox(height: 16),
           Text(
             '${Profile.feetInches(_cm)}  ·  $_cm cm',
-            style: theme.textTheme.titleMedium?.copyWith(color: AppColors.maroon),
+            style: theme.textTheme.titleMedium?.copyWith(color: AppColors.wine),
           ),
         ],
       ),

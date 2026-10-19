@@ -35,3 +35,6 @@ Applied so far:
   `recorded_by`, `note`)
 - `008_push_devices.sql` — `push_devices` (one FCM token per app install, with the cursor
   the push sender uses)
+- `009_one_profile_per_customer.sql` — one profile per customer again (SPEC §9.17): the
+  partial unique index `uq_profiles_one_per_customer` (skipped with a NOTICE if a customer
+  already owns several)

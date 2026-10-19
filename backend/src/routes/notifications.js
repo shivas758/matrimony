@@ -216,7 +216,7 @@ export async function agentFeed(agent) {
         id: r.id,
         customer_id: r.id,
         title: 'New client awaiting approval',
-        body: `${r.full_name} registered ${r.source === 'form' ? 'through your form' : 'in the Gandharva app'}`,
+        body: `${r.full_name} registered ${r.source === 'form' ? 'through your form' : 'in the MILI app'}`,
         at: r.created_at,
       })),
       ...interestInbox.map((r) => ({

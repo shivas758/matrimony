@@ -32,6 +32,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Photo editor (SPEC §9.17): image_cropper's uCrop screen — crop and
+             rotate a photo before it is uploaded. -->
+        <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
         <!-- Push (SPEC §9.16): the "updates" channel (created in MainActivity)
              and the white status-bar icon. Firebase is initialised from the
              server's /push/config — there is no google-services.json. -->

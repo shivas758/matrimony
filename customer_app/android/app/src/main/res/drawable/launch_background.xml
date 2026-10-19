@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Native splash shown until Flutter draws its first frame: the Gandharva disc
-     centred on the blush background. Logo PNGs come from tool/gen_logo.mjs. -->
+<!-- Native splash shown until Flutter draws its first frame: the MILI logo tile
+     centred on the cream background. Logo PNGs come from tool/gen_logo.mjs. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/launch_background"/>
     <item>

@@ -15,8 +15,7 @@ class AppConfig {
   /// Everything under /api. Customer routes live under /api/customer.
   static String get apiRoot => '$apiBaseUrl/api';
 
-  static const String appName = 'Gandharva';
-  static const String tagline = 'Connecting Hearts, Creating Families';
+  static const String appName = 'MILI';
 
   /// How long an accepted interest keeps the on-request fields visible — mirrors the server default.
   static const int accessDays = 15;

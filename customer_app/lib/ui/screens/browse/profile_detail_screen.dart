@@ -11,6 +11,7 @@ import '../../../state/interests_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/photo_viewer.dart';
 import '../../widgets/profile_sections.dart';
 import '../get_started/get_started_screen.dart';
 
@@ -130,7 +131,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 onPressed: () => Navigator.pop(ctx, p.id),
                 child: Row(
                   children: [
-                    const Icon(Icons.person_rounded, color: AppColors.roseDark),
+                    const Icon(Icons.person_rounded, color: AppColors.goldDark),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -240,7 +241,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             SliverAppBar(
               expandedHeight: 400,
               pinned: true,
-              backgroundColor: AppColors.maroon,
+              backgroundColor: AppColors.wine,
               foregroundColor: Colors.white,
               systemOverlayStyle: SystemUiOverlayStyle.light,
               flexibleSpace: FlexibleSpaceBar(
@@ -312,7 +313,7 @@ class _InterestBlock extends StatelessWidget {
         icon: Icons.favorite_border_rounded,
         title: S.interestHintTitle,
         body: S.interestHintBody,
-        tint: AppColors.roseDark,
+        tint: AppColors.goldDark,
       );
     }
     if (i.isPending) {
@@ -377,7 +378,7 @@ class _ActionBar extends StatelessWidget {
     } else if (i.isPending) {
       button = OutlinedButton.icon(
         onPressed: busy ? null : onWithdraw,
-        icon: busy ? const ButtonSpinner(color: AppColors.maroon) : const Icon(Icons.undo_rounded),
+        icon: busy ? const ButtonSpinner(color: AppColors.wine) : const Icon(Icons.undo_rounded),
         label: const Text(S.withdraw),
       );
     } else if (i.canReExpress) {
@@ -421,7 +422,17 @@ class _PhotoCarousel extends StatelessWidget {
           PageView.builder(
             onPageChanged: onIndexChanged,
             itemCount: photos.length,
-            itemBuilder: (_, i) => AuthedPhoto(url: photos[i].absoluteUrl, api: api),
+            // Whole photo, never cut; tap → full screen (SPEC §9.17).
+            itemBuilder: (_, i) => WholePhoto(
+              url: photos[i].absoluteUrl,
+              api: api,
+              onTap: () => PhotoViewer.open(
+                context,
+                urls: [for (final ph in photos) ph.absoluteUrl],
+                api: api,
+                initialIndex: i,
+              ),
+            ),
           ),
         // Scrims so the collapsing title and the counter read on any photo.
         const IgnorePointer(
@@ -430,7 +441,7 @@ class _PhotoCarousel extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment(0, 0.1),
                 end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Color(0xD92E0F18)],
+                colors: [Colors.transparent, Color(0xD93F0E1A)],
               ),
             ),
           ),
@@ -441,7 +452,7 @@ class _PhotoCarousel extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment(0, -0.4),
-                colors: [Color(0x802E0F18), Colors.transparent],
+                colors: [Color(0x803F0E1A), Colors.transparent],
               ),
             ),
           ),

@@ -59,14 +59,14 @@ class _PhoneScreenState extends State<PhoneScreen> {
     final topPad = MediaQuery.paddingOf(context).top;
 
     return Scaffold(
-      backgroundColor: AppColors.blush,
+      backgroundColor: AppColors.cream,
       body: AnnotatedRegion<SystemUiOverlayStyle>(
         value: SystemUiOverlayStyle.light,
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Maroon brand header with the disc and wordmark.
+              // Wine brand header with the logo tile (it carries the name).
               Container(
                 padding: EdgeInsets.fromLTRB(24, topPad + 28, 24, 52),
                 decoration: const BoxDecoration(
@@ -75,10 +75,8 @@ class _PhoneScreenState extends State<PhoneScreen> {
                 ),
                 child: Column(
                   children: [
-                    const AppLogo(size: 124),
-                    const SizedBox(height: 16),
-                    const AppWordmark(onDark: true, size: 36),
-                    const SizedBox(height: 14),
+                    const AppLogo(size: 136),
+                    const SizedBox(height: 18),
                     Text(
                       S.appIntro,
                       textAlign: TextAlign.center,
@@ -104,7 +102,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
                           borderRadius: BorderRadius.circular(24),
                           boxShadow: [
                             BoxShadow(
-                              color: AppColors.maroonDeep.withValues(alpha: 0.10),
+                              color: AppColors.wineDeep.withValues(alpha: 0.10),
                               blurRadius: 30,
                               offset: const Offset(0, 12),
                             ),
@@ -117,7 +115,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
                             children: [
                               Text(
                                 S.phoneTitle,
-                                style: theme.textTheme.titleLarge?.copyWith(color: AppColors.maroon),
+                                style: theme.textTheme.titleLarge?.copyWith(color: AppColors.wine),
                               ),
                               const SizedBox(height: 4),
                               Text(

@@ -102,7 +102,7 @@ class _SignupScreenState extends State<SignupScreen> {
                                 ),
                                 Text(
                                   '+91 ${widget.phone}',
-                                  style: theme.textTheme.titleMedium?.copyWith(color: AppColors.maroon),
+                                  style: theme.textTheme.titleMedium?.copyWith(color: AppColors.wine),
                                 ),
                               ],
                             ),

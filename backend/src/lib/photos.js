@@ -55,8 +55,16 @@ export async function watermarkedBuffer(relPath, label) {
   const abs = resolveStoredPath(relPath);
   if (!abs) throw new Error('invalid photo path');
 
-  const base = sharp(abs).rotate().resize({ width: 1080, height: 1080, fit: 'inside', withoutEnlargement: true });
-  const { width = 1080, height = 1080 } = await base.metadata();
+  // Resize first and read the OUTPUT size: metadata() on a pipeline reports the
+  // input's, and an overlay larger than the resized image makes sharp throw
+  // (every stored photo over 1080 px — most phone photos — failed that way).
+  const { data, info } = await sharp(abs)
+    .rotate()
+    .resize({ width: 1080, height: 1080, fit: 'inside', withoutEnlargement: true })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const base = sharp(data, { raw: { width, height, channels: info.channels } });
 
   const text = escapeXml(label || 'Shared privately');
   const fontSize = Math.max(16, Math.round(width / 28));

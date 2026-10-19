@@ -84,14 +84,20 @@ class AuthedPhoto extends StatelessWidget {
     required this.url,
     required this.api,
     this.fit = BoxFit.cover,
+    this.alignment = faceAnchor,
     this.width,
     this.height,
     this.placeholderInitials,
   });
 
+  /// Where a filled (cover) frame anchors the photo: its upper part, so a
+  /// face stays in view when a tall photo is trimmed to a card (SPEC §9.17).
+  static const faceAnchor = Alignment(0, -0.6);
+
   final String? url;
   final ApiClient api;
   final BoxFit fit;
+  final Alignment alignment;
   final double? width;
   final double? height;
   final String? placeholderInitials;
@@ -105,6 +111,7 @@ class AuthedPhoto extends StatelessWidget {
       // /api/photos/:id is authenticated — the token travels as a header.
       httpHeaders: {'Authorization': 'Bearer $token'},
       fit: fit,
+      alignment: alignment,
       width: width,
       height: height,
       fadeInDuration: const Duration(milliseconds: 150),

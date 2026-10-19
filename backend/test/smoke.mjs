@@ -151,13 +151,17 @@ async function signupCustomer({ full_name, phone, agent_phone }) {
   });
 }
 
-/** A real-sized JPEG when sharp is around (it is a backend dependency); the tiny one otherwise. */
+/**
+ * A phone-sized JPEG (960 × 1280, like a stored phone photo) when sharp is around (it is a
+ * backend dependency); the tiny one otherwise. Taller than 1080 px on purpose: the watermark
+ * pipeline resizes to 1080 and once broke on anything bigger (SPEC §9.17 fix).
+ */
 async function samplePhoto(label = 'Smoke') {
   try {
     const { default: sharp } = await import('sharp');
-    const svg = `<svg width="600" height="750" xmlns="http://www.w3.org/2000/svg">
-      <rect width="600" height="750" fill="#c9b8a8"/><circle cx="300" cy="300" r="140" fill="#f0e2d6"/>
-      <text x="300" y="640" font-family="DejaVu Sans, Arial, sans-serif" font-size="40" text-anchor="middle" fill="#4a1a29">${label}</text>
+    const svg = `<svg width="960" height="1280" xmlns="http://www.w3.org/2000/svg">
+      <rect width="960" height="1280" fill="#c9b8a8"/><circle cx="480" cy="480" r="220" fill="#f0e2d6"/>
+      <text x="480" y="1080" font-family="DejaVu Sans, Arial, sans-serif" font-size="64" text-anchor="middle" fill="#4a1a29">${label}</text>
     </svg>`;
     return await sharp(Buffer.from(svg)).jpeg({ quality: 85 }).toBuffer();
   } catch {
@@ -1695,7 +1699,7 @@ async function main() {
   assertTrue('form is HTML', (formPage.headers.get('content-type') || '').includes('text/html'));
   check('form is noindex', 'noindex, nofollow', formPage.headers.get('x-robots-tag'));
   assertTrue('form names the agent', formPage.text.includes('Agent C') && formPage.text.includes('C Bureau'));
-  assertTrue('form is branded Gandharva', formPage.text.includes('Gandharva'));
+  assertTrue('form is branded MILI', formPage.text.includes('MILI'));
   for (const field of ['phone', 'full_name', 'gender', 'community_id', 'edu_graduation', 'edu_graduation_country', 'elder_sisters', 'property_share', 'photos', 'work_country_id', 'occupation_type_id']) {
     assertTrue(`form has the ${field} field`, formPage.text.includes(`name="${field}"`));
   }
@@ -2007,7 +2011,7 @@ async function main() {
   for (let i = 0; i < 3; i++) check(`registration form GET #${i + 1} 200`, 200, (await raw(REG_URL)).status);
 
   // ---------------------------------------------------------------- v2.2 guest mode + fee
-  step('38. Guest mode, the ₹150 fee and up to 5 profiles (SPEC §9.12)');
+  step('38. Guest mode, the ₹150 fee and one profile per customer (SPEC §9.12 / §9.17)');
   const gPhone = randomPhone('7');
   const gSignup = await signupCustomer({ full_name: 'Guest User', phone: gPhone });
   check('signup without an agent 201', 201, gSignup.status);
@@ -2018,7 +2022,7 @@ async function main() {
   check('access guest', 'guest', gSignup.body?.customer?.access);
   check('unlock checklist all open', JSON.stringify({ agent_linked: false, profile_registered: false, paid: false, approved: false }), JSON.stringify(gSignup.body?.customer?.unlock));
   check('fee is ₹150', 150, gSignup.body?.customer?.profile_fee_inr);
-  check('up to 5 profiles', 5, gSignup.body?.customer?.max_profiles);
+  check('one profile per customer', 1, gSignup.body?.customer?.max_profiles);
   check('payment provider mock', 'mock', gSignup.body?.customer?.payment_provider);
   check('no profiles yet', 0, gSignup.body?.customer?.profiles?.length);
 
@@ -2080,43 +2084,37 @@ async function main() {
   check('C is current in the directory', C_ID, (await api('GET', '/api/customer/agents', G)).body?.agents?.find((x) => x.is_current)?.id);
   check('A no longer lists G', 0, (await api('GET', '/api/clients', A)).body?.clients?.filter((x) => x.id === G_ID).length);
 
-  // Up to 5 profiles; always hidden until paid.
+  // One profile per customer (SPEC §9.17); always hidden until paid.
+  const tmp = await apiForm('POST', '/api/customer/my-profiles', G, { full_name: 'Short Lived', gender: 'bride', dob: '1996-03-03', community_id: COMM_A });
+  check('first profile 201', 201, tmp.status);
+  const second = await apiForm('POST', '/api/customer/my-profiles', G, { full_name: 'One Too Many', gender: 'groom', dob: '1996-03-03', community_id: COMM_A });
+  check('second profile 409', 409, second.status);
+  check('… profile_limit', 'profile_limit', second.body?.error);
+  check('delete an unpaid profile 200', 200, (await api('DELETE', `/api/customer/my-profiles/${tmp.body?.profile?.id}`, G)).status);
   const gp1 = await apiForm('POST', '/api/customer/my-profiles', G, {
     full_name: 'Guest Son', gender: 'groom', dob: '1994-02-02', community_id: COMM_A, income_text: '12 LPA', status: 'active',
   }, [{ buffer: TINY_JPEG, name: 's.jpg', type: 'image/jpeg' }]);
-  check('first profile 201', 201, gp1.status);
+  check('the freed slot takes a new profile 201', 201, gp1.status);
   const GP1 = gp1.body?.profile?.id;
   check('… hidden (status ignored)', 'hidden', gp1.body?.profile?.status);
   check('… payment_pending', 'payment_pending', gp1.body?.profile?.visibility);
   check('… unpaid', false, gp1.body?.profile?.paid);
   check('… owned by C', C_ID, (await api('GET', `/api/profiles/${GP1}`, C)).body?.profile?.uploaded_by);
-  const gpIds = [GP1];
-  for (let i = 2; i <= 5; i++) {
-    const r = await apiForm('POST', '/api/customer/my-profiles', G, {
-      full_name: `Guest Child ${i}`, gender: i === 2 ? 'bride' : 'groom', dob: '1996-03-03', community_id: COMM_A,
-    });
-    check(`profile #${i} 201`, 201, r.status);
-    gpIds.push(r.body?.profile?.id);
-  }
-  const GP2 = gpIds[1];
-  const sixth = await apiForm('POST', '/api/customer/my-profiles', G, { full_name: 'One Too Many', gender: 'groom', dob: '1996-03-03', community_id: COMM_A });
-  check('sixth profile 409', 409, sixth.status);
-  check('… profile_limit', 'profile_limit', sixth.body?.error);
-  check('delete an unpaid profile 200', 200, (await api('DELETE', `/api/customer/my-profiles/${gpIds[4]}`, G)).status);
   check('another customer cannot open my profile', 404, (await api('GET', `/api/customer/my-profiles/${GP1}`, K1)).status);
   const gList = await api('GET', '/api/customer/my-profiles', G);
-  check('my-profiles lists 4', 4, gList.body?.profiles?.length);
-  check('… oldest first', GP1, gList.body?.profiles?.[0]?.id);
+  check('my-profiles lists 1', 1, gList.body?.profiles?.length);
+  check('… it is the new one', GP1, gList.body?.profiles?.[0]?.id);
+  check('… max_profiles 1', 1, gList.body?.max_profiles);
   check('… with the fee', 150, gList.body?.profile_fee_inr);
-  check('PATCH one of them 200', 'Edited', (await api('PATCH', `/api/customer/my-profiles/${GP2}`, G, { about: 'Edited' })).body?.profile?.about);
-  check('v1.0 GET /customer/profile is the oldest', GP1, (await api('GET', '/api/customer/profile', G)).body?.profile?.id);
+  check('PATCH it 200', 'Edited', (await api('PATCH', `/api/customer/my-profiles/${GP1}`, G, { about: 'Edited' })).body?.profile?.about);
+  check('v1.0 GET /customer/profile is it', GP1, (await api('GET', '/api/customer/profile', G)).body?.profile?.id);
   check('agent cannot put an unpaid profile live', 409, (await api('PATCH', `/api/profiles/${GP1}`, C, { status: 'active' })).status);
   check('… payment_required', 'payment_required', (await api('PATCH', `/api/profiles/${GP1}`, C, { status: 'active' })).body?.error);
   check('agent cannot share / download an unpaid profile', 'payment_required', (await api('POST', `/api/profiles/${GP1}/share`, C, { method: 'download' })).body?.error);
   const cRowG = (await api('GET', `/api/clients/${G_ID}`, C)).body?.client;
-  check('client row lists every profile', 4, cRowG?.profiles?.length);
-  check('… none paid', 0, cRowG?.profiles?.filter((x) => x.paid).length);
-  check('… `profile` stays the oldest', GP1, cRowG?.profile?.id);
+  check('client row lists the profile', 1, cRowG?.profiles?.length);
+  check('… not paid', 0, cRowG?.profiles?.filter((x) => x.paid).length);
+  check('… `profile` is the same one', GP1, cRowG?.profile?.id);
 
   // The fee (mock): a failed attempt, then a success.
   const order1 = await api('POST', `/api/customer/my-profiles/${GP1}/payment`, G);
@@ -2152,11 +2150,21 @@ async function main() {
   const gMe = (await api('GET', '/api/customer/auth/me', G)).body?.customer;
   check('G has full access now', 'full', gMe?.access);
   check('paid profile live', 'live', gMe?.profiles?.find((x) => x.id === GP1)?.visibility);
-  check('unpaid profile still waiting for payment', 'payment_pending', gMe?.profiles?.find((x) => x.id === GP2)?.visibility);
   check('A (same community) sees the paid profile now', 200, (await api('GET', `/api/profiles/${GP1}`, A)).status);
-  check('A cannot see the unpaid one', 404, (await api('GET', `/api/profiles/${GP2}`, A)).status);
-  const o3 = await api('POST', `/api/customer/my-profiles/${GP2}/payment`, G);
-  check('paying after approval puts it live at once', 'live', (await api('POST', `/api/customer/payments/${o3.body?.payment?.id}/confirm`, G, {})).body?.profile?.visibility);
+  // A second family (GB, a bride): approved first, paid later.
+  const gb = await signupCustomer({ full_name: 'Bride Family', phone: randomPhone('7'), agent_phone: cPhone });
+  const GB = gb.body?.token;
+  const GB_ID = gb.body?.customer?.id;
+  const gbp = await apiForm('POST', '/api/customer/my-profiles', GB, { full_name: 'Guest Daughter', gender: 'bride', dob: '1996-03-03', community_id: COMM_A });
+  check('GB registers a bride 201', 201, gbp.status);
+  const GBP = gbp.body?.profile?.id;
+  check('C approves GB', 200, (await api('POST', `/api/clients/${GB_ID}/approve`, C)).status);
+  const gbMe = (await api('GET', '/api/customer/auth/me', GB)).body?.customer;
+  check('approved but unpaid: still waiting for payment', 'payment_pending', gbMe?.profiles?.[0]?.visibility);
+  check('… and still guest access', 'guest', gbMe?.access);
+  check('A cannot see the unpaid one', 404, (await api('GET', `/api/profiles/${GBP}`, A)).status);
+  const o3 = await api('POST', `/api/customer/my-profiles/${GBP}/payment`, GB);
+  check('paying after approval puts it live at once', 'live', (await api('POST', `/api/customer/payments/${o3.body?.payment?.id}/confirm`, GB, {})).body?.profile?.visibility);
 
   // Full browsing: agent's communities, names, default gender from the oldest paid profile (a groom).
   const gFull = await api('GET', '/api/customer/profiles?limit=100', G);
@@ -2164,27 +2172,21 @@ async function main() {
   check('… access full', 'full', gFull.body?.access);
   check('… defaults to brides', 'bride', gFull.body?.gender);
   check('… rows are not locked and carry names', true, gFull.body?.profiles?.length > 0 && gFull.body.profiles.every((x) => !x.locked && typeof x.full_name === 'string'));
-  check('… never my own profiles', 0, gFull.body?.profiles?.filter((x) => gpIds.includes(x.id)).length);
+  check('… never my own profile', 0, gFull.body?.profiles?.filter((x) => x.id === GP1).length);
   check('full access: the second photo loads', 200, (await raw(`${BASE}/api/customer/photos/${TP.photos[1].id}`, { token: G })).status);
   check('full access: detail 200', 200, (await api('GET', `/api/customer/profiles/${PID}`, G)).status);
 
-  // Interests on behalf of one of several profiles.
+  // Interests on behalf of my profile.
   const gInt = await api('POST', `/api/customer/profiles/${PID}/interest`, G, {});
-  check('interest defaults to my only live groom', 201, gInt.status);
+  check('interest defaults to my live groom', 201, gInt.status);
   check('… from_profile is the groom', GP1, gInt.body?.interest?.from_profile?.id);
   const aSees = (await api('GET', '/api/interests?box=received', A)).body?.interests?.find((x) => x.id === gInt.body?.interest?.id);
   check("uploader sees which of G's profiles is interested", GP1, aSees?.customer_profile?.id);
-  // A second live groom makes the default ambiguous.
-  const gp3 = gpIds[2];
-  const o4 = await api('POST', `/api/customer/my-profiles/${gp3}/payment`, G);
-  await api('POST', `/api/customer/payments/${o4.body?.payment?.id}/confirm`, G, {});
-  const amb = await api('POST', `/api/customer/profiles/${TP.id}/interest`, G, {});
-  check('two live grooms → 400', 400, amb.status);
-  check('… from_profile_required', 'from_profile_required', amb.body?.error);
-  check('a bride cannot be interested in a bride', 'invalid_from_profile', (await api('POST', `/api/customer/profiles/${TP.id}/interest`, G, { from_profile_id: GP2 })).body?.error);
-  const chosen = await api('POST', `/api/customer/profiles/${TP.id}/interest`, G, { from_profile_id: gp3 });
+  check('a bride cannot be interested in a bride', 'no_matching_profile', (await api('POST', `/api/customer/profiles/${TP.id}/interest`, GB, {})).body?.error);
+  check("someone else's profile as from_profile_id", 'invalid_from_profile', (await api('POST', `/api/customer/profiles/${TP.id}/interest`, G, { from_profile_id: GBP })).body?.error);
+  const chosen = await api('POST', `/api/customer/profiles/${TP.id}/interest`, G, { from_profile_id: GP1 });
   check('explicit from_profile_id 201', 201, chosen.status);
-  check('… recorded', gp3, chosen.body?.interest?.from_profile?.id);
+  check('… recorded', GP1, chosen.body?.interest?.from_profile?.id);
   check('my interests list both', 2, (await api('GET', '/api/customer/interests', G)).body?.interests?.filter((x) => [PID, TP.id].includes(x.profile?.id)).length);
 
   // Admin: guests are listed; giving a guest an agent makes them pending.
@@ -2199,7 +2201,7 @@ async function main() {
   check('admin gives the guest an agent', 200, g2Reassigned.status);
   check('… now pending', 'pending', g2Reassigned.body?.customer?.status);
   const stats22 = (await api('GET', '/api/admin/stats', ADMIN)).body?.stats;
-  assertTrue('stats count paid registrations', (stats22?.paid_registrations ?? 0) >= 3);
+  assertTrue('stats count paid registrations', (stats22?.paid_registrations ?? 0) >= 2);
   assertTrue('stats carry guest_customers', typeof stats22?.guest_customers === 'number');
   check('v1.0 signup with agent_phone still starts pending', 'pending', (await signupCustomer({ full_name: 'Old App', phone: randomPhone('7'), agent_phone: cPhone })).body?.customer?.status);
 
@@ -2213,62 +2215,68 @@ async function main() {
   assertTrue('… P (native place Hyderabad) matches', g2Place.body?.profiles?.some((x) => x.id === PID));
   check('… without revealing the place', false, g2Place.body?.profiles?.some((x) => 'city' in x || 'work_place' in x));
 
-  // Cash payment recorded by the agent.
-  const GP4 = gpIds[3];
-  check('another agent cannot mark it paid', 403, (await api('POST', `/api/clients/${G_ID}/profiles/${GP4}/mark-paid`, A, {})).status);
-  check("a profile of someone else's client 404", 404, (await api('POST', `/api/clients/${G_ID}/profiles/${PID}/mark-paid`, C, {})).status);
-  const cash = await api('POST', `/api/clients/${G_ID}/profiles/${GP4}/mark-paid`, C, { note: 'Cash at office' });
+  // Cash payment recorded by the agent (a third family, GC: approved, unpaid).
+  const gc = await signupCustomer({ full_name: 'Cash Family', phone: randomPhone('7'), agent_phone: cPhone });
+  const GC = gc.body?.token;
+  const GC_ID = gc.body?.customer?.id;
+  const GCP = (await apiForm('POST', '/api/customer/my-profiles', GC, { full_name: 'Cash Child', gender: 'groom', dob: '1995-05-05', community_id: COMM_A })).body?.profile?.id;
+  check('C approves GC', 200, (await api('POST', `/api/clients/${GC_ID}/approve`, C)).status);
+  check('another agent cannot mark it paid', 403, (await api('POST', `/api/clients/${GC_ID}/profiles/${GCP}/mark-paid`, A, {})).status);
+  check("a profile of someone else's client 404", 404, (await api('POST', `/api/clients/${GC_ID}/profiles/${PID}/mark-paid`, C, {})).status);
+  const cash = await api('POST', `/api/clients/${GC_ID}/profiles/${GCP}/mark-paid`, C, { note: 'Cash at office' });
   check('C marks it paid in cash 200', 200, cash.status);
-  check('… client row shows it paid', true, cash.body?.client?.profiles?.find((x) => x.id === GP4)?.paid);
-  check('… live at once (G is active)', 'live', (await api('GET', `/api/customer/my-profiles/${GP4}`, G)).body?.profile?.visibility);
-  check('mark paid twice 409', 409, (await api('POST', `/api/clients/${G_ID}/profiles/${GP4}/mark-paid`, C, {})).status);
+  check('… client row shows it paid', true, cash.body?.client?.profiles?.find((x) => x.id === GCP)?.paid);
+  check('… live at once (GC is active)', 'live', (await api('GET', `/api/customer/my-profiles/${GCP}`, GC)).body?.profile?.visibility);
+  check('mark paid twice 409', 409, (await api('POST', `/api/clients/${GC_ID}/profiles/${GCP}/mark-paid`, C, {})).status);
 
-  // Deleting a paid profile needs the agent.
-  check('customer cannot delete a paid profile directly', 'approval_required', (await api('DELETE', `/api/customer/my-profiles/${GP2}`, G)).body?.error);
-  const dr1 = await api('POST', `/api/customer/my-profiles/${GP2}/delete-request`, G, { reason: 'Married elsewhere' });
+  // Deleting a paid profile needs the agent (GB's bride, paid in the app).
+  check('customer cannot delete a paid profile directly', 'approval_required', (await api('DELETE', `/api/customer/my-profiles/${GBP}`, GB)).body?.error);
+  const dr1 = await api('POST', `/api/customer/my-profiles/${GBP}/delete-request`, GB, { reason: 'Married elsewhere' });
   check('delete request 201', 201, dr1.status);
   check('… pending', 'pending', dr1.body?.delete_request?.status);
-  check('second request 409', 409, (await api('POST', `/api/customer/my-profiles/${GP2}/delete-request`, G, {})).status);
-  check('me.profiles carries delete_request_id', dr1.body?.delete_request?.id, (await api('GET', '/api/customer/auth/me', G)).body?.customer?.profiles?.find((x) => x.id === GP2)?.delete_request_id);
-  check('own view shows the pending request', dr1.body?.delete_request?.id, (await api('GET', `/api/customer/my-profiles/${GP2}`, G)).body?.profile?.delete_request?.id);
+  check('second request 409', 409, (await api('POST', `/api/customer/my-profiles/${GBP}/delete-request`, GB, {})).status);
+  check('me.profiles carries delete_request_id', dr1.body?.delete_request?.id, (await api('GET', '/api/customer/auth/me', GB)).body?.customer?.profiles?.find((x) => x.id === GBP)?.delete_request_id);
+  check('own view shows the pending request', dr1.body?.delete_request?.id, (await api('GET', `/api/customer/my-profiles/${GBP}`, GB)).body?.profile?.delete_request?.id);
   const cN = (await api('GET', '/api/notifications', C)).body;
   assertTrue('C is notified', cN?.items?.some((i) => i.type === 'profile_delete_requested' && i.id === dr1.body?.delete_request?.id));
   assertTrue('… counted in delete_requests_inbox', (cN?.counts?.delete_requests_inbox ?? 0) >= 1);
-  check('client row flags the profile', dr1.body?.delete_request?.id, (await api('GET', `/api/clients/${G_ID}`, C)).body?.client?.profiles?.find((x) => x.id === GP2)?.delete_request_id);
-  check('client detail lists it', 1, (await api('GET', `/api/clients/${G_ID}`, C)).body?.client?.delete_requests?.filter((x) => x.id === dr1.body?.delete_request?.id).length);
+  check('client row flags the profile', dr1.body?.delete_request?.id, (await api('GET', `/api/clients/${GB_ID}`, C)).body?.client?.profiles?.find((x) => x.id === GBP)?.delete_request_id);
+  check('client detail lists it', 1, (await api('GET', `/api/clients/${GB_ID}`, C)).body?.client?.delete_requests?.filter((x) => x.id === dr1.body?.delete_request?.id).length);
   const cList = await api('GET', '/api/clients/delete-requests', C);
   check('C lists it', 1, cList.body?.delete_requests?.filter((x) => x.id === dr1.body?.delete_request?.id).length);
   check('… with the reason', 'Married elsewhere', cList.body?.delete_requests?.find((x) => x.id === dr1.body?.delete_request?.id)?.reason);
   check('A does not list it', 0, (await api('GET', '/api/clients/delete-requests', A)).body?.delete_requests?.filter((x) => x.id === dr1.body?.delete_request?.id).length);
   check('A cannot approve it', 403, (await api('POST', `/api/clients/delete-requests/${dr1.body?.delete_request?.id}/approve`, A)).status);
   check('C rejects 200', 'rejected', (await api('POST', `/api/clients/delete-requests/${dr1.body?.delete_request?.id}/reject`, C)).body?.delete_request?.status);
-  check('profile still there', 200, (await api('GET', `/api/customer/my-profiles/${GP2}`, G)).status);
-  const dr2 = await api('POST', `/api/customer/my-profiles/${GP2}/delete-request`, G, {});
-  check('customer cancels a new request', 'cancelled', (await api('POST', `/api/customer/delete-requests/${dr2.body?.delete_request?.id}/cancel`, G)).body?.delete_request?.status);
-  const dr3 = await api('POST', `/api/customer/my-profiles/${GP2}/delete-request`, G, {});
+  check('profile still there', 200, (await api('GET', `/api/customer/my-profiles/${GBP}`, GB)).status);
+  const dr2 = await api('POST', `/api/customer/my-profiles/${GBP}/delete-request`, GB, {});
+  check('customer cancels a new request', 'cancelled', (await api('POST', `/api/customer/delete-requests/${dr2.body?.delete_request?.id}/cancel`, GB)).body?.delete_request?.status);
+  const dr3 = await api('POST', `/api/customer/my-profiles/${GBP}/delete-request`, GB, {});
   const approvedDel = await api('POST', `/api/clients/delete-requests/${dr3.body?.delete_request?.id}/approve`, ADMIN);
   check('admin can approve 200', 200, approvedDel.status);
   check('… approved', 'approved', approvedDel.body?.delete_request?.status);
-  check('… profile name kept', 'Guest Child 2', approvedDel.body?.delete_request?.profile_name);
-  check('… profile gone', 404, (await api('GET', `/api/customer/my-profiles/${GP2}`, G)).status);
-  check('… gone for agents too', 404, (await api('GET', `/api/profiles/${GP2}`, C)).status);
+  check('… profile name kept', 'Guest Daughter', approvedDel.body?.delete_request?.profile_name);
+  check('… profile gone', 404, (await api('GET', `/api/customer/my-profiles/${GBP}`, GB)).status);
+  check('… gone for agents too', 404, (await api('GET', `/api/profiles/${GBP}`, C)).status);
   check('approve again 409', 409, (await api('POST', `/api/clients/delete-requests/${dr3.body?.delete_request?.id}/approve`, C)).status);
-  const unpaidNew = await apiForm('POST', '/api/customer/my-profiles', G, { full_name: 'Unpaid New', gender: 'groom', dob: '1996-03-03', community_id: COMM_A });
-  check('delete request on an unpaid profile → 400 not_paid', 'not_paid', (await api('POST', `/api/customer/my-profiles/${unpaidNew.body?.profile?.id}/delete-request`, G, {})).body?.error);
+  const unpaidNew = await apiForm('POST', '/api/customer/my-profiles', GB, { full_name: 'Unpaid New', gender: 'bride', dob: '1996-03-03', community_id: COMM_A });
+  check('the deletion frees the slot: a new profile 201', 201, unpaidNew.status);
+  check('delete request on an unpaid profile → 400 not_paid', 'not_paid', (await api('POST', `/api/customer/my-profiles/${unpaidNew.body?.profile?.id}/delete-request`, GB, {})).body?.error);
 
   // ---------------------------------------------------------------- v2.5
-  step('40. Gandharva notifications (SPEC §9.15)');
+  step('40. MILI notifications (SPEC §9.15)');
   check('agent token refused', 401, (await api('GET', '/api/customer/notifications', C)).status);
-  const gNotif = await api('GET', '/api/customer/notifications', G);
+  const gNotif = await api('GET', '/api/customer/notifications', GB);
   check('customer notifications 200', 200, gNotif.status);
   const gItems = gNotif.body?.items ?? [];
   const hasNotif = (type, pred = () => true) => gItems.some((i) => i.type === type && pred(i));
   assertTrue('account_approved', hasNotif('account_approved'));
   assertTrue('payment_due for the unpaid profile', hasNotif('payment_due', (i) => i.my_profile_id === unpaidNew.body?.profile?.id && i.group === 'action'));
   check('action_count = action items', gItems.filter((i) => i.group === 'action').length, gNotif.body?.action_count);
-  assertTrue('payment_received for the cash payment (says cash)', hasNotif('payment_received', (i) => i.my_profile_id === GP4 && /cash/.test(i.body)));
-  check('waived payments are not listed', false, hasNotif('payment_received', (i) => i.body.startsWith('₹0')));
-  assertTrue('delete_request_approved', hasNotif('delete_request_approved', (i) => /Guest Child 2/.test(i.body)));
+  const gcItems = (await api('GET', '/api/customer/notifications', GC)).body?.items ?? [];
+  assertTrue('payment_received for the cash payment (says cash)', gcItems.some((i) => i.type === 'payment_received' && i.my_profile_id === GCP && /cash/.test(i.body)));
+  check('waived payments are not listed', false, gcItems.some((i) => i.type === 'payment_received' && i.body.startsWith('₹0')));
+  assertTrue('delete_request_approved', hasNotif('delete_request_approved', (i) => /Guest Daughter/.test(i.body)));
   assertTrue('delete_request_rejected', hasNotif('delete_request_rejected'));
   check('action items come first', true, gItems.findIndex((i) => i.group === 'update') >= gNotif.body?.action_count);
   check('never names another profile\'s uploader (Agent A)', false, JSON.stringify(gItems).includes('Agent A'));
@@ -2277,6 +2285,7 @@ async function main() {
   check('A accepts G\'s interest', 200, gAccepted.status);
   const gNotif2 = (await api('GET', '/api/customer/notifications', G)).body;
   assertTrue('interest_accepted with the profile', gNotif2?.items?.some((i) => i.type === 'interest_accepted' && i.profile_id === PID));
+  assertTrue('account_approved for G too', gNotif2?.items?.some((i) => i.type === 'account_approved'));
   // A guest gets an empty but valid feed.
   const g3Cust = await signupCustomer({ full_name: 'Quiet Guest', phone: randomPhone('7') });
   const g3Notif = await api('GET', '/api/customer/notifications', g3Cust.body?.token);
@@ -2302,19 +2311,18 @@ async function main() {
     check('register needs auth', 401, (await api('POST', '/api/push/devices', null, { token: cTok })).status);
     check('customer token refused on the agent route', 401, (await api('POST', '/api/push/devices', G, { token: gTok })).status);
     check('agent C registers 201', 201, (await api('POST', '/api/push/devices', C, { token: cTok })).status);
-    check('customer G registers 201', 201, (await api('POST', '/api/customer/push/devices', G, { token: gTok })).status);
+    check('customer GB registers 201', 201, (await api('POST', '/api/customer/push/devices', GB, { token: gTok })).status);
     check('re-register is idempotent', 201, (await api('POST', '/api/push/devices', C, { token: cTok })).status);
     check('short token 400', 400, (await api('POST', '/api/push/devices', C, { token: 'x' })).status);
     const outFor = async (tok) => (await api('GET', '/api/admin/push/outbox', ADMIN)).body?.pushes?.filter((p) => p.token === tok) ?? [];
     await new Promise((r) => setTimeout(r, 1100));
     check('first pass 200', 200, (await api('POST', '/api/admin/push/run', ADMIN)).status);
     check('no backlog pushed to a new device (C)', 0, (await outFor(cTok)).length);
-    check('no backlog pushed to a new device (G)', 0, (await outFor(gTok)).length);
+    check('no backlog pushed to a new device (GB)', 0, (await outFor(gTok)).length);
     // New events after registration.
     const pushCust = await signupCustomer({ full_name: 'Push Client', phone: randomPhone('7'), agent_phone: cPhone });
     check('a new client for C', 201, pushCust.status);
-    const pushProf = await apiForm('POST', '/api/customer/my-profiles', G, { full_name: 'Push Profile', gender: 'groom', dob: '1996-03-03', community_id: COMM_A });
-    check('cash payment recorded for G', 200, (await api('POST', `/api/clients/${G_ID}/profiles/${pushProf.body?.profile?.id}/mark-paid`, C, {})).status);
+    check('cash payment recorded for GB', 200, (await api('POST', `/api/clients/${GB_ID}/profiles/${unpaidNew.body?.profile?.id}/mark-paid`, C, {})).status);
     await new Promise((r) => setTimeout(r, 1100));
     const pass2 = await api('POST', '/api/admin/push/run', ADMIN);
     assertTrue('second pass sent something', (pass2.body?.sent ?? 0) >= 2, JSON.stringify(pass2.body));
@@ -2324,8 +2332,8 @@ async function main() {
     check('… with the customer id as a string', String(pushCust.body?.customer?.id), cp?.data?.customer_id);
     check('… for the mediator app', 'mediator', cp?.data?.app);
     const gp = (await outFor(gTok)).find((p) => p.data?.type === 'payment_received');
-    assertTrue('G got a payment_received push', Boolean(gp));
-    check('… naming the profile', true, /Push Profile/.test(gp?.body ?? ''));
+    assertTrue('GB got a payment_received push', Boolean(gp));
+    check('… naming the profile', true, /Unpaid New/.test(gp?.body ?? ''));
     check('payment_due is never pushed', 0, (await outFor(gTok)).filter((p) => p.data?.type === 'payment_due').length);
     await api('POST', '/api/admin/push/run', ADMIN);
     check('no duplicates on the next pass', cPushes.length, (await outFor(cTok)).length);
@@ -2334,7 +2342,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1100));
     await api('POST', '/api/admin/push/run', ADMIN);
     check('nothing pushed after logout', cPushes.length, (await outFor(cTok)).length);
-    check('customer removes theirs 200', 200, (await api('POST', '/api/customer/push/devices/remove', G, { token: gTok })).status);
+    check('customer removes theirs 200', 200, (await api('POST', '/api/customer/push/devices/remove', GB, { token: gTok })).status);
     check('push run is admin-only', 403, (await api('POST', '/api/admin/push/run', C)).status);
   }
 

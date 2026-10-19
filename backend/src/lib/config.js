@@ -75,13 +75,15 @@ export const config = {
     intervalMs: Number(process.env.PUSH_INTERVAL_MS || 60_000),
   },
 
-  // ---- Gandharva registration fee (SPEC §9.12). 'mock' charges nothing and
+  // ---- MILI registration fee (SPEC §9.12). 'mock' charges nothing and
   // confirms any checkout; 'razorpay' creates real orders and checks the
   // checkout signature. Switching provider needs no backend code change.
   payments: {
     provider: paymentProvider === 'razorpay' ? 'razorpay' : 'mock',
     profileFeeInr: Number(process.env.PROFILE_FEE_INR || 150),
-    maxCustomerProfiles: Number(process.env.MAX_CUSTOMER_PROFILES || 5),
+    // One profile per customer (SPEC §9.17) — also enforced by the database
+    // (uq_profiles_one_per_customer, migration 009), so this is not an env knob.
+    maxCustomerProfiles: 1,
     razorpay: {
       keyId: process.env.RAZORPAY_KEY_ID || '',
       keySecret: process.env.RAZORPAY_KEY_SECRET || '',

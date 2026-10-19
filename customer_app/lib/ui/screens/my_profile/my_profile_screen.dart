@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../config.dart';
@@ -11,29 +10,36 @@ import '../../../state/masters_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/notification_bell.dart';
+import '../../widgets/photo_picker.dart';
+import '../../widgets/photo_viewer.dart';
 import '../../widgets/profile_sections.dart';
 import '../payment/checkout_screen.dart';
 import 'my_profiles_screen.dart';
 import 'profile_form_screen.dart';
 
-/// One of my profiles (SPEC §9.11 Gandharva 5 / §9.12): where it stands with
+/// My profile (SPEC §9.11 Gandharva 5 / §9.12 / §9.17): where it stands with
 /// the fee and approval (with *Pay* while unpaid), the same cards as the
 /// detail screen plus the on-request block (it is mine), Edit, photo
 /// management, and *Delete* while it is still unpaid. A PAID profile can
 /// only be deleted by the agent: *Request deletion* → banner with *Cancel
 /// request* while it waits (SPEC §9.13). If the agent approved meanwhile
-/// (404), it pops back to the list. [MyProfilesScreen] pushes it.
+/// (404), it pops back to the list. [MyProfilesScreen] shows it [embedded]
+/// in the My profile tab: no back navigation then — once the profile is gone
+/// the account refresh swaps the tab back to *Create profile*.
 class MyProfileScreen extends StatefulWidget {
-  const MyProfileScreen({super.key, required this.profileId});
+  const MyProfileScreen({super.key, required this.profileId, this.embedded = false});
 
   final int profileId;
+
+  /// Mounted as the My profile tab rather than pushed as a page.
+  final bool embedded;
 
   @override
   State<MyProfileScreen> createState() => _MyProfileScreenState();
 }
 
 class _MyProfileScreenState extends State<MyProfileScreen> {
-  final _picker = ImagePicker();
   bool _photoBusy = false;
   bool _busy = false;
   bool _loading = true;
@@ -74,7 +80,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     await context.read<AuthState>().refresh();
     if (!mounted) return;
     showSnack(context, S.profileGone);
-    Navigator.of(context).pop();
+    if (!widget.embedded) Navigator.of(context).pop();
   }
 
   Future<void> _openForm(Profile existing) async {
@@ -119,7 +125,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       await context.read<AuthState>().refresh();
       if (!mounted) return;
       showSnack(context, S.profileDeleted);
-      Navigator.of(context).pop();
+      if (!widget.embedded) Navigator.of(context).pop();
     } on ApiException catch (e) {
       if (!mounted) return;
       showSnack(context, friendlyMessage(e), error: true);
@@ -226,7 +232,8 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       showSnack(context, S.maxPhotos(AppConfig.maxPhotos), error: true);
       return;
     }
-    final picked = await _picker.pickMultiImage(imageQuality: 92, limit: remaining);
+    // Camera or gallery, then the crop / rotate editor — before the upload (SPEC §9.17).
+    final picked = await PhotoPicker.pick(context, remaining: remaining);
     if (picked.isEmpty || !mounted) return;
     final paths = picked.take(remaining).map((f) => f.path).toList();
     await _runPhoto(() => context.read<ProfileService>().addPhotos(profile.id, paths), S.photosAdded);
@@ -240,9 +247,14 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.fullscreen_rounded),
+              title: const Text(S.viewFullPhoto),
+              onTap: () => Navigator.pop(ctx, 'view'),
+            ),
             if (!photo.isPrimary)
               ListTile(
-                leading: const Icon(Icons.star_rounded, color: AppColors.roseDark),
+                leading: const Icon(Icons.star_rounded, color: AppColors.goldDark),
                 title: const Text(S.makePrimary),
                 onTap: () => Navigator.pop(ctx, 'primary'),
               ),
@@ -257,6 +269,16 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       ),
     );
     if (action == null || !mounted) return;
+    if (action == 'view') {
+      final photos = _profile?.photos ?? [photo];
+      await PhotoViewer.open(
+        context,
+        urls: [for (final p in photos) p.absoluteUrl],
+        api: context.read<ApiClient>(),
+        initialIndex: photos.indexWhere((p) => p.id == photo.id),
+      );
+      return;
+    }
     if (action == 'primary') {
       await _runPhoto(() => context.read<ProfileService>().makePrimary(photo.id), S.primarySet);
       return;
@@ -289,6 +311,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       appBar: AppBar(
         title: Text(profile?.fullName ?? S.myProfile),
         actions: [
+          if (widget.embedded) const NotificationBell(),
           if (profile != null)
             IconButton(
               tooltip: S.edit,
@@ -344,7 +367,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     final theme = Theme.of(context);
     final visibility = profile.visibility;
     final (icon, tint) = switch (visibility) {
-      ProfileVisibility.paymentPending => (Icons.lock_rounded, AppColors.roseDark),
+      ProfileVisibility.paymentPending => (Icons.lock_rounded, AppColors.goldDark),
       ProfileVisibility.awaitingApproval => (Icons.hourglass_top_rounded, AppColors.warning),
       ProfileVisibility.live => (Icons.visibility_outlined, AppColors.success),
       _ => (Icons.visibility_off_outlined, theme.colorScheme.outline),
@@ -362,7 +385,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
               tint: theme.colorScheme.error,
               action: OutlinedButton.icon(
                 onPressed: _busy ? null : () => _cancelDeletion(profile.deleteRequest!),
-                icon: _busy ? const ButtonSpinner(color: AppColors.maroon) : const Icon(Icons.close_rounded),
+                icon: _busy ? const ButtonSpinner(color: AppColors.wine) : const Icon(Icons.close_rounded),
                 label: const Text(S.cancelRequest),
               ),
             ),
@@ -443,7 +466,7 @@ class _PhotoManager extends StatelessWidget {
       return SurfaceCard(
         child: Row(
           children: [
-            const Icon(Icons.photo_camera_outlined, color: AppColors.maroonLight),
+            const Icon(Icons.photo_camera_outlined, color: AppColors.wineLight),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -478,7 +501,7 @@ class _PhotoManager extends StatelessWidget {
                     bottom: 6,
                     child: StatusChip(
                       label: S.primaryPhoto,
-                      color: AppColors.roseDark,
+                      color: AppColors.goldDark,
                       icon: Icons.star_rounded,
                       solid: true,
                     ),

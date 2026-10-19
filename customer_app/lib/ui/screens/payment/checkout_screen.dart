@@ -176,7 +176,7 @@ class _AmountCard extends StatelessWidget {
           Text(
             S.amount.toUpperCase(),
             style: theme.textTheme.labelMedium?.copyWith(
-              color: AppColors.roseLight,
+              color: AppColors.goldLight,
               letterSpacing: 1.1,
               fontWeight: FontWeight.w700,
             ),

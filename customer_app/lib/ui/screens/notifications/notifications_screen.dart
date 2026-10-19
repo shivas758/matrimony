@@ -148,7 +148,7 @@ Future<bool> openNotificationRoute(
 
 /// (icon, colour) per type; unknown types get a neutral bell.
 (IconData, Color) notificationLook(String type) => switch (type) {
-      'payment_due' => (Icons.payments_outlined, AppColors.roseDark),
+      'payment_due' => (Icons.payments_outlined, AppColors.goldDark),
       'interest_expiring' => (Icons.timer_outlined, AppColors.warning),
       'account_approved' => (Icons.verified_rounded, AppColors.success),
       'account_rejected' => (Icons.block_rounded, const Color(0xFFC62828)),
@@ -207,7 +207,7 @@ class _NotificationTile extends StatelessWidget {
                             n.title,
                             style: theme.textTheme.titleSmall?.copyWith(
                               fontWeight: isNew || n.isAction ? FontWeight.w700 : FontWeight.w600,
-                              color: AppColors.maroon,
+                              color: AppColors.wine,
                             ),
                           ),
                         ),
@@ -218,7 +218,7 @@ class _NotificationTile extends StatelessWidget {
                               width: 9,
                               height: 9,
                               margin: const EdgeInsets.only(left: 8, top: 5),
-                              decoration: const BoxDecoration(color: AppColors.roseDark, shape: BoxShape.circle),
+                              decoration: const BoxDecoration(color: AppColors.goldDark, shape: BoxShape.circle),
                             ),
                           ),
                       ],

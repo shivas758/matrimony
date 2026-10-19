@@ -124,7 +124,7 @@ class Customer {
     this.pendingAgentChange,
     this.access = 'guest',
     this.profiles = const [],
-    this.maxProfiles = 5,
+    this.maxProfiles = 1,
     this.profileFeeInr,
     this.paymentProvider = 'mock',
     this.unlock = const UnlockChecklist(),
@@ -212,7 +212,7 @@ class Customer {
         profiles: (j['profiles'] as List? ?? [])
             .map((e) => ProfileSummary.fromJson(e as Map<String, dynamic>))
             .toList(),
-        maxProfiles: (j['max_profiles'] as num?)?.toInt() ?? 5,
+        maxProfiles: (j['max_profiles'] as num?)?.toInt() ?? 1,
         profileFeeInr: j['profile_fee_inr'] as num?,
         paymentProvider: '${j['payment_provider'] ?? 'mock'}',
         unlock: UnlockChecklist.fromJson(j['unlock'] as Map<String, dynamic>?),

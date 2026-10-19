@@ -141,11 +141,14 @@ publicRouter.get(
     const pageUrl = `${config.publicBaseUrl}/p/${p.token}`;
     const ogImage = photos.length ? `${pageUrl}/photo/${photos[0].id}` : null;
 
+    // Each photo is shown whole (SPEC §9.17): fitted inside the 4:5 frame over
+    // a blurred copy of itself — same URL, so the browser fetches it once.
     const gallery = photos
-      .map(
-        (ph, i) =>
-          `<img class="shot" src="/p/${esc(p.token)}/photo/${ph.id}" alt="Photo ${i + 1}" loading="${i ? 'lazy' : 'eager'}">`,
-      )
+      .map((ph, i) => {
+        const src = `/p/${esc(p.token)}/photo/${ph.id}`;
+        const loading = i ? 'lazy' : 'eager';
+        return `<div class="shot"><img class="fill" src="${src}" alt="" aria-hidden="true" loading="${loading}"><img class="pic" src="${src}" alt="Photo ${i + 1}" loading="${loading}"></div>`;
+      })
       .join('');
     const dots =
       photos.length > 1 ? `<div class="dots">${photos.map((_, i) => `<i${i ? '' : ' class="on"'}></i>`).join('')}</div>` : '';
@@ -190,7 +193,10 @@ ${ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : ''}
   .hero { background:#fff; border-radius: 20px; overflow:hidden; box-shadow: 0 10px 30px rgba(8,28,51,.08); }
   .gallery { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; background:var(--navy-deep); scrollbar-width:none; }
   .gallery::-webkit-scrollbar { display:none; }
-  .shot { width:100%; flex:0 0 100%; scroll-snap-align:center; aspect-ratio:4/5; object-fit:cover; display:block; }
+  .shot { position:relative; overflow:hidden; width:100%; flex:0 0 100%; scroll-snap-align:center; aspect-ratio:4/5; }
+  .shot img { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .shot .fill { object-fit:cover; filter: blur(22px) brightness(.7); transform: scale(1.15); }
+  .shot .pic { object-fit:contain; }
   .noimg { aspect-ratio:4/5; display:grid; place-items:center; color:var(--gold); font-size:1.1rem;
            background: radial-gradient(circle at 50% 40%, #1B4F82, var(--navy-deep)); }
   .dots { display:flex; justify-content:center; gap:6px; padding: 10px 0 0; }

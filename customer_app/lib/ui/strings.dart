@@ -3,7 +3,7 @@
 /// customer_app/lib/ui/strings.dart"). Warm, simple words — no jargon.
 class S {
   // ---- brand
-  static const appTagline = 'Connecting Hearts, Creating Families';
+  static const appTagline = 'MATRIMONY';
   static const appIntro = "Your agent's app for finding a match";
 
   // ---- phone screen
@@ -31,7 +31,7 @@ class S {
   // ---- signup
   static const signupTitle = 'Create your account';
   static const signupBody =
-      'This number is new to Gandharva. Tell us your name and start looking around.';
+      'This number is new to MILI. Tell us your name and start looking around.';
   static const yourNumber = 'Your number';
   static const fullName = 'Full name';
   static const fullNameHelper = 'As the family knows you';
@@ -69,7 +69,6 @@ class S {
   static const browse = 'Browse';
   static const interested = 'Interested';
   static const myProfile = 'My profile';
-  static const myProfiles = 'My profiles';
   static const more = 'More';
 
   // ---- more screen
@@ -82,7 +81,7 @@ class S {
   static String changeAgentPending(String name) => 'Waiting for approval to move to $name';
   static const logout = 'Logout';
   static const logoutConfirm = 'You will need a new one-time code to log in again.';
-  static const version = 'v1.4';
+  static const version = 'v2.0';
   static const accountStatus = 'Account';
 
   // ---- customer statuses
@@ -409,7 +408,7 @@ class S {
   static const errUnlockRequired =
       'Choose your agent, register a profile and pay the registration fee to open profiles.';
   static const errAgentRequired = 'Choose your agent first.';
-  static const errProfileLimit = 'You have registered the most profiles allowed.';
+  static const errProfileLimit = 'You have already registered your profile — each account has one.';
   static const errAlreadyPaid = 'This profile is already paid for.';
   static const errFromProfileRequired = 'Choose which of your profiles is interested.';
   static const errNoMatchingProfile =
@@ -430,11 +429,11 @@ class S {
   static const lockedProfile = 'Locked';
   static const step1Title = 'Choose your agent';
   static const step1Body = "Enter your marriage bureau agent's mobile number, or pick one from the list.";
-  static const step2Title = 'Register a profile';
+  static const step2Title = 'Register your profile';
   static const step2Body = 'Fill in the registration form for the bride or groom.';
   static String step3Title(num? fee) => 'Pay ${feeLabel(fee)}';
   static String step3Body(num? fee) =>
-      'A one-time registration fee of ${feeLabel(fee)} per profile. A profile is shown to other families only after this.';
+      'A one-time registration fee of ${feeLabel(fee)}. Your profile is shown to other families only after this.';
   static const step4Title = 'Agent approval';
   static String step4Waiting(String agent) => 'Waiting for $agent to approve your account.';
   static const step4WaitingNoAgent = 'Your agent approves your account after you choose them.';
@@ -448,16 +447,16 @@ class S {
   static const pickFromDirectory = 'Pick from directory';
   static const change = 'Change';
   static const agentLinkedSnack = 'Agent chosen — they will approve your account';
-  static String profilesRegistered(int n) => n == 1 ? '1 profile registered' : '$n profiles registered';
+  static const profileRegistered = 'Profile registered';
   static const allPaid = 'Registration fee paid';
   static const needAgentFirst = 'Choose your agent first (step 1).';
-  static const needProfileFirst = 'Register a profile first (step 2).';
+  static const needProfileFirst = 'Register your profile first (step 2).';
   static const chooseYourAgent = 'Choose your agent';
   static const chooseYourAgentBody =
       'Your agent registers your profile with the bureau and takes interests forward for you.';
   static String chooseAgentConfirm(String name) => 'Choose $name?';
   static String chooseAgentConfirmBody(String name) =>
-      '$name will be your agent. They approve your account and follow up interests for you. Your profiles move to them.';
+      '$name will be your agent. They approve your account and follow up interests for you. Your profile moves to them.';
   static const choose = 'Choose';
   static const chooseAgentExplain =
       'Pick the marriage bureau agent you want to work with. They approve your account.';
@@ -466,14 +465,12 @@ class S {
       'Choose your agent, register a profile and pay the registration fee. Once your agent approves you, you can express interest.';
   static const lockedDetailTitle = 'This profile is locked';
 
-  // ---- my profiles (SPEC §9.12)
-  static const addProfile = 'Add profile';
-  static String profilesCount(int n, int max) => '$n of $max profiles';
-  static String maxProfilesReached(int max) => 'You have registered $max profiles — the most allowed.';
+  // ---- my profile (SPEC §9.12, one per account since §9.17)
+  static const addProfile = 'Create profile';
   static const addProfileNeedsAgent = 'Choose your agent first — tap Get started.';
-  static const noProfilesYetTitle = 'Register a profile';
-  static String noProfilesYetBody(int max) =>
-      'Fill in the registration form for the bride or groom. You can register up to $max profiles — for example one for each of your children.';
+  static const noProfilesYetTitle = 'Register your profile';
+  static const noProfilesYetBody =
+      'Fill in the registration form for the bride or groom. Each account registers one profile.';
   static String chipPay(num? fee) => 'Pay ${feeLabel(fee)}';
   static const chipWaitingForAgent = 'Waiting for agent';
   static const chipLive = 'Live';
@@ -515,7 +512,7 @@ class S {
   static const checkoutTitle = 'Registration fee';
   static String checkoutFor(String name) => 'For the profile of $name';
   static const checkoutWhat =
-      "One-time fee per profile. After payment and your agent's approval, the profile is shown to other families.";
+      "One-time registration fee. After payment and your agent's approval, your profile is shown to other families.";
   static const testModeNoCharge = 'Test mode — no money is charged';
   static String payFee(num? fee) => 'Pay ${feeLabel(fee)}';
   static const simulateFailure = 'Simulate failure';
@@ -584,4 +581,13 @@ class S {
   static const remove = 'Remove';
   static const loading = 'Loading…';
   static const somethingWrong = 'Something went wrong';
+
+  // ---- photo editor + camera (SPEC §9.17)
+  static const takePhoto = 'Take photo';
+  static const takePhotoHint = 'Use the camera now';
+  static const chooseFromGallery = 'Choose from gallery';
+  static String chooseFromGalleryHint(int n) => n == 1 ? 'Pick 1 more photo' : 'Pick up to $n photos';
+  static const photoEditHint = 'Each photo opens the editor next — crop and rotate it so it shows the way you want.';
+  static const editPhoto = 'Edit photo';
+  static const viewFullPhoto = 'View full photo';
 }

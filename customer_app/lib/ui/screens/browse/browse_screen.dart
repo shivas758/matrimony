@@ -263,8 +263,8 @@ class _SearchBar extends StatelessWidget {
         tooltip: S.filters,
         style: IconButton.styleFrom(
           minimumSize: const Size(52, 52),
-          backgroundColor: activeCount > 0 ? AppColors.maroon : AppColors.roseLight,
-          foregroundColor: activeCount > 0 ? Colors.white : AppColors.maroon,
+          backgroundColor: activeCount > 0 ? AppColors.wine : AppColors.goldLight,
+          foregroundColor: activeCount > 0 ? Colors.white : AppColors.wine,
         ),
         icon: const Icon(Icons.tune_rounded),
         onPressed: onOpenFilters,
@@ -331,7 +331,7 @@ class _GuestBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.lock_outline_rounded, color: AppColors.roseGold),
+          const Icon(Icons.lock_outline_rounded, color: AppColors.gold),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -342,8 +342,8 @@ class _GuestBanner extends StatelessWidget {
           const SizedBox(width: 8),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: AppColors.roseGold,
-              foregroundColor: AppColors.maroonDeep,
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.wineDeep,
               minimumSize: const Size(0, 40),
               padding: const EdgeInsets.symmetric(horizontal: 14),
             ),

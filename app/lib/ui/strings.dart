@@ -338,7 +338,7 @@ class S {
   static const searchClients = 'Search by name or phone';
   static const noClients = 'No clients yet';
   static const noClientsHint =
-      'Share your registration form, or ask clients to sign up in the Gandharva app with your '
+      'Share your registration form, or ask clients to sign up in the MILI app with your '
       'mobile number.';
   static const noClientMatches = 'No clients match your search';
   static const noInterests = 'No interests yet';
@@ -348,7 +348,7 @@ class S {
   static const noTransfersHint =
       'Clients asking to move to another agent, and clients moving to you, appear here.';
   static const noProfileYet = 'No profile yet';
-  static const noProfileYetBody = 'No profile yet — the client fills it in Gandharva';
+  static const noProfileYetBody = 'No profile yet — the client fills it in MILI';
   static const profilePrefix = 'Profile: ';
   static const sourceApp = 'App';
   static const sourceForm = 'Form';
@@ -357,7 +357,7 @@ class S {
   static const approvedOn = 'Approved on';
   static const lastLogin = 'Last login';
   static const rejectClientBody =
-      'will not be able to use Gandharva with you. Only an admin can undo this.';
+      'will not be able to use MILI with you. Only an admin can undo this.';
   static const suspendClientBody =
       'They keep their account but cannot browse or mark interests until you activate them again.';
   static const clientApproved = 'Client approved — they can now browse profiles';
@@ -396,7 +396,7 @@ class S {
 
   // ---- v2.1 admin customers
   static const customers = 'Customers';
-  static const customersSubtitle = 'Gandharva accounts across all agents';
+  static const customersSubtitle = 'MILI accounts across all agents';
   static const reassignAgent = 'Reassign agent';
   static const reassignAgentBody = 'The customer and their profile move to the chosen agent.';
   static const searchAgents = 'Search by name, agency or phone';
@@ -420,16 +420,16 @@ class S {
   static const feeNotPaid = 'Fee not paid';
   static const feePending = 'Fee pending';
   static const unpaidApproveNote =
-      'Their profile goes live only after they pay the registration fee in Gandharva.';
+      'Their profile goes live only after they pay the registration fee in MILI.';
   static const paymentRequired =
       "This customer hasn't paid the registration fee for this profile yet — it stays hidden "
-      'until they pay in Gandharva.';
+      'until they pay in MILI.';
   static const onBehalfOf = 'On behalf of';
   static const noAgentYet = 'No agent yet';
   static const guestCustomers = 'Guests (no agent)';
   static const paidRegistrations = 'Paid registrations';
   static const guestReassignNote =
-      'Guest — signed up in Gandharva without an agent. Reassigning gives them that agent '
+      'Guest — signed up in MILI without an agent. Reassigning gives them that agent '
       '(they become pending).';
   static String profilesCount(int n) => n == 1 ? '1 profile' : '$n profiles';
 
@@ -470,4 +470,13 @@ class S {
   // ---- v2.5 push notifications (SPEC §9.16)
   static const newNotification = 'New notification';
   static const view = 'View';
+
+  // ---- photo editor + camera (SPEC §9.17)
+  static const takePhoto = 'Take photo';
+  static const takePhotoHint = 'Use the camera now';
+  static const chooseFromGallery = 'Choose from gallery';
+  static String chooseFromGalleryHint(int n) => n == 1 ? 'Pick 1 more photo' : 'Pick up to $n photos';
+  static const photoEditHint = 'Each photo opens the editor next — crop and rotate it so it shows the way you want.';
+  static const editPhoto = 'Edit photo';
+  static const viewFullPhoto = 'View full photo';
 }

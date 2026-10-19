@@ -248,7 +248,7 @@ class _ChangeAgentScreenState extends State<ChangeAgentScreen> {
                 tint: AppColors.warning,
                 action: OutlinedButton.icon(
                   onPressed: _busy ? null : () => _cancel(pending),
-                  icon: _busy ? const ButtonSpinner(color: AppColors.maroon) : const Icon(Icons.close_rounded),
+                  icon: _busy ? const ButtonSpinner(color: AppColors.wine) : const Icon(Icons.close_rounded),
                   label: const Text(S.cancelRequest),
                 ),
                 child: AgentRow(agent: pending.toAgent, label: S.newAgent),

@@ -2,7 +2,7 @@
 
 **Mediator — Matrimony Partners.** Private platform for marriage bureau agents: organised profiles, filters, controlled WhatsApp sharing (link, PDF bio-data or photo card), and protected contact details. Replaces unstructured WhatsApp forwarding.
 
-**Gandharva — Connecting Hearts, Creating Families.** The companion app for the agents' customers (v2.2): sign up with just phone + OTP and browse as a guest (photo, age, job, caste, package), then choose an agent, register up to 5 profiles and pay the ₹150 registration fee per profile (mock checkout for now) to open profiles in the agent's communities, mark *interested*, see a profile's on-request details once the other side's agent accepts, and switch agents with approval. Agents manage their customers under **Clients** in Mediator and can also send a public registration-form link.
+**MILI Matrimony** (formerly *Gandharva*; same package, installs update in place). The companion app for the agents' customers: sign up with just phone + OTP and browse as a guest (photo, age, job, caste, package), then choose an agent, register one profile and pay the ₹150 registration fee (mock checkout for now) to open profiles in the agent's communities, mark *interested*, see a profile's on-request details once the other side's agent accepts, and switch agents with approval. Agents manage their customers under **Clients** in Mediator and can also send a public registration-form link.
 
 **Stack:** Flutter (Android) · Node.js + Express · PostgreSQL · Docker · Oracle Cloud Free Tier
 
@@ -12,7 +12,7 @@
 |---|---|
 | Backend API | Complete — every route in `docs/SPEC.md` §4 incl. subcastes, AI import, NRI/gothram/complexion fields, protected native place + parents, and the admin-driven forgot-password flow — 248 end-to-end checks passing |
 | Flutter app (Mediator) | Complete — all screens in `docs/SPEC.md` §5 and §9.11: OTP signup, Clients tab (approve customers, interests, transfers, registration link), the registration-form fields, the "on request" field split, admin customers |
-| Flutter app (Gandharva) | Complete — `docs/SPEC.md` §9.11 + §9.12: OTP login, guest browsing, get-started checklist (agent → profile → ₹150 mock payment → approval), up to 5 profiles (paid ones deleted with the agent's approval), browse + filters (guests too), interests on behalf of a profile, change agent (`customer_app/`) |
+| Flutter app (MILI) | Complete — `docs/SPEC.md` §9.11 – §9.17: OTP login, guest browsing, get-started checklist (agent → profile → ₹150 mock payment → approval), one profile per customer (a paid one is deleted with the agent's approval), photo editor + camera, browse + filters (guests too), interests on behalf of a profile, change agent (`customer_app/`) |
 | Deployment | **Live** on an Oracle Always Free VM behind Caddy/HTTPS, nightly backups on cron — `deploy/ORACLE_SETUP.md` is the runbook |
 
 ## Run it locally
@@ -53,7 +53,7 @@ cd customer_app && flutter build apk --release --target-platform android-arm,and
 ```
 
 Send `app/build/app/outputs/flutter-apk/app-release.apk` (Mediator, ~34 MB) to agents and
-`customer_app/build/app/outputs/flutter-apk/app-release.apk` (Gandharva) to customers over WhatsApp.
+`customer_app/build/app/outputs/flutter-apk/app-release.apk` (MILI) to customers over WhatsApp.
 
 **6. Customer app on the emulator:** `cd customer_app && flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3000`
 
@@ -75,7 +75,7 @@ Replace the placeholder communities (Community A/B/C) with your real ones from
 - `docs/SPEC.md` — full specification: schema, permissions, API, screens
 - `backend/` — Express API, Docker Compose, SQL schema + seed data, smoke test
 - `app/` — Flutter app for agents (auth, list/filters, detail, add/edit, requests, clients, sharing, shortlists, admin)
-- `customer_app/` — Flutter app for customers (Gandharva)
+- `customer_app/` — Flutter app for customers (MILI, formerly Gandharva)
 - `deploy/ORACLE_SETUP.md` — copy-paste Oracle VM setup with HTTPS and backups
 
 ## Key business rules

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gandharva/models/customer.dart';
+import 'package:gandharva/models/master_data.dart';
 import 'package:gandharva/models/profile.dart';
 import 'package:gandharva/services/agents_service.dart';
 import 'package:gandharva/services/api_client.dart';
@@ -41,17 +42,24 @@ class _FakeAuth extends AuthState {
 class _FakeProfiles extends ProfileService {
   _FakeProfiles(super.api);
 
+  static Profile _priya() => Profile.fromJson({
+        'id': 77,
+        'full_name': 'Priya',
+        'gender': 'bride',
+        'paid': true,
+        'visibility': 'live',
+        'delete_request': {'id': 4, 'status': 'pending', 'reason': null, 'created_at': '2026-09-28T12:00:00Z'},
+      });
+
   @override
-  Future<List<Profile>> myProfiles() async => [
-        Profile.fromJson({
-          'id': 77,
-          'full_name': 'Priya',
-          'gender': 'bride',
-          'paid': true,
-          'visibility': 'live',
-          'delete_request': {'id': 4, 'status': 'pending', 'reason': null, 'created_at': '2026-09-28T12:00:00Z'},
-        }),
-      ];
+  Future<List<Profile>> myProfiles() async => [_priya()];
+
+  @override
+  Future<Profile> myProfile(int id) async => _priya();
+
+  /// No network: the profile page loads the masters when it opens.
+  @override
+  Future<MasterData> masters() async => MasterData.fromJson(const {});
 }
 
 Widget _host(Customer customer, Widget child) {
@@ -138,18 +146,24 @@ void main() {
     await _dispose(tester);
   });
 
-  testWidgets('My profiles — chips and the pay button', (tester) async {
-    await _render(tester, active, const MyProfilesScreen());
-    expect(find.text('Priya'), findsOneWidget);
-    expect(find.text(S.chipLive), findsNWidgets(3));
-    expect(find.text(S.chipPay(150)), findsOneWidget);
-    expect(find.text(S.addProfile), findsOneWidget);
-    await tester.pump(); // my-profiles answered → the delete chip
-    expect(find.text(S.chipDeleteRequested), findsOneWidget);
+  testWidgets('My profile — the one profile opens right in the tab (SPEC §9.17)', (tester) async {
+    final one = Customer.fromJson({
+      ...activeMeJson(),
+      'max_profiles': 1,
+      'profiles': [(activeMeJson()['profiles'] as List).first],
+    });
+    await _render(tester, one, const MyProfilesScreen());
+    await tester.pump(); // my-profile answered
+    expect(find.text('Priya'), findsWidgets, reason: 'the page title is the profile name');
+    expect(find.text(S.visibilityTitle('live')), findsOneWidget);
+    expect(find.text(S.deletionRequestedTitle), findsOneWidget);
+    expect(find.text(S.addProfile), findsNothing, reason: 'one profile per customer');
+    expect(find.byType(BackButton), findsNothing, reason: 'a tab, not a pushed page');
     expect(tester.takeException(), isNull);
+    await _dispose(tester);
   });
 
-  testWidgets('My profiles — guest: empty state, Add profile disabled with a hint', (tester) async {
+  testWidgets('My profile — guest: empty state, Create profile disabled with a hint', (tester) async {
     await _render(tester, guest, const MyProfilesScreen());
     expect(find.text(S.noProfilesYetTitle), findsOneWidget);
     expect(find.text(S.addProfileNeedsAgent), findsWidgets);

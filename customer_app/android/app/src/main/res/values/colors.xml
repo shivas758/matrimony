@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Native splash background — the app's blush surface (lib/ui/theme.dart). -->
-    <color name="launch_background">#FAF3F0</color>
-    <!-- Tint of push notifications — Gandharva maroon (AppColors.maroon). -->
-    <color name="notification_color">#4A1A29</color>
+    <!-- Native splash background — the app's cream surface (lib/ui/theme.dart). -->
+    <color name="launch_background">#FFF8EE</color>
+    <!-- Tint of push notifications — MILI wine (AppColors.wine). -->
+    <color name="notification_color">#6A1B2D</color>
 </resources>

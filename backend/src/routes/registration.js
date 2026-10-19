@@ -1,12 +1,12 @@
 // The agent's public registration form — SPEC §9.3-B. Mounted at /r (no auth).
 //   GET  /r/:token  → the paper registration form as a mobile-friendly HTML
-//                     page (Gandharva styling, agent's name in the header).
+//                     page (MILI styling, agent's name in the header).
 //   POST /r/:token  → creates the customer (pending, source 'form', no OTP yet)
 //                     AND their profile (hidden, uploaded_by = the agent,
 //                     photos stored) in one transaction; thank-you page.
 //                     Rate-limited 20/hour/IP (the POST only — §9.3-B).
 // Unknown / rotated token or an inactive agent → 404 page. A number that is
-// already a customer → 409 page ("open Gandharva and log in").
+// already a customer → 409 page ("open MILI and log in").
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -38,51 +38,59 @@ async function loadAgentByToken(token) {
 // ---------------------------------------------------------------- page shell
 
 const CSS = `
-  :root { color-scheme: light; --maroon:#4A1A29; --maroon-deep:#2E0F18; --rose:#D4A28C; --rose-light:#F0D6CC;
-          --blush:#FAF3F0; --ink:#2B1A1F; --muted:#7A6469; --rule:#EBD9D2; }
+  :root { color-scheme: light; --wine:#6A1B2D; --wine-deep:#3F0E1A; --gold:#C8A056; --gold-light:#F5E7C8;
+          --cream:#FFF8EE; --ink:#2A1518; --muted:#7A6A64; --rule:#EFE0CA; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--blush); color:var(--ink);
+  body { margin:0; background:var(--cream); color:var(--ink);
          font-family: Poppins, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .brand { background: linear-gradient(135deg, #6B2A3E 0%, var(--maroon) 55%, var(--maroon-deep) 100%);
-           color:#fff; padding: 16px 20px 18px; border-bottom: 3px solid var(--rose); }
+  .brand { background: linear-gradient(135deg, #8C2D44 0%, var(--wine) 55%, var(--wine-deep) 100%);
+           color:#fff; padding: 16px 20px 18px; border-bottom: 3px solid var(--gold); }
   .brand .in { max-width: 640px; margin: 0 auto; }
-  .brand .name { font-family: "Playfair Display", Georgia, serif; font-weight:600; font-size:1.5rem; color:var(--rose-light); line-height:1; }
+  .brand .logo { display:flex; align-items:center; gap:10px; }
+  .brand .logo svg { flex:none; }
+  .brand .name { font-weight:500; font-size:1.45rem; letter-spacing:.14em; color:var(--gold); line-height:1; }
   .brand .tag { font-size:.62rem; letter-spacing:.2em; text-transform:uppercase; opacity:.8; margin-top:5px; }
   .brand .agent { margin-top:12px; font-size:.86rem; opacity:.95; }
   .brand .agent b { font-weight:600; }
   .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; }
-  h1 { margin: 8px 0 4px; font-family: "Playfair Display", Georgia, serif; font-weight:600; font-size:1.5rem; color:var(--maroon); line-height:1.2; }
+  h1 { margin: 8px 0 4px; font-family: "Playfair Display", Georgia, serif; font-weight:600; font-size:1.5rem; color:var(--wine); line-height:1.2; }
   .lead { margin: 0 0 14px; color:var(--muted); font-size:.9rem; line-height:1.5; }
   fieldset.card { background:#fff; border:1px solid var(--rule); border-radius:16px; padding: 10px 16px 16px; margin: 0 0 14px;
-                  box-shadow: 0 6px 20px rgba(46,15,24,.05); min-width:0; }
-  legend { font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--maroon); font-weight:600; padding: 0 6px; }
+                  box-shadow: 0 6px 20px rgba(63,14,26,.05); min-width:0; }
+  legend { font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--wine); font-weight:600; padding: 0 6px; }
   .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
   .f { display:flex; flex-direction:column; gap:4px; grid-column: 1 / -1; font-size:.84rem; color:var(--muted); min-width:0; }
   .f.half { grid-column: auto; }
   .f b { color:#B4453F; }
   .f small { font-size:.74rem; color:var(--muted); }
   input, select, textarea { font: inherit; font-size:16px; color:var(--ink); padding: 10px 12px; width:100%;
-                            border:1px solid #D9C4BC; border-radius:10px; background:#FFFDFC; }
+                            border:1px solid #E3CFB2; border-radius:10px; background:#FFFDF8; }
   textarea { resize: vertical; min-height: 72px; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--rose); border-color: var(--rose); }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold); border-color: var(--gold); }
   input[type=file] { padding: 8px; background:#fff; }
-  .btn { display:block; width:100%; background:var(--maroon); color:var(--rose-light); border:0; border-radius:14px;
+  .btn { display:block; width:100%; background:var(--wine); color:var(--gold-light); border:0; border-radius:14px;
          padding: 14px; font: 600 1rem Poppins, system-ui, sans-serif; margin-top: 4px; cursor:pointer; }
-  .btn:active { background: var(--maroon-deep); }
+  .btn:active { background: var(--wine-deep); }
   .alert { background:#FDECEC; border:1px solid #F3B9B9; color:#7A1F1F; border-radius:12px; padding: 12px 14px; margin: 0 0 14px; font-size:.9rem; }
   .alert ul { margin: 6px 0 0; padding-left: 18px; }
-  .notice { background:#fff; border-radius:18px; padding: 26px 20px; text-align:center; box-shadow: 0 6px 20px rgba(46,15,24,.06); }
+  .notice { background:#fff; border-radius:18px; padding: 26px 20px; text-align:center; box-shadow: 0 6px 20px rgba(63,14,26,.06); }
   .notice .icon { width:64px; height:64px; border-radius:50%; margin: 0 auto 12px; display:grid; place-items:center;
-                  background: var(--rose-light); color: var(--maroon); font-size:1.8rem; }
+                  background: var(--gold-light); color: var(--wine); font-size:1.8rem; }
   .notice p { line-height:1.6; margin: 8px 0; }
   .notice .steps { text-align:left; margin: 14px auto 0; padding-left: 20px; max-width: 420px; line-height:1.7; }
-  .notice a { color: var(--maroon); font-weight:600; }
+  .notice a { color: var(--wine); font-weight:600; }
   .foot { text-align:center; color:var(--muted); font-size:.76rem; margin-top: 22px; line-height:1.6; }
   .foot .by { letter-spacing:.08em; text-transform:uppercase; font-size:.68rem; opacity:.75; margin-top:6px; }
   @media (max-width: 420px) { .grid { grid-template-columns: 1fr; } .f.half { grid-column: 1 / -1; } }
 `;
 
-/** The Gandharva page shell (noindex; Poppins / Playfair like the share page). */
+/** The two interlocked gold rings of the MILI logo, drawn inline (no image request). */
+const RINGS = `<svg width="44" height="28" viewBox="0 0 44 28" aria-hidden="true">
+  <circle cx="14" cy="14" r="11" fill="none" stroke="#C8A056" stroke-width="3"/>
+  <circle cx="30" cy="14" r="11" fill="none" stroke="#C8A056" stroke-width="3"/>
+</svg>`;
+
+/** The MILI page shell (noindex; Poppins / Playfair like the share page). */
 function page({ title, agent, body }) {
   const agentLine = agent
     ? `<div class="agent">Registering with <b>${esc(agent.full_name)}</b>${
@@ -94,22 +102,22 @@ function page({ title, agent, body }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#4A1A29">
-<title>${esc(title)} — Gandharva</title>
+<meta name="theme-color" content="#6A1B2D">
+<title>${esc(title)} — MILI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
 <style>${CSS}</style>
 </head><body>
 <header class="brand"><div class="in">
-  <div class="name">Gandharva</div><div class="tag">Connecting Hearts, Creating Families</div>
+  <div class="logo">${RINGS}<div><div class="name">MILI</div><div class="tag">Matrimony</div></div></div>
   ${agentLine}
 </div></header>
 <main class="wrap">
 ${body}
 <footer class="foot">
   Your details are shared only with your agent. Contact details stay private until you approve a match.
-  <div class="by">Gandharva · Mediator Matrimony Partners</div>
+  <div class="by">MILI Matrimony · Mediator Matrimony Partners</div>
 </footer>
 </main>
 </body></html>`;
@@ -238,7 +246,7 @@ ${card(
     inputmode: 'numeric',
     placeholder: '10-digit mobile number',
     maxlength: 15,
-    hint: 'This becomes your Gandharva login. Use the number you will install the app on.',
+    hint: 'This becomes your MILI login. Use the number you will install the app on.',
   }),
 )}
 ${card(
@@ -341,8 +349,8 @@ const takenPage = (agent, phone) =>
     agent,
     body: `<div class="notice"><div class="icon">✓</div>
 <h1>This number is already registered</h1>
-<p><b>+91 ${esc(phone)}</b> already has a Gandharva account.</p>
-<p>Open the <b>Gandharva</b> app and log in with this number — you will get a one-time code by SMS. You can add up to ${esc(String(config.payments.maxCustomerProfiles))} profiles there (My profiles → Add profile).</p>
+<p><b>+91 ${esc(phone)}</b> already has a MILI account.</p>
+<p>Open the <b>MILI</b> app and log in with this number — you will get a one-time code by SMS. Your profile is under <b>My profile</b> there.</p>
 <p>Questions? Call ${esc(agent.full_name)} on <a href="tel:+91${esc(agent.phone)}">+91 ${esc(agent.phone)}</a>.</p></div>`,
   });
 
@@ -365,9 +373,9 @@ const thanksPage = (agent, name, phone) =>
       agent.agency_name ? ` (${esc(agent.agency_name)})` : ''
     }. They will check your details and approve your account.</p>
 <ol class="steps">
-  <li>Install the <b>Gandharva</b> app.</li>
+  <li>Install the <b>MILI</b> app.</li>
   <li>Log in with <b>+91 ${esc(phone)}</b> — you will receive a one-time code by SMS.</li>
-  <li>Pay the <b>₹${esc(String(config.payments.profileFeeInr))}</b> registration fee in the app (My profiles) — your profile becomes visible to others only after that.</li>
+  <li>Pay the <b>₹${esc(String(config.payments.profileFeeInr))}</b> registration fee in the app (My profile) — your profile becomes visible to others only after that.</li>
   <li>Once ${esc(agent.full_name)} approves you, browse profiles and mark the ones you like.</li>
 </ol>
 <p>Questions? Call <a href="tel:+91${esc(agent.phone)}">+91 ${esc(agent.phone)}</a>.</p></div>`,
@@ -481,7 +489,7 @@ registrationRouter.get(
  * Submissions only, 20/hour/IP (SPEC §9.3-B) — it stores photos. GET /r/:token
  * is deliberately NOT limited: behind carrier-grade NAT hundreds of families
  * share one address, and a limit on page views would lock them all out of a
- * form none of them had even submitted. A browser gets a Gandharva page, not JSON.
+ * form none of them had even submitted. A browser gets a MILI page, not JSON.
  */
 const submitLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
@@ -520,7 +528,7 @@ registrationRouter.post(
     try {
       await tx(async (client) => {
         // No OTP on the web form: the agent vets the person; the first
-        // Gandharva login verifies the number (phone_verified_at stays null).
+        // MILI login verifies the number (phone_verified_at stays null).
         const { rows } = await client.query(
           `INSERT INTO customers (full_name, phone, agent_id, status, source, phone_verified_at)
            VALUES ($1, $2, $3, 'pending', 'form', NULL) RETURNING id`,

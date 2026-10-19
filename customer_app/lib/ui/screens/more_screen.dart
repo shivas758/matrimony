@@ -52,7 +52,7 @@ class MoreScreen extends StatelessWidget {
                 icon: Icons.support_agent_rounded,
                 title: S.chooseYourAgent,
                 body: S.chooseYourAgentBody,
-                tint: AppColors.roseDark,
+                tint: AppColors.goldDark,
                 action: FilledButton(
                   onPressed: () => GetStartedScreen.open(context),
                   child: const Text(S.chooseYourAgent),
@@ -64,7 +64,7 @@ class MoreScreen extends StatelessWidget {
               SurfaceCard(
                 padding: EdgeInsets.zero,
                 child: ListTile(
-                  leading: const Icon(Icons.lock_open_rounded, color: AppColors.maroonLight),
+                  leading: const Icon(Icons.lock_open_rounded, color: AppColors.wineLight),
                   title: const Text(S.getStarted, style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: const Text(S.getStartedTitle),
                   trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
@@ -79,7 +79,7 @@ class MoreScreen extends StatelessWidget {
               SurfaceCard(
                 padding: EdgeInsets.zero,
                 child: ListTile(
-                  leading: const Icon(Icons.swap_horiz_rounded, color: AppColors.maroonLight),
+                  leading: const Icon(Icons.swap_horiz_rounded, color: AppColors.wineLight),
                   title: const Text(S.changeAgent, style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     pendingChange == null
@@ -163,7 +163,7 @@ class _CustomerHeader extends StatelessWidget {
             width: 58,
             height: 58,
             decoration: BoxDecoration(
-              color: AppColors.roseLight,
+              color: AppColors.goldLight,
               borderRadius: BorderRadius.circular(18),
             ),
             alignment: Alignment.center,
@@ -174,7 +174,7 @@ class _CustomerHeader extends StatelessWidget {
                 fontSize: 22,
                 fontWeight: FontWeight.w600,
                 fontVariations: [FontVariation('wght', 600)],
-                color: AppColors.maroonDeep,
+                color: AppColors.wineDeep,
               ),
             ),
           ),
@@ -208,7 +208,7 @@ class _CustomerHeader extends StatelessWidget {
                 CustomerStatus.rejected => S.statusRejected,
                 CustomerStatus.suspended => S.statusSuspended,
               },
-              color: customer!.isActive ? AppColors.roseGold : AppColors.warning,
+              color: customer!.isActive ? AppColors.gold : AppColors.warning,
               solid: true,
             ),
         ],
@@ -239,7 +239,7 @@ class _MyAgentCard extends StatelessWidget {
               Container(
                 width: 48,
                 height: 48,
-                decoration: BoxDecoration(color: AppColors.roseLight, borderRadius: BorderRadius.circular(14)),
+                decoration: BoxDecoration(color: AppColors.goldLight, borderRadius: BorderRadius.circular(14)),
                 alignment: Alignment.center,
                 child: Text(
                   initialsOf(agent.fullName),
@@ -248,7 +248,7 @@ class _MyAgentCard extends StatelessWidget {
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
                     fontVariations: [FontVariation('wght', 600)],
-                    color: AppColors.maroonDeep,
+                    color: AppColors.wineDeep,
                   ),
                 ),
               ),
@@ -297,7 +297,7 @@ class _MyAgentCard extends StatelessWidget {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(Icons.phone_rounded, size: 18, color: AppColors.maroonLight),
+                const Icon(Icons.phone_rounded, size: 18, color: AppColors.wineLight),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(

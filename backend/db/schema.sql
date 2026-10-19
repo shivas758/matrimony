@@ -128,7 +128,7 @@ CREATE TABLE agents (
 -- ===== Customers (Gandharva app accounts, SPEC §9) =====
 -- A customer signs up as a 'guest' (phone + OTP, no agent), links one agent
 -- and is 'pending' until that agent approves (SPEC §9.12). Login is phone +
--- OTP (no password). Up to 5 profiles per customer (profiles.customer_id).
+-- OTP (no password). One profile per customer (profiles.customer_id; SPEC §9.17).
 CREATE TABLE customers (
   id SERIAL PRIMARY KEY,
   full_name TEXT NOT NULL,
@@ -270,6 +270,8 @@ CREATE INDEX idx_profiles_religion ON profiles(religion_id);
 CREATE INDEX idx_profiles_mother_tongue ON profiles(mother_tongue_id);
 CREATE INDEX idx_profiles_food_habit ON profiles(food_habit_id);
 CREATE INDEX idx_profiles_customer ON profiles(customer_id) WHERE customer_id IS NOT NULL;
+-- One profile per customer (SPEC §9.17, migration 009).
+CREATE UNIQUE INDEX uq_profiles_one_per_customer ON profiles(customer_id) WHERE customer_id IS NOT NULL;
 CREATE INDEX idx_profiles_work_country ON profiles(work_country_id);
 CREATE INDEX idx_profiles_occupation_type ON profiles(occupation_type_id);
 

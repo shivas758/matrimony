@@ -135,9 +135,9 @@ class _OtpScreenState extends State<OtpScreen> {
                     Container(
                       width: 84,
                       height: 84,
-                      decoration: const BoxDecoration(color: AppColors.roseLight, shape: BoxShape.circle),
+                      decoration: const BoxDecoration(color: AppColors.goldLight, shape: BoxShape.circle),
                       alignment: Alignment.center,
-                      child: const Icon(Icons.sms_rounded, size: 38, color: AppColors.maroon),
+                      child: const Icon(Icons.sms_rounded, size: 38, color: AppColors.wine),
                     ),
                     const SizedBox(height: 20),
                     Text(
@@ -149,7 +149,7 @@ class _OtpScreenState extends State<OtpScreen> {
                     Text(
                       '+91 ${widget.phone}',
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.titleLarge?.copyWith(color: AppColors.maroon),
+                      style: theme.textTheme.titleLarge?.copyWith(color: AppColors.wine),
                     ),
                     const SizedBox(height: 28),
                     TextFormField(
@@ -239,7 +239,7 @@ class _TestModeHint extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Material(
-      color: AppColors.roseLight,
+      color: AppColors.goldLight,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -248,7 +248,7 @@ class _TestModeHint extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              const Icon(Icons.science_rounded, size: 20, color: AppColors.maroon),
+              const Icon(Icons.science_rounded, size: 20, color: AppColors.wine),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -257,18 +257,18 @@ class _TestModeHint extends StatelessWidget {
                     Text(
                       S.testModeHint(code),
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: AppColors.maroonDeep,
+                        color: AppColors.wineDeep,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     Text(
                       S.testModeTap,
-                      style: theme.textTheme.bodySmall?.copyWith(color: AppColors.maroonLight),
+                      style: theme.textTheme.bodySmall?.copyWith(color: AppColors.wineLight),
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.touch_app_rounded, size: 18, color: AppColors.maroonLight),
+              const Icon(Icons.touch_app_rounded, size: 18, color: AppColors.wineLight),
             ],
           ),
         ),

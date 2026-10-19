@@ -1,22 +1,27 @@
 import 'package:flutter/material.dart';
 
-/// Brand palette — maroon and rose gold from the Gandharva disc logo, on a
-/// warm blush background (SPEC §9 intro). Mirrored in the backend's public
+/// Brand palette — the wine wordmark and gold rings of the MILI logo, on the
+/// logo's cream tile (SPEC §9.17). Mirrored in the backend's public
 /// registration form so the web page matches the app.
 class AppColors {
-  static const maroonDeep = Color(0xFF2E0F18);
-  static const maroon = Color(0xFF4A1A29);
-  static const maroonLight = Color(0xFF6B2A3D);
-  static const roseGold = Color(0xFFD4A28C);
-  static const roseDark = Color(0xFFB07E68);
-  static const roseLight = Color(0xFFF0D6CC);
-  static const blush = Color(0xFFFAF3F0);
+  static const wineDeep = Color(0xFF3F0E1A);
+  static const wine = Color(0xFF6A1B2D);
+  static const wineLight = Color(0xFF8C2D44);
+  static const gold = Color(0xFFC8A056);
 
-  /// A slightly deeper neutral than blush — used for chips and tinted panels.
-  static const blushDeep = Color(0xFFF3E8E3);
-  static const ink = Color(0xFF241418);
-  static const muted = Color(0xFF7A6A6E);
-  static const rule = Color(0xFFEADCD6);
+  /// Gold dark enough for text and icons on white (4.5:1).
+  static const goldDark = Color(0xFF94702F);
+  static const goldLight = Color(0xFFF5E7C8);
+
+  /// The glow at the centre of the logo tile.
+  static const peach = Color(0xFFFED4C4);
+  static const cream = Color(0xFFFFF8EE);
+
+  /// A slightly deeper neutral than cream — used for chips and tinted panels.
+  static const creamDeep = Color(0xFFFBEEDB);
+  static const ink = Color(0xFF2A1518);
+  static const muted = Color(0xFF7A6A64);
+  static const rule = Color(0xFFEFE0CA);
   static const success = Color(0xFF2E7D32);
   static const warning = Color(0xFFEF6C00);
 
@@ -24,7 +29,7 @@ class AppColors {
   static const brandGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [maroonLight, maroon, maroonDeep],
+    colors: [wineLight, wine, wineDeep],
     stops: [0, 0.55, 1],
   );
 }
@@ -33,35 +38,35 @@ class AppColors {
 /// targets, generous type, high contrast (SPEC §5 / §9.11). Poppins for text,
 /// Playfair Display for the brand wordmark and headlines.
 class AppTheme {
-  static const seed = AppColors.maroon;
-  static const surfaceTint = AppColors.blush;
+  static const seed = AppColors.wine;
+  static const surfaceTint = AppColors.cream;
   static const bodyFont = 'Poppins';
   static const displayFont = 'Playfair Display';
 
   static ThemeData light() {
     final scheme = ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.light).copyWith(
-      primary: AppColors.maroon,
+      primary: AppColors.wine,
       onPrimary: Colors.white,
-      primaryContainer: AppColors.roseLight,
-      onPrimaryContainer: AppColors.maroonDeep,
-      secondary: AppColors.roseDark,
+      primaryContainer: AppColors.goldLight,
+      onPrimaryContainer: AppColors.wineDeep,
+      secondary: AppColors.goldDark,
       onSecondary: Colors.white,
-      secondaryContainer: AppColors.roseLight,
-      onSecondaryContainer: AppColors.maroonDeep,
-      tertiary: const Color(0xFF8A4A5C),
+      secondaryContainer: AppColors.goldLight,
+      onSecondaryContainer: AppColors.wineDeep,
+      tertiary: AppColors.wineLight,
       onTertiary: Colors.white,
-      tertiaryContainer: const Color(0xFFF7E6DF),
-      onTertiaryContainer: AppColors.maroonDeep,
+      tertiaryContainer: const Color(0xFFFDE6DC),
+      onTertiaryContainer: AppColors.wineDeep,
       surface: Colors.white,
       onSurface: AppColors.ink,
-      onSurfaceVariant: const Color(0xFF5B4A4F),
-      surfaceContainerHighest: AppColors.blushDeep,
-      surfaceContainerHigh: const Color(0xFFF6EDE9),
-      surfaceContainer: const Color(0xFFF8F1EE),
-      surfaceContainerLow: AppColors.blush,
+      onSurfaceVariant: const Color(0xFF5E4B46),
+      surfaceContainerHighest: AppColors.creamDeep,
+      surfaceContainerHigh: const Color(0xFFFCF1E2),
+      surfaceContainer: const Color(0xFFFDF4E8),
+      surfaceContainerLow: AppColors.cream,
       outline: AppColors.muted,
       outlineVariant: AppColors.rule,
-      inverseSurface: AppColors.maroonDeep,
+      inverseSurface: AppColors.wineDeep,
       onInverseSurface: Colors.white,
     );
 
@@ -71,7 +76,7 @@ class AppTheme {
       fontFamily: displayFont,
       fontWeight: FontWeight.w600,
       fontVariations: const [FontVariation('wght', 600)],
-      color: AppColors.maroon,
+      color: AppColors.wine,
       letterSpacing: -0.2,
     );
 
@@ -91,7 +96,7 @@ class AppTheme {
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: surfaceTint,
-        foregroundColor: AppColors.maroon,
+        foregroundColor: AppColors.wine,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -99,10 +104,10 @@ class AppTheme {
         titleTextStyle: text.titleLarge?.copyWith(
           fontFamily: bodyFont,
           fontWeight: FontWeight.w700,
-          color: AppColors.maroon,
+          color: AppColors.wine,
           letterSpacing: -0.2,
         ),
-        iconTheme: const IconThemeData(color: AppColors.maroon),
+        iconTheme: const IconThemeData(color: AppColors.wine),
       ),
       cardTheme: CardThemeData(
         elevation: 0,
@@ -120,8 +125,8 @@ class AppTheme {
         fillColor: scheme.surface,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         hintStyle: const TextStyle(color: AppColors.muted),
-        labelStyle: const TextStyle(color: Color(0xFF5B4A4F)),
-        prefixIconColor: AppColors.maroonLight,
+        labelStyle: const TextStyle(color: Color(0xFF5E4B46)),
+        prefixIconColor: AppColors.wineLight,
         suffixIconColor: AppColors.muted,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -133,7 +138,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.maroon, width: 1.6),
+          borderSide: const BorderSide(color: AppColors.wine, width: 1.6),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -147,7 +152,7 @@ class AppTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size.fromHeight(52), // large touch target
-          backgroundColor: AppColors.maroon,
+          backgroundColor: AppColors.wine,
           foregroundColor: Colors.white,
           textStyle: const TextStyle(fontFamily: bodyFont, fontSize: 16, fontWeight: FontWeight.w600),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -156,24 +161,24 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size.fromHeight(52),
-          foregroundColor: AppColors.maroon,
-          side: const BorderSide(color: AppColors.maroon, width: 1.2),
+          foregroundColor: AppColors.wine,
+          side: const BorderSide(color: AppColors.wine, width: 1.2),
           textStyle: const TextStyle(fontFamily: bodyFont, fontSize: 16, fontWeight: FontWeight.w600),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: AppColors.maroon,
+          foregroundColor: AppColors.wine,
           textStyle: const TextStyle(fontFamily: bodyFont, fontWeight: FontWeight.w600),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(foregroundColor: AppColors.maroon),
+        style: IconButton.styleFrom(foregroundColor: AppColors.wine),
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: AppColors.roseGold,
-        foregroundColor: AppColors.maroonDeep,
+        backgroundColor: AppColors.gold,
+        foregroundColor: AppColors.wineDeep,
         elevation: 2,
         extendedTextStyle: TextStyle(fontFamily: bodyFont, fontWeight: FontWeight.w700, fontSize: 15),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(18))),
@@ -181,7 +186,7 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: AppColors.roseLight,
+        indicatorColor: AppColors.goldLight,
         elevation: 0,
         height: 68,
         labelTextStyle: WidgetStateProperty.resolveWith(
@@ -189,12 +194,12 @@ class AppTheme {
             fontFamily: bodyFont,
             fontSize: 12,
             fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
-            color: states.contains(WidgetState.selected) ? AppColors.maroon : AppColors.muted,
+            color: states.contains(WidgetState.selected) ? AppColors.wine : AppColors.muted,
           ),
         ),
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
-            color: states.contains(WidgetState.selected) ? AppColors.maroon : AppColors.muted,
+            color: states.contains(WidgetState.selected) ? AppColors.wine : AppColors.muted,
           ),
         ),
       ),
@@ -202,8 +207,8 @@ class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         side: const BorderSide(color: AppColors.rule),
         backgroundColor: Colors.white,
-        selectedColor: AppColors.roseLight,
-        checkmarkColor: AppColors.maroon,
+        selectedColor: AppColors.goldLight,
+        checkmarkColor: AppColors.wine,
         // Override the shape only. Replacing labelStyle wholesale drops the
         // scheme colours and leaves chip text unreadable on light surfaces.
         labelStyle: text.labelLarge?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w500),
@@ -212,10 +217,10 @@ class AppTheme {
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
           backgroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.selected) ? AppColors.maroon : Colors.white,
+            (states) => states.contains(WidgetState.selected) ? AppColors.wine : Colors.white,
           ),
           foregroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.selected) ? Colors.white : AppColors.maroon,
+            (states) => states.contains(WidgetState.selected) ? Colors.white : AppColors.wine,
           ),
           side: const WidgetStatePropertyAll(BorderSide(color: AppColors.rule)),
           textStyle: const WidgetStatePropertyAll(
@@ -225,7 +230,7 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.maroonDeep,
+        backgroundColor: AppColors.wineDeep,
         contentTextStyle: const TextStyle(fontFamily: bodyFont, color: Colors.white),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -233,7 +238,7 @@ class AppTheme {
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        titleTextStyle: text.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: AppColors.maroon),
+        titleTextStyle: text.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: AppColors.wine),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: Colors.white,
@@ -249,13 +254,13 @@ class AppTheme {
       dividerTheme: const DividerThemeData(color: AppColors.rule, space: 1, thickness: 1),
       listTileTheme: const ListTileThemeData(
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        iconColor: AppColors.maroonLight,
+        iconColor: AppColors.wineLight,
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(color: AppColors.roseDark),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(color: AppColors.goldDark),
       tabBarTheme: const TabBarThemeData(
-        labelColor: AppColors.maroon,
+        labelColor: AppColors.wine,
         unselectedLabelColor: AppColors.muted,
-        indicatorColor: AppColors.roseGold,
+        indicatorColor: AppColors.gold,
         labelStyle: TextStyle(fontFamily: bodyFont, fontWeight: FontWeight.w700),
         unselectedLabelStyle: TextStyle(fontFamily: bodyFont, fontWeight: FontWeight.w500),
       ),
@@ -264,22 +269,22 @@ class AppTheme {
           (states) => states.contains(WidgetState.selected) ? Colors.white : null,
         ),
         trackColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? AppColors.maroon : null,
+          (states) => states.contains(WidgetState.selected) ? AppColors.wine : null,
         ),
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? AppColors.maroon : null,
+          (states) => states.contains(WidgetState.selected) ? AppColors.wine : null,
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
       ),
       sliderTheme: const SliderThemeData(
-        activeTrackColor: AppColors.maroon,
-        thumbColor: AppColors.maroon,
+        activeTrackColor: AppColors.wine,
+        thumbColor: AppColors.wine,
         inactiveTrackColor: AppColors.rule,
         rangeThumbShape: RoundRangeSliderThumbShape(enabledThumbRadius: 10),
       ),
-      badgeTheme: const BadgeThemeData(backgroundColor: AppColors.roseGold, textColor: AppColors.maroonDeep),
+      badgeTheme: const BadgeThemeData(backgroundColor: AppColors.gold, textColor: AppColors.wineDeep),
     );
   }
 }

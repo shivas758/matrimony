@@ -4,28 +4,33 @@ import '../../config.dart';
 import '../strings.dart';
 import '../theme.dart';
 
-/// The Gandharva disc: the rose-gold couple and lotus heart on a round maroon
-/// disc, on a transparent background. Rendered by `tool/gen_logo.mjs` from
-/// `assets/logo/gandharva_source.jpg` into this asset and every Android
-/// launcher/splash size.
+/// The MILI logo on its rounded cream tile (SPEC §9.17): the gold rings, MILI
+/// and MATRIMONY — or, below [compactBelow] px where MATRIMONY can no longer
+/// be read, just the rings and MILI. Rendered by `tool/gen_logo.mjs` from
+/// `assets/logo/mili_source.jpg` into these assets and every Android
+/// launcher/splash size. The tile reads on both the cream pages and the wine
+/// headers.
 class AppLogo extends StatelessWidget {
   const AppLogo({super.key, this.size = 72, this.shadow = true});
 
   final double size;
   final bool shadow;
 
+  static const double compactBelow = 64;
+
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(size * 0.215);
     return Container(
       width: size,
       height: size,
       decoration: shadow
           ? BoxDecoration(
-              // The disc is round, so the shadow is too.
-              shape: BoxShape.circle,
+              // Follows the tile's rounded corners.
+              borderRadius: radius,
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.maroonDeep.withValues(alpha: 0.32),
+                  color: AppColors.wineDeep.withValues(alpha: 0.30),
                   blurRadius: size * 0.3,
                   offset: Offset(0, size * 0.1),
                 ),
@@ -33,7 +38,7 @@ class AppLogo extends StatelessWidget {
             )
           : null,
       child: Image.asset(
-        'assets/logo/logo.png',
+        size < compactBelow ? 'assets/logo/logo_mark.png' : 'assets/logo/logo.png',
         width: size,
         height: size,
         filterQuality: FilterQuality.medium,
@@ -42,7 +47,7 @@ class AppLogo extends StatelessWidget {
   }
 }
 
-/// "Gandharva" in the brand serif with the small tagline underneath.
+/// "MILI" spaced out like the logo's lettering, with MATRIMONY underneath.
 class AppWordmark extends StatelessWidget {
   const AppWordmark({super.key, this.onDark = false, this.size = 34, this.showTagline = true});
 
@@ -52,8 +57,8 @@ class AppWordmark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final nameColor = onDark ? AppColors.roseGold : AppColors.maroon;
-    final tagColor = onDark ? Colors.white.withValues(alpha: 0.78) : AppColors.roseDark;
+    final nameColor = onDark ? AppColors.gold : AppColors.wine;
+    final tagColor = onDark ? Colors.white.withValues(alpha: 0.78) : AppColors.goldDark;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -61,25 +66,24 @@ class AppWordmark extends StatelessWidget {
           AppConfig.appName,
           textAlign: TextAlign.center,
           style: TextStyle(
-            fontFamily: AppTheme.displayFont,
+            fontFamily: AppTheme.bodyFont,
             fontSize: size,
-            fontWeight: FontWeight.w600,
-            fontVariations: const [FontVariation('wght', 600)],
+            fontWeight: FontWeight.w500,
             color: nameColor,
             height: 1.05,
-            letterSpacing: -0.3,
+            letterSpacing: size * 0.08,
           ),
         ),
         if (showTagline) ...[
-          SizedBox(height: size * 0.22),
+          SizedBox(height: size * 0.12),
           Text(
             S.appTagline,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: AppTheme.bodyFont,
-              fontSize: size * 0.34,
+              fontSize: size * 0.3,
               fontWeight: FontWeight.w500,
-              letterSpacing: size * 0.02,
+              letterSpacing: size * 0.09,
               color: tagColor,
             ),
           ),

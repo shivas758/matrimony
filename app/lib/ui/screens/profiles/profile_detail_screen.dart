@@ -18,6 +18,7 @@ import '../../../state/profiles_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/photo_viewer.dart';
 import 'profile_form_screen.dart';
 
 class ProfileDetailScreen extends StatefulWidget {
@@ -685,7 +686,17 @@ class _PhotoCarousel extends StatelessWidget {
           PageView.builder(
             onPageChanged: onIndexChanged,
             itemCount: photos.length,
-            itemBuilder: (_, i) => AuthedPhoto(url: photos[i].absoluteUrl, api: api),
+            // Whole photo, never cut; tap → full screen (SPEC §9.17).
+            itemBuilder: (_, i) => WholePhoto(
+              url: photos[i].absoluteUrl,
+              api: api,
+              onTap: () => PhotoViewer.open(
+                context,
+                urls: [for (final ph in photos) ph.absoluteUrl],
+                api: api,
+                initialIndex: i,
+              ),
+            ),
           ),
         // Scrim so the collapsing title and the dots read on any photo.
         const IgnorePointer(

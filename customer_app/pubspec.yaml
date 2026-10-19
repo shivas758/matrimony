@@ -1,8 +1,8 @@
 name: gandharva
-description: "Gandharva — Connecting Hearts, Creating Families. The customer app of the Mediator matrimony network."
+description: "MILI Matrimony (formerly Gandharva) — the customer app of the Mediator matrimony network."
 publish_to: 'none'
 
-version: 1.4.0+5
+version: 2.0.0+6
 
 environment:
   sdk: ^3.11.3
@@ -23,6 +23,7 @@ dependencies:
   http_parser: ^4.1.2
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
+  image_cropper: ^12.2.1
 
 dev_dependencies:
   flutter_test:
@@ -34,6 +35,7 @@ flutter:
 
   assets:
     - assets/logo/logo.png
+    - assets/logo/logo_mark.png
 
   # Poppins for text, Playfair Display for the wordmark and headlines (both OFL).
   # Bundled so the app never depends on the network for type.

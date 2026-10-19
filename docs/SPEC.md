@@ -1,6 +1,6 @@
 # Mediator (Matrimony Agents) App — Full Specification
 
-The product is branded **Mediator — Matrimony Partners** (the app name, launcher icon, share pages, PDFs and cards). The Android package id stays `com.matrimonyagents.matrimony_agents` so existing installs update in place. Since v2.1 a second app, **Gandharva**, lets the agents' customers browse and mark interest — see §9.
+The product is branded **Mediator — Matrimony Partners** (the app name, launcher icon, share pages, PDFs and cards). The Android package id stays `com.matrimonyagents.matrimony_agents` so existing installs update in place. Since v2.1 a second app, **MILI** (built as *Gandharva* until v2.7, §9.17), lets the agents' customers browse and mark interest — see §9.
 
 A private platform for marriage bureau agents to organise, filter, and share bride/groom profiles, replacing unstructured WhatsApp forwarding. Agents: 10–50. Profiles: up to ~5,000 with photos.
 
@@ -195,22 +195,19 @@ customers; step 37 pins the review fixes — shortlist rows carry no protected f
 customers (OTP `123456`) for app development. `cd app && flutter test` and
 `cd customer_app && flutter test` cover the models and filter serialisation.
 
-## 9. Customers, the Gandharva app, OTP signups (v2.1; guest mode, fee and 5 profiles: §9.12, v2.2; guest filters, delete requests, cash: §9.13, v2.3)
+## 9. Customers, the MILI app (formerly Gandharva), OTP signups (v2.1; guest mode and fee: §9.12, v2.2; guest filters, delete requests, cash: §9.13, v2.3; MILI rebrand, photo editor, one profile per customer: §9.17, v2.7)
 
 Two apps now share one backend:
 
 | App | Users | Package | Directory |
 |---|---|---|---|
 | **Mediator** (existing) | agents + admins | `com.matrimonyagents.matrimony_agents` | `app/` |
-| **Gandharva** (new) — "Connecting Hearts, Creating Families" | customers (the brides/grooms or their families) | `com.matrimonyagents.gandharva` | `customer_app/` |
+| **MILI** — "MILI Matrimony" (was *Gandharva* until v2.7) | customers (the brides/grooms or their families) | `com.matrimonyagents.gandharva` | `customer_app/` |
 
 A **customer** is always attached to exactly one **agent**. Customers never talk to each other or to
 other agents directly: they browse, mark *interested*, and their agent (or the other party's agent)
-does the rest by phone. The Gandharva logo is `new content/Gandharva.jpeg` (maroon disc, rose-gold
-couple + lotus heart); `customer_app/tool/gen_logo.mjs` cuts the disc out of its black background
-and produces the in-app assets, launcher icons and splash. Palette: maroon `#4A1A29` / deep maroon
-`#2E0F18` / rose gold `#D4A28C` / rose light `#F0D6CC` on blush `#FAF3F0` (`AppColors` in
-`customer_app/lib/ui/theme.dart`, mirrored in the public registration form). Type: Poppins +
+does the rest by phone. Logo and palette: see §9.17 (MILI); the paragraphs below still say
+"Gandharva" where they were written before the rename — read it as MILI. Type: Poppins +
 Playfair Display, same files as Mediator.
 
 ### 9.1 OTP (mock now, real SMS later)
@@ -361,7 +358,7 @@ Active only:
 
 Strings live in `customer_app/lib/ui/strings.dart`. `API_BASE_URL` is the same `--dart-define` as Mediator (`customer_app/lib/config.dart`).
 
-### 9.12 Guest mode, the ₹150 registration fee and up to 5 profiles (v2.2)
+### 9.12 Guest mode, the ₹150 registration fee and up to 5 profiles (v2.2; one profile since v2.7, §9.17)
 
 Replaces the parts of §9.2 / §9.3-A / §9.9 / §9.11 that say otherwise. A customer can now join with
 just their mobile number and look around before committing.
@@ -597,6 +594,67 @@ again on token refresh); on logout remove it. Foreground message → refresh the
 state and show a small in-app banner; tapping a system notification (background or terminated)
 opens the app on the item's target using the same routing as the Notifications screen (falls
 back to the Notifications screen). Android channel `updates` ("Updates", high importance).
+
+### 9.17 MILI rebrand, photo editor + camera, one profile per customer (v2.7)
+
+Owner's requests of 2026-10-19. Where earlier sections say otherwise, this wins.
+
+**The customer app is now MILI** ("MILI Matrimony"; logo `new logo/MILI logo.jpeg`: two gold
+interlocked rings forming an "m", the wordmark MILI in wine and MATRIMONY beneath, on a cream tile
+with a peach glow). The rename is what people see, not the plumbing: the package id
+`com.matrimonyagents.gandharva`, the directory `customer_app/`, the Dart package `gandharva`, the
+push app key `gandharva` (`/push/config?app=gandharva`, `FCM_APP_ID_GANDHARVA`) and the token
+`typ` all stay, so the installed Gandharva app updates in place to MILI and customers stay logged
+in. "Gandharva" remains the internal code name in code comments. Everything a person reads says
+MILI: launcher label, splash, in-app wordmark, the watermark on guest photos, the registration
+form `/r/:token`, OTP/notification texts, and Mediator texts that mention the customers' app.
+- **Icon / logo** (`customer_app/tool/gen_logo.mjs`, source `customer_app/assets/logo/mili_source.jpg`):
+  the launcher icon is the rings + MILI on the cream tile (MATRIMONY is unreadable at icon size and
+  is dropped); the splash shows the full logo; in-app, `AppLogo` shows the full logo on its cream
+  tile (it reads on both the cream pages and the wine headers).
+- **Palette** (sampled from the logo; `AppColors` in `customer_app/lib/ui/theme.dart`, mirrored
+  in the registration form): wine `#6A1B2D` (primary) / deep wine `#3F0E1A` / light wine `#8C2D44`,
+  gold `#C8A056` / dark gold `#94702F` (gold text and icons on light backgrounds, 4.5:1 on white) / light gold
+  `#F4E6C4`, peach `#FED4C4`, on cream `#FFF8EE` (deeper cream `#FBEEDB` for chips and panels).
+  Mediator keeps its navy/gold palette.
+
+**Photo editor + camera (both apps).** Wherever photos are added — Mediator add/edit profile;
+MILI registration form and My profile → photos — *Add photos* opens a sheet: **Take photo**
+(camera) or **Choose from gallery** (multi-select, up to the free slots of the 8). Each new photo
+then opens the **editor**: crop and rotate, free-form, starting on a portrait 4:5 frame with
+Original / Square / 3:4 / 4:5 / 16:9 presets. Cancelling the editor keeps the photo as taken.
+Until the form is saved every new photo's thumbnail has **Edit** (re-open the editor) and
+**Remove**. What leaves the phone is the edited image; the server is unchanged (JPEG, longest
+side ≤ 1280 px, never cropped). Android: `image_picker` (camera source) + `image_cropper` (uCrop).
+
+**Photos are never cut on a profile page.** The profile detail screen in both apps shows each
+photo whole — fitted inside the header over a blurred, enlarged copy of itself — and tapping it
+opens a full-screen viewer (swipe between photos, pinch to zoom). The public share page
+`/p/:token` does the same. List cards still fill their frame (a grid needs one shape) but anchor
+on the upper part of the photo so faces stay in view.
+
+**Fixed with this release.** (1) Watermarked copies (`/p/:token` photos, the customer photo route
+for other profiles, the PDF bio-data's photos) failed with a 500 for every stored photo larger than 1080 px
+— the overlay was sized from the input instead of the resized image (`lib/photos.js`). The smoke
+test's sample photo is now 960 × 1280 so the suite covers it. (2) Choosing the gallery with exactly
+one free photo slot crashed (`pickMultiImage` needs a limit of at least 2); it now picks one photo.
+
+**One profile per customer.** Replaces §9.12's "up to 5": a customer registers exactly one
+profile (for one bride or groom). `max_profiles` is 1 everywhere it is reported; creating a second
+→ `409 profile_limit` ("You can register only one profile"). Enforced in the database too by
+migration 009: a partial unique index `uq_profiles_one_per_customer ON profiles(customer_id)
+WHERE customer_id IS NOT NULL` (skipped with a NOTICE if duplicates already exist — there were
+none on 2026-10-19 — and a concurrent second insert maps to the same 409). The env knob
+`MAX_CUSTOMER_PROFILES` is gone. The multi-profile API shapes stay (`profiles[]`,
+`/customer/my-profiles`, `from_profile_id`) so older app builds keep working. Deleting the profile
+(unpaid directly, paid via the §9.13 delete request) frees the slot for a new one.
+- **MILI**: the *My profiles* tab is **My profile** again. No profile → the *Create your profile*
+  call to action (Get-started step 2 unchanged); one profile → that profile's page right in the tab
+  (view, edit, photos, pay, delete). The "On behalf of" chooser can no longer appear.
+- **Mediator**: client screens show the client's single profile; texts that said "up to 5" are
+  gone.
+- The registration form `/r/:token` already creates exactly one profile with the account; its
+  "already registered" page now points to *My profile* in MILI.
 
 ## 8. Explicit v2 (do NOT build now)
 iOS build, Telugu/Hindi UI, horoscope matching/compatibility scores, in-app chat, AI import of old WhatsApp chat exports, real SMS OTP provider wiring beyond the `msg91` adapter (configure by env once the subscription exists).

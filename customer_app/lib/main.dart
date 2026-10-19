@@ -181,16 +181,15 @@ class _Splash extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const AppLogo(size: 140),
-              const SizedBox(height: 20),
-              const AppWordmark(onDark: true, size: 40),
-              const SizedBox(height: 40),
+              // The tile already carries "MILI MATRIMONY".
+              const AppLogo(size: 168),
+              const SizedBox(height: 44),
               SizedBox(
                 width: 26,
                 height: 26,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  color: AppColors.roseGold.withValues(alpha: 0.9),
+                  color: AppColors.gold.withValues(alpha: 0.9),
                 ),
               ),
             ],

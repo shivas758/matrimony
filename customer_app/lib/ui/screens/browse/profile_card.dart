@@ -81,7 +81,7 @@ class ProfileCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.maroon,
+                                color: AppColors.wine,
                               ),
                             ),
                           ),
@@ -89,7 +89,7 @@ class ProfileCard extends StatelessWidget {
                             const SizedBox(width: 6),
                             const StatusChip(
                               label: S.interestedChip,
-                              color: AppColors.roseDark,
+                              color: AppColors.goldDark,
                               icon: Icons.favorite_rounded,
                             ),
                           ],
@@ -102,7 +102,7 @@ class ProfileCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppColors.roseDark,
+                            color: AppColors.goldDark,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -142,7 +142,7 @@ class _Line extends StatelessWidget {
     final theme = Theme.of(context);
     return Row(
       children: [
-        Icon(icon, size: 15, color: AppColors.roseDark),
+        Icon(icon, size: 15, color: AppColors.goldDark),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
@@ -198,7 +198,7 @@ class GuestProfileCard extends StatelessWidget {
                       left: 8,
                       child: StatusChip(
                         label: S.lockedProfile,
-                        color: AppColors.maroon,
+                        color: AppColors.wine,
                         icon: Icons.lock_rounded,
                         solid: true,
                       ),
@@ -221,11 +221,11 @@ class GuestProfileCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.maroon,
+                                color: AppColors.wine,
                               ),
                             ),
                           ),
-                          const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.roseDark),
+                          const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.goldDark),
                         ],
                       ),
                       const SizedBox(height: 10),

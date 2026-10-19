@@ -62,7 +62,7 @@ import { requireActiveCustomer, requireFullAccess, requireNotSuspended } from '.
 
 export const customerRouter = Router();
 
-const DEFAULT_WATERMARK = 'Gandharva';
+const DEFAULT_WATERMARK = 'MILI';
 const MAX_PROFILES = () => config.payments.maxCustomerProfiles;
 
 /** Public profile shape with photo urls pointing at /api/customer/photos. */
@@ -132,27 +132,33 @@ async function ownProfileView(customer, id) {
 }
 
 /**
- * Creates a profile for the customer (SPEC §9.12): multipart, the agent form
- * minus `status`; always stored hidden — it goes live once paid AND the
- * customer is approved. Owned by the customer's agent. 409 profile_limit.
+ * Creates the customer's profile (SPEC §9.12 / §9.17): multipart, the agent
+ * form minus `status`; always stored hidden — it goes live once paid AND the
+ * customer is approved. Owned by the customer's agent. One per customer:
+ * 409 profile_limit, also when two saves race past the count (the database
+ * keeps one — uq_profiles_one_per_customer, migration 009).
  */
 async function createOwnProfile(req) {
   if (!req.customer.agent_id) throw forbidden('agent_required', 'Choose your agent before registering a profile');
+  const limitReached = () => conflict('profile_limit', 'You can register only one profile');
   const { n } = await one('SELECT count(*)::int AS n FROM profiles WHERE customer_id = $1', [req.customer.id]);
-  if (n >= MAX_PROFILES()) {
-    throw conflict('profile_limit', `You can register at most ${MAX_PROFILES()} profiles`);
-  }
+  if (n >= MAX_PROFILES()) throw limitReached();
   const raw = { ...(req.body ?? {}) };
   delete raw.status;
   const body = await prepareProfileBody(raw, { multipart: true });
-  const { id } = await createProfileRecord({
-    uploadedBy: req.customer.agent_id,
-    customerId: req.customer.id,
-    body,
-    files: req.files || [],
-    status: 'hidden',
-  });
-  return id;
+  try {
+    const { id } = await createProfileRecord({
+      uploadedBy: req.customer.agent_id,
+      customerId: req.customer.id,
+      body,
+      files: req.files || [],
+      status: 'hidden',
+    });
+    return id;
+  } catch (e) {
+    if (e.code === '23505' && e.constraint === 'uq_profiles_one_per_customer') throw limitReached();
+    throw e;
+  }
 }
 
 /** PATCH one own profile — JSON; `status` is ignored (the agent manages it). */
@@ -175,7 +181,7 @@ async function addOwnPhotos(req, id) {
   return saved.map((p) => photoPublic(p, CUSTOMER_PHOTO_BASE));
 }
 
-// ---- up to 5 profiles (SPEC §9.12)
+// ---- my profile: one per customer (SPEC §9.12 / §9.17)
 
 // GET /api/customer/my-profiles
 customerRouter.get(
@@ -434,7 +440,7 @@ customerRouter.post(
 // uploader's agency: uploader identity is never sent to a customer (SPEC §9.9,
 // §3.3, CLAUDE.md rule 3). Customers never get clean copies of other people's
 // photos. Guest access (SPEC §9.12): only the PRIMARY photo of an active
-// profile, stamped "Gandharva".
+// profile, stamped "MILI".
 customerRouter.get(
   '/photos/:id',
   requireNotSuspended,

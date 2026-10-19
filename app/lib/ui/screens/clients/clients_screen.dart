@@ -633,8 +633,8 @@ class InterestCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
             ),
           ] else if (customerProfile != null) ...[
-            // The client's own agent: which of their profiles is interested
-            // (SPEC §9.12 — a customer can have up to 5).
+            // The client's own agent: their profile that is interested
+            // (SPEC §9.12; one profile per customer since §9.17).
             const SizedBox(height: 8),
             ProfileSummaryTile(
               profile: customerProfile,

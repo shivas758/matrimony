@@ -162,7 +162,7 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
                 icon: Icons.lock_open_rounded,
                 title: S.getStartedTitle,
                 body: S.getStartedIntro,
-                tint: AppColors.roseDark,
+                tint: AppColors.goldDark,
               ),
             const SizedBox(height: 16),
 
@@ -175,13 +175,13 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
             ),
             const SizedBox(height: 12),
 
-            // ---- 2 Register a profile
+            // ---- 2 Register your profile
             _StepCard(
               number: 2,
               title: S.step2Title,
               done: done[1],
               child: done[1]
-                  ? _Line(S.profilesRegistered(customer.profiles.length))
+                  ? const _Line(S.profileRegistered)
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -365,7 +365,7 @@ class _StepCard extends StatelessWidget {
                 width: 30,
                 height: 30,
                 decoration: BoxDecoration(
-                  color: done ? AppColors.success : AppColors.roseLight,
+                  color: done ? AppColors.success : AppColors.goldLight,
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
@@ -373,7 +373,7 @@ class _StepCard extends StatelessWidget {
                     ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
                     : Text(
                         '$number',
-                        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.maroon),
+                        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.wine),
                       ),
               ),
               const SizedBox(width: 12),
@@ -382,7 +382,7 @@ class _StepCard extends StatelessWidget {
                   title,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: done ? AppColors.success : AppColors.maroon,
+                    color: done ? AppColors.success : AppColors.wine,
                   ),
                 ),
               ),
@@ -438,7 +438,7 @@ class _StepButton extends StatelessWidget {
     }
     return OutlinedButton.icon(
       onPressed: onPressed,
-      icon: busy ? const ButtonSpinner(color: AppColors.maroon) : Icon(icon),
+      icon: busy ? const ButtonSpinner(color: AppColors.wine) : Icon(icon),
       label: Text(label),
     );
   }
