@@ -7,38 +7,34 @@ import {
 import { asyncHandler, badRequest, conflict, unauthorized } from '../lib/errors.js';
 import { parse, passwordSchema, phoneSchema } from '../lib/validate.js';
 import { requireAuth } from '../middleware/auth.js';
-import { agentPublic } from '../lib/serialize.js';
-import { requestOtp, verifyOtp } from '../lib/otp.js';
+import { AGENT_SELECT, agentPublic } from '../lib/serialize.js';
+import { checkOtp, otpSendSchema, otpVerifySchema, startOtp } from '../lib/otp.js';
+import { findState, issueAgentCode } from '../lib/codes.js';
 
 export const authRouter = Router();
 
 const OTP_PURPOSE = 'agent_signup';
 
-const otpSendSchema = z.object({ phone: phoneSchema });
-const otpVerifySchema = z.object({
-  phone: phoneSchema,
-  code: z.string().trim().regex(/^\d{4,8}$/, 'Enter the 6-digit code'),
-});
-
-// POST /api/auth/otp/send {phone} — first step of agent signup (SPEC §9.1).
-// A number that is already an agent gets 409 so the app can point to Login.
+// POST /api/auth/otp/send {phone, firebase?} — first step of agent signup
+// (SPEC §9.1 / §9.19 A). A number that is already an agent gets 409 so the app
+// can point to Login — before any SMS is sent, by us or by Firebase.
 authRouter.post(
   '/otp/send',
   asyncHandler(async (req, res) => {
-    const { phone } = parse(otpSendSchema, req.body ?? {});
+    const { phone, firebase } = parse(otpSendSchema, req.body ?? {});
     const existing = await one('SELECT id FROM agents WHERE phone = $1', [phone]);
     if (existing) throw conflict('phone_taken', 'This mobile number is already registered');
-    res.json(await requestOtp(phone, OTP_PURPOSE));
+    res.json(await startOtp(phone, OTP_PURPOSE, { app: 'agent', firebase }));
   }),
 );
 
-// POST /api/auth/otp/verify {phone, code} → {verification_token} for /signup.
+// POST /api/auth/otp/verify {phone, code | firebase_id_token} → {verification_token} for /signup.
 authRouter.post(
   '/otp/verify',
   asyncHandler(async (req, res) => {
-    const { phone, code } = parse(otpVerifySchema, req.body ?? {});
-    await verifyOtp(phone, OTP_PURPOSE, code);
-    res.json({ verification_token: signPhoneVerification(phone, OTP_PURPOSE) });
+    const body = parse(otpVerifySchema, req.body ?? {});
+    await checkOtp(body.phone, OTP_PURPOSE, body);
+    res.json({ verification_token: signPhoneVerification(body.phone, OTP_PURPOSE) });
   }),
 );
 
@@ -48,6 +44,10 @@ const signupSchema = z.object({
   password: passwordSchema,
   agency_name: z.string().trim().max(120).optional().nullable(),
   community_ids: z.array(z.number().int().positive()).min(1, 'Select at least one community'),
+  // The agent's State decides their agent code (SPEC §9.18 B). The 3.0.0 app
+  // requires it; optional here so older builds can still sign up (those
+  // agents choose it later through POST /my/state).
+  state_id: z.coerce.number().int().positive().optional().nullable(),
   // Proof from /otp/verify (SPEC §9.1). Optional in the schema so a missing
   // token answers phone_not_verified rather than validation_failed.
   phone_verification_token: z.string().optional(),
@@ -85,21 +85,26 @@ authRouter.post(
     }
 
     const password_hash = await hashPassword(body.password);
-    const agent = await tx(async (client) => {
+    const created = await tx(async (client) => {
+      const state = body.state_id ? await findState(client, body.state_id) : null;
+      if (body.state_id && !state) throw badRequest('invalid_state', 'Select your state from the list');
+
       const { rows } = await client.query(
         `INSERT INTO agents (full_name, phone, password_hash, agency_name, role, status)
          VALUES ($1, $2, $3, $4, 'agent', 'pending')
-         RETURNING id, full_name, phone, agency_name, role, status, created_at`,
+         RETURNING id`,
         [body.full_name, body.phone, password_hash, body.agency_name || null],
       );
-      const created = rows[0];
       await client.query(
         `INSERT INTO agent_communities (agent_id, community_id)
          SELECT $1, unnest($2::int[])`,
-        [created.id, body.community_ids],
+        [rows[0].id, body.community_ids],
       );
-      return created;
+      // The permanent agent code, issued with the account (SPEC §9.18 B).
+      if (state) await issueAgentCode(client, rows[0].id, state);
+      return rows[0];
     });
+    const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [created.id]);
 
     res.status(201).json({
       token: signToken(agent),
@@ -115,13 +120,10 @@ authRouter.post(
   '/login',
   asyncHandler(async (req, res) => {
     const body = parse(loginSchema, req.body);
-    const agent = await one(
-      `SELECT id, full_name, phone, password_hash, agency_name, role, status, must_change_password, created_at
-         FROM agents WHERE phone = $1`,
-      [body.phone],
-    );
-    const ok = agent && (await verifyPassword(body.password, agent.password_hash));
+    const login = await one('SELECT id, password_hash FROM agents WHERE phone = $1', [body.phone]);
+    const ok = login && (await verifyPassword(body.password, login.password_hash));
     if (!ok) throw unauthorized('bad_credentials', 'Mobile number or password is incorrect');
+    const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [login.id]);
 
     res.json({
       token: signToken(agent),

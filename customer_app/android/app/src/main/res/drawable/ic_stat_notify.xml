@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status-bar icon for push notifications (SPEC §9.16): the two MILI rings in
-     plain white — Android tints small icons, so it must be monochrome on transparent. -->
+<!-- Status-bar icon for push notifications (SPEC §9.16): the two interlocked rings
+     of the Wedbook Matrimony logo in plain white — Android tints small icons, so it must be monochrome on transparent. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"

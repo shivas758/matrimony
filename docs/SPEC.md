@@ -1,6 +1,6 @@
-# Mediator (Matrimony Agents) App — Full Specification
+# Wedbook (Matrimony Agents) — Full Specification
 
-The product is branded **Mediator — Matrimony Partners** (the app name, launcher icon, share pages, PDFs and cards). The Android package id stays `com.matrimonyagents.matrimony_agents` so existing installs update in place. Since v2.1 a second app, **MILI** (built as *Gandharva* until v2.7, §9.17), lets the agents' customers browse and mark interest — see §9.
+Since v2.8 (§9.18) the product is **Wedbook**: the agents' app is **Wedbook Agent** (called *Mediator* until v2.7) and the customers' app is **Wedbook Matrimony** (*MILI* until v2.7, *Gandharva* before that). Older sections still say Mediator / MILI / Gandharva — read them as the two Wedbook apps; "Mediator" and "Gandharva" remain the internal code names. The Android package ids stay `com.matrimonyagents.matrimony_agents` and `com.matrimonyagents.gandharva` so existing installs update in place.
 
 A private platform for marriage bureau agents to organise, filter, and share bride/groom profiles, replacing unstructured WhatsApp forwarding. Agents: 10–50. Profiles: up to ~5,000 with photos.
 
@@ -185,8 +185,11 @@ except for `10.0.2.2`/`localhost` via `android/app/src/main/res/xml/network_secu
 3. `flutter build apk --release` → distribute APK directly.
 4. Deploy backend to Oracle VM per `deploy/ORACLE_SETUP.md`.
 
-Testing: `cd backend && npm run smoke` runs 1014 end-to-end assertions (38 steps) against a live
-API, covering every rule in §3, §9 and CLAUDE.md (steps 24–27 cover birth details, the hold
+Testing: `cd backend && npm run smoke` runs 1525 end-to-end assertions (46 steps) against a live
+API, covering every rule in §3, §9 and CLAUDE.md (steps 42–46 cover §9.18: agent codes per state
+and the once-only State choice, customer / profile IDs and who may see them, the privacy toggles
+in lists, filters, shares, photos, request rows and notifications, the community audience, and the
+four-step registration form; steps 24–27 cover birth details, the hold
 workflow, delete, and religion / languages / food habit / siblings + the PDF share; steps 28–36
 cover OTP hardening, customer signup and pending gating, the Clients routes, the customer browse
 scope, interests end to end, agent change, the public registration form, the §9.7 fields and admin
@@ -210,7 +213,7 @@ does the rest by phone. Logo and palette: see §9.17 (MILI); the paragraphs belo
 "Gandharva" where they were written before the rename — read it as MILI. Type: Poppins +
 Playfair Display, same files as Mediator.
 
-### 9.1 OTP (mock now, real SMS later)
+### 9.1 OTP (mock now, real SMS later — Firebase phone auth since v2.9, §9.19 A)
 
 Both apps verify the mobile number with a one-time code **at signup**. Agents keep their password
 login; customers have no password — every login is phone + OTP.
@@ -431,8 +434,7 @@ set an unpaid customer profile to anything but `hidden`, nor share / download it
   succeeds. **razorpay**: the order is created through Razorpay's Orders API (`RAZORPAY_KEY_ID`,
   `RAZORPAY_KEY_SECRET`) and confirm checks the checkout signature (HMAC-SHA256 of
   `order_id|payment_id` with the key secret) — `400 payment_verification_failed` otherwise. The
-  Gandharva app ships only the mock checkout sheet; Razorpay also needs an app update with the
-  Razorpay Checkout plugin, then the env switch.
+  Razorpay Checkout in the app, capture, the safety net and the webhook: §9.19 B (v2.9).
 - Customer profiles that exist when migration 006 runs are grandfathered as paid
   (`provider = 'waived'`).
 - Agents: client rows gain `profiles[]` (summary + `paid`, `paid_at`); `profile` stays (the oldest).
@@ -656,5 +658,433 @@ none on 2026-10-19 — and a concurrent second insert maps to the same 409). The
 - The registration form `/r/:token` already creates exactly one profile with the account; its
   "already registered" page now points to *My profile* in MILI.
 
+### 9.18 Wedbook: rebrand, agent codes, customer IDs, privacy toggles, community audience, four-step forms (v2.8)
+
+Owner's requests of 2026-11-09. Where earlier sections say otherwise, this wins.
+
+#### A. Names and logos
+
+| | until v2.7 | now | package (unchanged) | APK |
+|---|---|---|---|---|
+| agents' app (`app/`) | Mediator | **Wedbook Agent** | `com.matrimonyagents.matrimony_agents` | `wedbook-agent-v3.0.0.apk` |
+| customers' app (`customer_app/`) | MILI | **Wedbook Matrimony** | `com.matrimonyagents.gandharva` | `wedbook-matrimony-v3.0.0.apk` |
+
+The rename is what people see, not the plumbing: package ids, directories, Dart package names, the
+push app keys (`mediator` / `gandharva`, `FCM_APP_ID_*`) and the token `typ` all stay, so both apps
+update in place and everyone stays logged in. Everything a person reads says Wedbook: launcher
+labels, splash, wordmarks, share card / PDF / `/p/:token` ("Wedbook"), the registration form
+`/r/:token` ("Wedbook Matrimony"), the default photo watermark ("Wedbook"), notification texts.
+
+- **Logos** (`new logo/WhatsApp Image 2026-10-28 at 08.56.03.jpeg` = Matrimony, `…08.56.27.jpeg` =
+  Agent): a rounded tile — wine for Matrimony, royal blue for Agent — with two interlocked gold
+  rings holding the ♂ and ♀ signs and the gold serif wordmark "Wedbook / Matrimony" or
+  "Wedbook / Agent". Copied to `customer_app/assets/logo/wedbook_matrimony_source.jpg` and
+  `app/assets/logo/wedbook_agent_source.jpg`; each app's `tool/gen_logo.mjs` cuts the tile out of
+  the white canvas and renders the in-app logo, launcher icons (legacy + adaptive) and splash.
+  The launcher icon is the supplied artwork itself — rings and wordmark on the tile colour (the
+  adaptive icon keeps both inside the safe zone on a full-bleed background of the tile colour);
+  in-app and on the splash the same tile is shown.
+- **Palettes** (sampled from the tiles). Wedbook Agent: blue `#043270` / deep `#021E4A` / light
+  `#0D4A9A` replace the navy family; gold unchanged (`#C9962E`, light `#E8C25F`); ivory ground
+  unchanged. Mirrored in the backend share card, PDF and `/p/:token`. Wedbook Matrimony: wine
+  `#540729` / deep `#3A0419` / light `#7A1B45` replace the MILI wine family; gold (`#C8A056`, dark
+  `#94702F`, light `#F4E6C4`) and the cream ground unchanged. Mirrored in `/r/:token`.
+
+#### B. Agent codes
+
+Every agent gets a permanent code: **STATE CODE + NUMBER + LETTER(S)**, numbered separately per
+state in the order the codes are issued:
+
+`KA1A, KA1B … KA1Z, KA2A … KA2Z, … KA999A … KA999Z`, then two letters `KA1AA, KA1AB … KA1ZZ, KA2AA …
+KA999ZZ` (then three letters, should a state ever need it). No zero padding.
+
+- New master **`states`** `(id, name, code, active, sort_order)`: the Indian states and union
+  territories with their two-letter codes (KA Karnataka, AP Andhra Pradesh, TS Telangana, TN Tamil
+  Nadu, KL Kerala, MH Maharashtra first, the rest alphabetically). `GET /masters` adds
+  `states: [{id, name, code, active, sort_order}]`. Codes are fixed once a state exists: the admin
+  master API can rename, re-order and deactivate a state (`PATCH /admin/masters/states/:id`), not
+  re-code it; `POST /admin/masters/states {name, code}` adds one. The list is complete for India,
+  so Wedbook Agent's master editor has no States tab (API only).
+- `agents.state_id → states`, `agents.agent_code` (unique). The per-state counter lives in
+  `agent_code_counters (state_id, last_seq)` and only ever counts up, so a code is **never reused**,
+  also not after an agent is deleted. A code never changes once given, and neither does the state.
+- **New agents** choose their State on the signup form: `POST /auth/signup {…, state_id}`
+  (`400 invalid_state`); the code is generated in the same transaction (so pending agents already
+  have one). `state_id` stays optional in the API for app builds older than 3.0.0.
+- **Agents registered before v2.8** have no state: the first time they open Wedbook Agent 3.0.0 a
+  full-screen **Choose your State** step asks once (with a "this cannot be changed later"
+  confirmation) → `POST /my/state {state_id}` → `{agent}` (`409 state_already_set`,
+  `400 invalid_state`). Codes are issued in the order agents complete this step.
+- The agent object (`/auth/login`, `/auth/me`, `/auth/signup`, `/my/account`, `/my/state`) adds
+  `state: {id, name, code} | null` and `agent_code: string | null`.
+- **Searchable.** `GET /admin/agents?q=` also matches the code (rows add `agent_code`,
+  `state: {id, name, code}|null`); the customers' directory `GET /customer/agents?q=` matches it
+  too. A customer can link their agent by code: `POST /customer/agent {agent_code}` (as well as
+  `agent_phone` / `agent_id`; `404 agent_not_found`).
+- **Who sees an agent's code:** the agent, admins, customers in the directory and on their "my
+  agent" card (`agentDirectory` adds `agent_code`), and the other agent in an interest or
+  agent-change row (those cards add `agent_code`). It is never printed on a profile, a share page
+  or a PDF.
+
+#### C. Customer / profile IDs
+
+Every profile gets a permanent ID: **`GN-<agent code>-<letter><3 digits>`**, numbered per agent:
+`GN-KA1A-A001 … GN-KA1A-A999, GN-KA1A-B001 … GN-KA1A-Z999` (then two letters `AA001…`). With one
+profile per customer (§9.17) this is the customer's ID.
+
+- `profiles.profile_code` (unique, nullable); the per-agent counter is `agents.profile_seq` (only
+  counts up — never reused).
+- Assigned when the profile is created, from its agent (`uploaded_by`) — agent uploads, customer
+  registrations in the app and the web form alike. A profile whose agent has no code yet gets its
+  ID when that agent chooses their State (all of that agent's profiles then, oldest first), or when
+  the customer links / is moved to an agent who has one.
+- **Permanent**: once assigned it never changes — not on an agent change either (the ID keeps
+  showing the agent who first registered the customer).
+- **Owner side only.** The ID contains the agent's code, so it follows the uploader-identity rule
+  (CLAUDE.md rule 3 / 7): `profile_code` is sent only to the profile's own agent (uploader), admins
+  and the owning customer. Other agents, other customers, guest cards, share texts, the photo card,
+  the PDF and `/p/:token` never carry it.
+- Where it appears: profile list rows / detail / write responses for the owner side
+  (`profile_code`); embedded profile summaries shown to the owner side (client rows `profile` /
+  `profiles[]`, interest rows for the side that owns that profile, delete requests); the
+  customer's `me` (`customer_code` = their profile's ID or null, and `profiles[].profile_code`);
+  client rows (`customer_code`).
+- **Searchable** by the owner side: `GET /profiles?q=` matches the ID on the caller's own uploads
+  (admins: any profile) in addition to the name; `GET /clients?q=` and `GET /admin/customers?q=`
+  match it too.
+
+#### D. Privacy toggles — what a profile shows
+
+A customer decides, detail by detail, what others see. **Always shown** (not switchable): the main
+photo, age and gender. Everything else on the "before approval" sheet (§9.8) has a toggle:
+
+| section | key | hides (API keys) |
+|---|---|---|
+| personal | `name` | `full_name` (replaced, see below) |
+| personal | `dob` | `dob` (age stays) |
+| personal | `marital_status` | `marital_status` |
+| personal | `religion` | `religion` |
+| personal | `community` | `community` **and** `subcaste` |
+| personal | `subcaste` | `subcaste` |
+| personal | `mother_tongue` | `mother_tongue` |
+| personal | `known_languages` | `known_languages` |
+| personal | `height` | `height_cm` |
+| personal | `weight` | `weight_kg` |
+| personal | `complexion` | `complexion` |
+| personal | `food_habit` | `food_habit` |
+| personal | `nationality` | `nationality` |
+| personal | `about` | `about` |
+| personal | `photos` | every photo except the main one |
+| professional | `education` | `education`, `education_details`, `education_levels` |
+| professional | `profession` | `profession`, `profession_details`, `occupation_type` |
+| professional | `income` | `income_text`, `other_income` |
+| professional | `work_location` | `work_country`, `is_nri`, `nri_country` |
+| horoscope | `star_rasi` | `nakshatram`, `zodiac` |
+| horoscope | `gothram` | `gothram` |
+| horoscope | `birth_time` | `birth_time` |
+
+The list is served by the API — `GET /masters` adds `privacy_fields: [{key, label, section, hint}]`
+(`section` ∈ `personal | professional | horoscope`, `hint` a short note or null) and
+`privacy_always_visible: ['Main photo', 'Age', 'Gender']` — the apps render the toggles from it.
+
+- Stored as `profiles.hidden_fields TEXT[]` (default `{}` = everything shown, today's behaviour).
+- **Write**: the body key `hidden_fields` (JSON array, or a comma-separated / JSON string in
+  multipart; `[]` shows everything; an unknown key → `400 validation_failed`) on
+  `POST | PATCH /customer/my-profiles[/:id]`, `/customer/profile`, and — the agent acting for the
+  family — `POST | PATCH /profiles[/:id]` (uploader or admin). The web form `/r/:token` has no
+  toggles (everything shown until the customer or agent changes it).
+- **A switched-off detail is "on request"**: it is revealed exactly when the §9.8 on-request block
+  is — to the uploader, admins, an agent with an unexpired approved contact request, the owning
+  customer, and a customer whose interest is accepted and unexpired (15 days). For everyone else
+  the value is `null` (`[]` for lists, `false` for `is_nri`), and:
+  - `full_name` becomes the neutral label **`Profile <id>`** (the numeric profile id — never the
+    ID of §C) so every screen still has something to show;
+  - `masked_fields: [keys…]` on every profile object lists what was withheld from this viewer
+    (`[]` when nothing was), so the apps can say "some details are shared after approval";
+  - `photos` / `primary_photo_url` carry only the main photo, and the photo routes refuse the
+    others (`404 photo_not_found`).
+- **Everything that leaves the app is always masked**, whoever shares it — the WhatsApp summary,
+  the photo card, the PDF and `/p/:token` (and its photo route) never show a switched-off detail,
+  also not when the uploader shares their own profile (same rule as the on-request fields, §3.3).
+- **List rows** are masked the same way; the caller's own uploads (admins: all) and profiles the
+  caller currently has contact access to (agents: approved request; customers: accepted interest)
+  come unmasked. Guest cards (§9.12) drop a hidden community, subcaste, job or package.
+- **Filters never leak a hidden value**: a filter on a hidden detail does not match that profile
+  for other viewers (community / subcaste / education / profession / occupation type / marital
+  status / complexion / religion / mother tongue / languages / food habit / star / rasi / height /
+  NRI / country / work country; name search and name sort likewise) — the caller's own uploads
+  still match (admins: everything). Age, gender and the place filter are unaffected.
+- **Names elsewhere.** Wherever a profile's name is shown to someone without access it is the
+  neutral label: shortlist rows, the *sent* box of contact / hold requests, interest rows (the
+  other side's profile, and that customer's account name), notifications and pushes. Rows that
+  embed a profile summary add `name_hidden: true` when that happened.
+- The owner side also gets the setting back: `hidden_fields: [keys…]` on the profile object
+  (uploader, admin, owning customer only).
+
+#### E. Community audience — who a profile is shown to
+
+By default a profile is shown to its own community, as before. The customer can widen that:
+
+- `profiles.audience_all BOOLEAN` (default false) and `profiles.audience_community_ids INT[]`
+  (default `{}`): **additional** communities the profile is shown to. The profile's own community
+  is always part of the audience (it is implicit and never stored in the list).
+- **Write**: `audience_all` (true/false) and `audience_community_ids` (id list like
+  `known_language_ids`; unknown id → `400 invalid_reference`; the own community is dropped) on the
+  same routes as `hidden_fields`. The owner side reads back `audience_all` and
+  `audience_communities: [{id, name}]`.
+- **Visibility (replaces "community in the agent's communities" in §3.1 and §9.9).** Let
+  `shown_to(P, C)` = `P.community ∈ C OR P.audience_all OR P.audience_community_ids ∩ C ≠ ∅`.
+  - Agents see active profiles with `shown_to(P, the agent's communities)` (own uploads, the hold
+    and interest branches unchanged; admins everything).
+  - Customers with full access see active profiles whose community is in their agent's
+    communities (as before) **or** with `P.audience_all` **or** whose audience list contains the
+    community of the customer's own profile.
+  - Guest cards (§9.12) are unchanged: a teaser of every active profile.
+- "No caste preference": hide `community` and switch on *All communities*.
+
+#### F. Four-step profile forms
+
+The profile form is four sections instead of one long page — the same four in Wedbook Matrimony
+(register / edit my profile), Wedbook Agent (add / edit profile) and the web form `/r/:token`:
+
+1. **Personal details** — (web form: your mobile number) name, gender, date of birth, marital
+   status, religion, community, subcaste, mother tongue, languages known, height, weight,
+   complexion, food habit, nationality, about, photos.
+2. **Professional details** — the education table (five levels), highest qualification, other
+   education details, occupation type, profession, profession details, income, other income, work
+   country, work place*, NRI + country + place*.
+3. **Horoscope** — star (nakshatram), rasi, gothram, birth time, birth place*, birth state*,
+   birth country*.
+4. **Family & contact** — father and mother (name, occupation, phone)*, siblings*, family
+   details*, property share / details*, native place (city, state)*, contact person (name,
+   phone)*.
+
+(* = on request, §9.8 — marked "visible only after approval" as before.)
+
+A step header shows the four steps with the current one highlighted; **Back** / **Next** move
+between them and **Next** validates the current step (required: name, gender, date of birth,
+community — all in step 1). The last step's button saves. When editing an existing profile every
+step is reachable by tapping its header and **Save** is available on every step. Nothing is sent
+until Save; leaving with unsaved changes asks first. The web form keeps working without
+JavaScript (all four sections stacked, one submit button) and gains star / rasi selects for its
+Horoscope section.
+
+#### G. Screens
+
+**Wedbook Agent** (3.0.0)
+- Signup: a required **State** dropdown ("decides your agent code — cannot be changed later").
+  The pending screen and Settings show **Your agent code** (tap to copy).
+- **Choose your State** gate for agents without a code (after the set-password gate, before Home).
+- Profile cards, profile detail, My uploads and client screens show the **ID** on the owner side
+  (tap to copy on the detail screen). The profile search box says "Search by name or ID".
+- A profile with `masked_fields` shows a lock note on its detail screen: "Some details are hidden
+  by the family — they are shared when your contact request is approved."
+- Add / edit profile: the four steps (§F); the AI import, status and photo editor stay. The last
+  step ends with a **Privacy** card: the toggles of §D grouped by section, and "Show this profile
+  to" (own community only / selected communities / all communities) of §E.
+- Admin → Agents: the code on each row, search by code. Interest and transfer rows show the other
+  agent's code.
+
+**Wedbook Matrimony** (3.0.0)
+- My profile shows **Your ID** (tap to copy) once assigned; the agent card shows the agent's code.
+- Get started → *Choose your agent*: one field takes the agent's **mobile number or agent code**;
+  directory rows show the code and search matches it.
+- Register / edit profile: the four steps (§F).
+- **Privacy** (My profile → *Privacy settings*; also opened once right after a profile is
+  created): "Always shown: main photo, age, gender", then the toggles of §D grouped Personal /
+  Professional / Horoscope ("Shown to everyone" ↔ "Only after approval"), then **Show my profile
+  to**: *My community only* · *Selected communities* (multi-select) · *All communities*. Save →
+  `PATCH /customer/my-profiles/:id {hidden_fields, audience_all, audience_community_ids}`.
+- Browse / profile detail: a masked name arrives as "Profile 1042"; a profile with `masked_fields`
+  shows "Some details are hidden — they are shared after your interest is accepted."
+
+#### H. Assumptions (not confirmed by the owner)
+
+- The fourth form section is "Family & contact"; photos sit in step 1.
+- State codes follow the vehicle-registration letters; Telangana is **TS** as written.
+- The customer ID prefix stays **GN** although the app is no longer called Gandharva; the digits
+  start at 001 (`A000` is not used).
+- Agent-uploaded profiles (no customer account) get an ID too, and their agent can set the privacy
+  toggles and the audience for the family.
+- Admins are agents: they choose a State and get a code like everyone else.
+- Guest teaser cards still show every active profile regardless of the audience setting (§9.12).
+
+### 9.19 Real OTP through Firebase phone auth, Razorpay checkout (v2.9)
+
+The owner asked to switch the mock OTP to **Firebase phone authentication** and the mock fee to
+**Razorpay**; after hearing that Firebase SMS is Blaze-only (≈ ₹6 per SMS after ~10 a day) they
+chose **Fast2SMS** for OTP instead (C) — Firebase stays built in as a dormant alternative. All
+stay env switches on the server: with no keys, everything behaves exactly as before (mock OTP
+`123456`, mock checkout). Apps: **Wedbook Agent 3.1.0+13**, **Wedbook Matrimony 3.1.0+8**
+(`wedbook-agent-v3.1.0.apk`, `wedbook-matrimony-v3.1.0.apk`).
+
+#### A. OTP provider `firebase`
+
+With `OTP_PROVIDER=firebase` the **phone** sends and receives the SMS through Firebase
+Authentication; the server sends no SMS, stores no code, and instead verifies the **Firebase ID
+token** the app gets once the code is accepted. The rest of §9.1 (verification token, signup,
+customer login answer) is unchanged.
+
+- **Config:** `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_SENDER_ID`,
+  `FIREBASE_APP_ID_AGENT`, `FIREBASE_APP_ID_CUSTOMER` — the same Firebase project and the same two
+  Android apps as push (§9.16); each falls back to its old `FCM_*` name (`FCM_PROJECT_ID`,
+  `FCM_API_KEY`, `FCM_SENDER_ID`, `FCM_APP_ID_MEDIATOR`, `FCM_APP_ID_GANDHARVA`). Push additionally
+  needs `FIREBASE_SERVICE_ACCOUNT` (old name `FCM_SERVICE_ACCOUNT`); OTP does not.
+- **Send** — `POST /auth/otp/send {phone, firebase?}` (agent signup) and
+  `POST /customer/auth/otp/send {phone, firebase?}`. New apps send `firebase: true` ("I can do
+  Firebase"). Every send response now carries `provider` (`mock` | `msg91` | `firebase`).
+  - provider `firebase` + `firebase: true` → `200 {sent: false, provider: 'firebase', mock: false,
+    expires_in: 300, retry_after: 30, firebase: {api_key, app_id, messaging_sender_id,
+    project_id}}` — the options for *that* app (agent route → agent app id, customer route →
+    customer app id). Nothing is stored; the agent route still answers `409 phone_taken` first.
+  - provider `firebase` + an older app (no flag) → `426 app_update_required` "Please update the
+    app to get your code" (the 3.0.0 apps show the server message).
+  - provider `firebase` but an option is missing → `503 otp_provider_error`.
+  - `mock` / `msg91`: unchanged (the flag is ignored).
+- **Verify** — the same two `…/otp/verify` routes accept `{phone, firebase_id_token}` instead of
+  `{phone, code}`. The server checks the token itself (no Google SDK): RS256 signature against
+  Google's published `securetoken@system.gserviceaccount.com` certificates (cached per their
+  `Cache-Control`), `aud` = project id, `iss` = `https://securetoken.google.com/<project id>`,
+  not expired, `auth_time` within the last 15 minutes, a `sub`, and `phone_number` =
+  `+91<phone>`. Then it answers exactly like a code verify (agent: `{verification_token}`;
+  customer: login or `{new: true, verification_token}`).
+  Errors: `400 invalid_firebase_token` (bad / expired / other project / not a phone sign-in),
+  `400 phone_mismatch` (token is for another number), `400 otp_provider_mismatch` (a token while
+  the provider is not firebase, or a code while it is), `503 otp_provider_error` (certificates
+  unreachable).
+- **Limits:** Firebase's own (per number, per IP, per device; app verification through Play
+  Integrity, falling back to a reCAPTCHA page for APKs installed outside the Play Store). The
+  `otp_codes` throttles keep applying to mock / msg91 only.
+- **Apps** (both): on a `firebase` send response → initialise Firebase with those options (unless
+  push already did — same project), `verifyPhoneNumber('+91<phone>')`. Android may verify by
+  itself (instant verification / SMS auto-read) — then the app continues without typing;
+  otherwise the user types the 6-digit code → `signInWithCredential` → `getIdToken()` → verify
+  call → `FirebaseAuth.signOut()` (the app keeps no Firebase session; our JWT is the session).
+  Resend after 30 s with the `forceResendingToken`. Firebase errors become plain messages
+  (wrong code, code expired, too many attempts, invalid number, network, "phone verification is
+  not set up" for configuration errors). No "Test mode" hint in firebase mode.
+- **Owner setup** (deploy/ORACLE_SETUP.md): Firebase project on the **Blaze** plan (phone-auth SMS
+  is Blaze-only: about 10 SMS/day free, then a per-SMS charge for India), Authentication → Phone
+  enabled, both Android apps registered with the SHA-1 and SHA-256 of the key that signs the APKs,
+  SMS region policy "allow India only", optional test numbers. **Switch only after the 3.1.0 APKs
+  are out** — 3.0.0 apps cannot do Firebase OTP.
+
+#### B. Razorpay checkout
+
+- **App** (Wedbook Matrimony 3.1.0, `razorpay_flutter`): when `payment_provider == 'razorpay'`,
+  *Pay* creates an order (`POST /customer/my-profiles/:id/payment`, as before) and opens Razorpay
+  Checkout with `{key: payment.key_id, order_id, amount: amount_paise, currency: 'INR', name:
+  'Wedbook Matrimony', description: 'Profile registration fee', prefill: {contact: '+91<phone>'}}`.
+  Success → `POST /customer/payments/:id/confirm {provider_payment_id, signature}`. Cancel / error
+  → a message, no confirm call; trying again starts a new order. No "Test mode" card and no
+  *Simulate failure* button for razorpay. The mock checkout is unchanged.
+- **Confirm:** signature check as in §9.12; then the server makes sure the money is **captured**:
+  it fetches the payment and captures it when Razorpay still shows it `authorized` (accounts set
+  to manual capture would otherwise auto-refund after a few days). A capture problem is logged,
+  never shown to the customer.
+- **Safety net for an app that died after paying:** before creating a new order, the server asks
+  Razorpay about this profile's earlier open razorpay orders (`created` / `failed`); an order
+  Razorpay reports `paid` is settled → `409 already_paid` (the app already treats that as done).
+- **Webhook** `POST /api/payments/razorpay/webhook` (public; `X-Razorpay-Signature` =
+  HMAC-SHA256 of the raw body with `RAZORPAY_WEBHOOK_SECRET`): events `order.paid` and
+  `payment.captured` settle the payment with that `provider_order_id`. `200 {ok}` for any
+  correctly signed event (unknown orders / events are ignored), `400 invalid_signature`,
+  `503` when no webhook secret is set. Optional but recommended.
+- **Settling** (confirm, safety net, webhook — one code path): payment `paid`, `profiles.paid_at`,
+  profile live when the customer is active (§9.12). If the profile was **already paid** by another
+  payment (rare: a slow UPI payment completing after a retry was paid) the row becomes
+  `status = 'refund_due'` with a note — refund it from the Razorpay dashboard; the admin
+  dashboard counts them (`refunds_due`).
+- **Migration 011:** `payments.status` gains `refund_due`; unique index on the razorpay
+  `provider_order_id`.
+- **Test hooks** (never set in production): `RAZORPAY_API_BASE` (default
+  `https://api.razorpay.com/v1`), `FIREBASE_CERTS_URL` (default Google's certificate URL) and
+  `FAST2SMS_API_URL` (default `https://www.fast2sms.com/dev/bulkV2`) let
+  `backend/test/providers.mjs` run the flows against local fakes.
+
+#### C. OTP provider `fast2sms` (the owner's choice)
+
+`OTP_PROVIDER=fast2sms` + `FAST2SMS_API_KEY`. Works exactly like `msg91` (§9.1): the server
+generates the 6-digit code, stores its hash, sends it, and the apps' existing code screens verify
+it — so it works with **every app version** (3.0.0 included); no app update is needed for OTP.
+
+- Send: `POST https://www.fast2sms.com/dev/bulkV2`, header `authorization: <key>`, JSON
+  `{route: 'otp', variables_values: '<code>', numbers: '<10 digits>', flash: 0}`. Fast2SMS
+  delivers its fixed OTP text ("Your OTP: <code>" style) through its DLT-registered OTP route —
+  no DLT registration of our own. Success = HTTP 200 with `return: true`; anything else (HTTP
+  error, `return: false` with a `status_code`/`message`, unreachable) is logged and answered
+  `503 otp_provider_error` "Could not send the SMS — try again in a minute"; nothing is stored,
+  so the resend cooldown is not used up.
+- The send response is the §9.1 shape with `provider: 'fast2sms'`, `mock: false`, no
+  `mock_code`. The `firebase: true` flag of the 3.1.0 apps is ignored.
+- Owner setup: Fast2SMS account, **website verification** in the panel's *OTP Message* menu (error
+  996 "Before using OTP Message API, complete website verification" otherwise — what production got
+  on 2026-11-11, so it went back to mock), possibly a first wallet recharge of at least ₹100 (error
+  999), API key from *Dev API*. The key is already in the production `.env`; switching on =
+  `OTP_PROVIDER=fast2sms` + `docker compose up -d`. Throttles (30 s between sends,
+  5 sends/hour, 5 attempts) are ours, as for msg91.
+
+#### C2. OTP provider `startmessaging` (the owner's final choice)
+
+Fast2SMS's cheap OTP route needs a website verification its panel no longer offers, and its other
+routes need DLT or cost ₹7 per SMS, so the owner chose **StartMessaging** (startmessaging.com):
+₹0.25 per SMS, no DLT of our own (their pre-approved templates and shared sender IDs), one-time
+KYC on their side. Same model as fast2sms / msg91 — our code, our verification, every app
+version works.
+
+- `OTP_PROVIDER=startmessaging` + `STARTMESSAGING_API_KEY` (`sm_live_…`) +
+  `STARTMESSAGING_TEMPLATE_ID` (their OTP template's id from the dashboard);
+  `STARTMESSAGING_APP_NAME` (default `Wedbook`) fills the template's app-name variable.
+- Send: `POST https://api.startmessaging.com/otp/send`, header `X-API-Key`, JSON
+  `{phoneNumber: '+91<10 digits>', templateId, variables: {otp: '<code>', appName}}`. Success =
+  HTTP 2xx with `success: true`; anything else → logged, `503 otp_provider_error`, nothing stored.
+- Test hook `STARTMESSAGING_API_URL` (default the URL above).
+
+#### E. Public website for Razorpay's review (owner request)
+
+Razorpay asks for the link where payments are collected and for test login details. The apps are
+not on the Play Store, so the API's domain root serves a small public website (no login,
+mobile-friendly, Wedbook Matrimony wine/gold look, logo):
+
+- `/` — what Wedbook Matrimony is, how it works (install → sign in with mobile + OTP → choose your
+  agent and register your profile → pay the ₹150 registration fee → your agent approves → browse
+  and send interests), the price, **download buttons** for both apps, links to every page below.
+- `/about`, `/contact`, `/pricing`, `/terms`, `/privacy`, `/refunds` (refund & cancellation),
+  `/shipping` (delivery of a digital service) — the pages Razorpay checks.
+- `/download/wedbook-matrimony.apk`, `/download/wedbook-agent.apk` — the current APKs, copied to
+  `<UPLOADS_DIR>/downloads/` on the server (`application/vnd.android.package-archive`); a missing
+  file → a friendly 404 page.
+- Business identity from env: `SITE_BUSINESS_NAME` (default "Wedbook"), `SITE_ADDRESS`,
+  `SITE_EMAIL`, `SITE_PHONE`; a missing value is simply left out of the pages.
+- **Refund rule (owner's choice):** the ₹150 fee is refunded in full on request until the
+  customer's agent approves the profile (it goes live); after that it is not refundable; a
+  duplicate payment is always refunded. Refunds go back to the original payment method through
+  Razorpay (usually 5–7 working days).
+
+#### F. Reviewer login and demo accounts (owner approved)
+
+- `OTP_REVIEW_PHONE` + `OTP_REVIEW_CODE` (env, both required): for that one number the customer
+  login never sends an SMS (whatever `OTP_PROVIDER` is, Firebase included) — the code is
+  `OTP_REVIEW_CODE`, stored and checked like any other code (same expiry, attempts and
+  throttles), and never echoed. The send response says `provider: 'review'` (the apps treat it as
+  the normal code flow). Agent signup for that number is unaffected.
+- Production demo data, created once by hand: **Wedbook Demo Agent** (`6000000002`, active, no
+  State/code, random password nobody uses) and **Demo Customer** (`6000000001` = the review
+  number) linked to it, pending, with one unpaid, hidden profile "Demo Profile" — so the reviewer
+  lands on *Pay ₹150*. The demo agent keeps no communities afterwards, so it is not in the
+  customers' agent directory and nobody can link to it. Delete both once Razorpay has approved
+  the account.
+
+#### D. Fresh start (production, 2026-11-11)
+
+At the owner's request every agent, customer and profile created before agent codes / profile IDs
+existed was deleted from production (with their photos, requests, interests, shares, payments,
+shortlists and devices); master lists and the agent-code counters were kept. Two admin accounts
+remain: `9515702350` and `9036384100` (each picks a State on first login to get an agent code).
+Before: 8 agents (none with a code), 22 customers, 20 profiles, 48 photos, 20 payments. Backups
+taken just before: `~/backups/db-pre-wipe-20261111-052710.sql.gz` and
+`~/backups/uploads-pre-wipe-20261111-052710.tgz` on the VM. No agent code had been issued yet, so
+the first codes are `KA1A`, `TS1A`, …
+
 ## 8. Explicit v2 (do NOT build now)
-iOS build, Telugu/Hindi UI, horoscope matching/compatibility scores, in-app chat, AI import of old WhatsApp chat exports, real SMS OTP provider wiring beyond the `msg91` adapter (configure by env once the subscription exists).
+iOS build, Telugu/Hindi UI, horoscope matching/compatibility scores, in-app chat, AI import of old WhatsApp chat exports, OTP providers other than mock / msg91 / firebase (§9.19).

@@ -112,6 +112,13 @@ class ProfileService {
     return Profile.fromJson(json['profile'] as Map<String, dynamic>);
   }
 
+  /// PATCH /customer/my-profiles/:id {hidden_fields, audience_all,
+  /// audience_community_ids} → {profile} — the privacy toggles and the
+  /// community audience (SPEC §9.18 D / E); the body comes from
+  /// `PrivacySettings.toJson`. Allowed while the account is pending or active
+  /// (403 otherwise); an unknown key answers 400 `validation_failed`.
+  Future<Profile> updatePrivacy(int id, Map<String, dynamic> body) => updateProfile(id, body);
+
   /// GET /customer/my-profiles → {profiles: [own view…]} — each with its
   /// pending `delete_request` (SPEC §9.13).
   Future<List<Profile>> myProfiles() async {

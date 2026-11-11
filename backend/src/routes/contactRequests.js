@@ -4,6 +4,7 @@ import { config } from '../lib/config.js';
 import { many, one } from '../lib/db.js';
 import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { displayName, hiddenSet } from '../lib/privacy.js';
 import { loadRow } from './profiles.js';
 
 // Mounted at /api/profiles — the request-creating half of the workflow.
@@ -49,7 +50,9 @@ profileContactRouter.post(
       [profile.id, req.agent.id, body.note],
     );
     // Re-read through LIST_SELECT so the app gets the same shape as the list.
-    res.status(201).json({ contact_request: shape(await one(`${LIST_SELECT} WHERE cr.id = $1`, [created.id])) });
+    res.status(201).json({
+      contact_request: shape(await one(`${LIST_SELECT} WHERE cr.id = $1`, [created.id]), { viewer: req.agent }),
+    });
   }),
 );
 
@@ -63,7 +66,7 @@ const LIST_SELECT = `
               THEN CEIL(EXTRACT(EPOCH FROM (cr.expires_at - now())) / 86400)::int
          END AS days_left,
          (cr.status = 'approved' AND cr.expires_at <= now()) AS is_expired,
-         p.full_name AS profile_name, p.gender AS profile_gender, p.uploaded_by,
+         p.full_name AS profile_name, p.gender AS profile_gender, p.uploaded_by, p.hidden_fields,
          c.name AS profile_community,
          r.full_name AS requester_name, r.agency_name AS requester_agency, r.phone AS requester_phone,
          (SELECT ph.id FROM profile_photos ph
@@ -76,17 +79,31 @@ const LIST_SELECT = `
 /**
  * API shape. `requester` is included only in the inbox (the approver needs to
  * know who is asking); the sent box never exposes the uploader's identity.
+ *
+ * `viewer` is the agent reading the row. A name / community the family
+ * switched off (SPEC §9.18 D) is shown to the profile's uploader, an admin,
+ * and the requester only while their approval is live — otherwise the neutral
+ * label; `profile_name_hidden` says so.
  */
-function shape(row, { includeRequester = false } = {}) {
+function shape(row, { includeRequester = false, viewer = null } = {}) {
   const expired = Boolean(row.is_expired);
   const daysLeft = row.days_left ?? null;
+  const live = row.status === 'approved' && !expired;
+  const reveal = Boolean(
+    viewer && (viewer.is_admin || row.uploaded_by === viewer.id || (row.requester_id === viewer.id && live)),
+  );
+  const hidden = reveal ? new Set() : hiddenSet(row.hidden_fields);
 
   return {
     id: row.id,
     profile_id: row.profile_id,
-    profile_name: row.profile_name,
+    profile_name: displayName(
+      { id: row.profile_id, full_name: row.profile_name, hidden_fields: row.hidden_fields },
+      reveal,
+    ),
+    profile_name_hidden: hidden.has('name'),
     profile_gender: row.profile_gender,
-    profile_community: row.profile_community,
+    profile_community: hidden.has('community') ? null : row.profile_community,
     profile_photo_url: row.photo_id ? `/api/photos/${row.photo_id}` : null,
     status: expired ? 'expired' : row.status,
     note: row.note,
@@ -146,7 +163,7 @@ contactRequestsRouter.get(
     );
     res.json({
       box: f.box,
-      contact_requests: rows.map((r) => shape(r, { includeRequester: f.box === 'inbox' })),
+      contact_requests: rows.map((r) => shape(r, { includeRequester: f.box === 'inbox', viewer: req.agent })),
     });
   }),
 );
@@ -171,7 +188,7 @@ async function loadDecidable(id, agent) {
 /** Re-reads a decided request with the joins so the response matches the list shape. */
 async function reload(id, agent) {
   const row = await one(`${LIST_SELECT} WHERE cr.id = $1`, [id]);
-  return shape(row, { includeRequester: !agent || agent.is_admin || row.uploaded_by === agent.id });
+  return shape(row, { includeRequester: !agent || agent.is_admin || row.uploaded_by === agent.id, viewer: agent });
 }
 
 // POST /api/contact-requests/:id/approve — grants access for CONTACT_ACCESS_DAYS (default 15).

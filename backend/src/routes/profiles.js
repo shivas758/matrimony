@@ -4,6 +4,7 @@ import { asyncHandler, badRequest, forbidden, notFound } from '../lib/errors.js'
 import { parse } from '../lib/validate.js';
 import {
   PROFILE_SELECT,
+  agentAccessIds,
   contactAccess,
   deleteProfile,
   holdState,
@@ -13,7 +14,8 @@ import {
   protectedFields,
   visibilityClause,
 } from '../lib/profiles.js';
-import { SORTS, applyListFilters, listQuerySchema } from '../lib/profileQuery.js';
+import { applyListFilters, listQuerySchema, sortSql } from '../lib/profileQuery.js';
+import { filterViewer } from '../lib/privacy.js';
 import {
   MAX_PHOTOS,
   addPhotos,
@@ -55,7 +57,10 @@ profilesRouter.get(
     // Non-admins can only narrow within what visibilityClause already allows.
     if (f.status) add('p.status = $#', f.status);
     // The search filters are shared with the customer list (lib/profileQuery.js).
-    applyListFilters(f, add);
+    // A filter never matches a detail the family switched off, except on my
+    // own uploads (SPEC §9.18 D).
+    const viewer = filterViewer({ agent: req.agent });
+    applyListFilters(f, add, viewer);
 
     const whereSql = `WHERE ${where.join(' AND ')}`;
     const offset = (f.page - 1) * f.limit;
@@ -65,16 +70,24 @@ profilesRouter.get(
       params,
     );
     const rows = await many(
-      `${PROFILE_SELECT} ${whereSql} ORDER BY ${SORTS[f.sort]} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      `${PROFILE_SELECT} ${whereSql} ORDER BY ${sortSql(f.sort, viewer)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, f.limit, offset],
     );
 
-    const photos = await photosByProfile(rows.map((r) => r.id));
+    // Rows of profiles I hold a live contact approval for come unmasked, like
+    // their detail page; only worth a query when something is hidden at all.
+    const others = rows.filter((r) => r.hidden_fields?.length && r.uploaded_by !== req.agent.id).map((r) => r.id);
+    const [photos, access] = await Promise.all([
+      photosByProfile(rows.map((r) => r.id)),
+      req.agent.is_admin ? new Set() : agentAccessIds(req.agent.id, others),
+    ]);
     res.json({
       total: countRows[0].total,
       page: f.page,
       limit: f.limit,
-      profiles: rows.map((r) => profilePublic(r, { photos: photos.get(r.id), agent: req.agent })),
+      profiles: rows.map((r) =>
+        profilePublic(r, { photos: photos.get(r.id), agent: req.agent, reveal: access.has(r.id) }),
+      ),
     });
   }),
 );
@@ -114,7 +127,8 @@ export async function loadDetail(id, agent) {
   const row = await loadRow(id, agent);
   const photos = (await photosByProfile([row.id])).get(row.id);
   const access = await contactAccess(row, agent);
-  const out = profilePublic(row, { photos, agent });
+  // A granted contact request also lifts the family's privacy toggles (SPEC §9.18 D).
+  const out = profilePublic(row, { photos, agent, reveal: access.access === 'granted' });
 
   out.contact_access = access.access;
   out.contact_expires_at = access.expires_at;

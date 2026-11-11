@@ -1,8 +1,14 @@
 /// All user-facing text in one place so Telugu/Hindi can be added later
 /// without touching screens (SPEC §5, v2 item).
 class S {
+  // ---- brand (SPEC §9.18 A): the app is "Wedbook Agent"; the wordmark reads
+  // "Wedbook" with "AGENT" under it, like the logo. The customers' app is
+  // "Wedbook Matrimony".
+  static const brandName = 'Wedbook';
+  static const appTagline = 'Agent';
+  static const customerAppName = 'Wedbook Matrimony';
+
   // ---- auth
-  static const appTagline = 'Matrimony Partners';
   static const appIntro = 'Private profile sharing for marriage bureaus';
   static const login = 'Login';
   static const signup = 'Create account';
@@ -50,7 +56,7 @@ class S {
   static const admin = 'Admin';
 
   // ---- profile list
-  static const searchHint = 'Search by name';
+  static const searchHint = 'Search by name or ID';
   static const filters = 'Filters';
   static const clearAll = 'Clear all';
   static const apply = 'Show results';
@@ -281,8 +287,6 @@ class S {
   static const anyWorkCountry = 'Any country';
   static const birthState = 'Birth state';
   static const birthCountry = 'Birth country';
-  static const birthPlaceProtectedHint =
-      'Birth place is shown only after approval — never in shares';
   static const fatherOccupation = "Father's occupation";
   static const motherOccupation = "Mother's occupation";
   static const siblingsBreakdown = 'Brothers and sisters';
@@ -295,11 +299,6 @@ class S {
   static const propertyShareHint = "e.g. Equal share with brother, 5 acres in the person's name";
   static const propertyDetails = 'Property details';
   static const propertyDetailsHint = 'House, land, other assets';
-  static const personalDetailsTitle = 'Personal details — visible only after approval';
-  static const personalDetailsNote =
-      'Native place, birth place, work place, parents, contact person, siblings, property and '
-      'family details are visible only to you until you approve a request. '
-      'They are never included in shares or downloads.';
   static const noPersonalDetails = 'No personal or contact details were saved for this profile.';
   static const workPlaceHint = 'Town / city where they work or live now';
 
@@ -335,11 +334,11 @@ class S {
   static const rotateLinkBody =
       'The old link stops working immediately. Anyone you already sent it to will need the new one.';
   static const linkRotated = 'New link created — the old one no longer works';
-  static const searchClients = 'Search by name or phone';
+  static const searchClients = 'Search by name, phone or ID';
   static const noClients = 'No clients yet';
   static const noClientsHint =
-      'Share your registration form, or ask clients to sign up in the MILI app with your '
-      'mobile number.';
+      'Share your registration form, or ask clients to sign up in the $customerAppName app '
+      'with your mobile number or agent code.';
   static const noClientMatches = 'No clients match your search';
   static const noInterests = 'No interests yet';
   static const noInterestsHint =
@@ -348,7 +347,7 @@ class S {
   static const noTransfersHint =
       'Clients asking to move to another agent, and clients moving to you, appear here.';
   static const noProfileYet = 'No profile yet';
-  static const noProfileYetBody = 'No profile yet — the client fills it in MILI';
+  static const noProfileYetBody = 'No profile yet — the client fills it in $customerAppName';
   static const profilePrefix = 'Profile: ';
   static const sourceApp = 'App';
   static const sourceForm = 'Form';
@@ -357,7 +356,7 @@ class S {
   static const approvedOn = 'Approved on';
   static const lastLogin = 'Last login';
   static const rejectClientBody =
-      'will not be able to use MILI with you. Only an admin can undo this.';
+      'will not be able to use $customerAppName with you. Only an admin can undo this.';
   static const suspendClientBody =
       'They keep their account but cannot browse or mark interests until you activate them again.';
   static const clientApproved = 'Client approved — they can now browse profiles';
@@ -396,10 +395,10 @@ class S {
 
   // ---- v2.1 admin customers
   static const customers = 'Customers';
-  static const customersSubtitle = 'MILI accounts across all agents';
+  static const customersSubtitle = '$customerAppName accounts across all agents';
   static const reassignAgent = 'Reassign agent';
   static const reassignAgentBody = 'The customer and their profile move to the chosen agent.';
-  static const searchAgents = 'Search by name, agency or phone';
+  static const searchAgents = 'Search by name, agency, phone or code';
   static const noCustomers = 'No customers in this list';
   static const noActiveAgents = 'No other active agents';
   static const agentLabel = 'Agent';
@@ -420,16 +419,16 @@ class S {
   static const feeNotPaid = 'Fee not paid';
   static const feePending = 'Fee pending';
   static const unpaidApproveNote =
-      'Their profile goes live only after they pay the registration fee in MILI.';
+      'Their profile goes live only after they pay the registration fee in $customerAppName.';
   static const paymentRequired =
       "This customer hasn't paid the registration fee for this profile yet — it stays hidden "
-      'until they pay in MILI.';
+      'until they pay in $customerAppName.';
   static const onBehalfOf = 'On behalf of';
   static const noAgentYet = 'No agent yet';
   static const guestCustomers = 'Guests (no agent)';
   static const paidRegistrations = 'Paid registrations';
   static const guestReassignNote =
-      'Guest — signed up in MILI without an agent. Reassigning gives them that agent '
+      'Guest — signed up in $customerAppName without an agent. Reassigning gives them that agent '
       '(they become pending).';
   static String profilesCount(int n) => n == 1 ? '1 profile' : '$n profiles';
 
@@ -479,4 +478,116 @@ class S {
   static const photoEditHint = 'Each photo opens the editor next — crop and rotate it so it shows the way you want.';
   static const editPhoto = 'Edit photo';
   static const viewFullPhoto = 'View full photo';
+
+  // ---- v3.0 agent state and agent code (SPEC §9.18 B)
+  static const state = 'State';
+  static const stateHelper = 'Decides your agent code — it cannot be changed later';
+  static const stateRequired = 'Select your state';
+  static const chooseStateTitle = 'Choose your State';
+  static const chooseStateBody =
+      'Every agent now has a permanent agent code that starts with the letters of their '
+      'state. Choose the state your bureau is in — you are asked only once.';
+  static const continueLabel = 'Continue';
+  static String confirmStateTitle(String stateName) => 'Register in $stateName?';
+
+  /// "KA — Karnataka. Your agent code will start with KA and cannot be changed later."
+  static String confirmStateBody(String code, String stateName) =>
+      '$code — $stateName. Your agent code will start with $code and cannot be changed later.';
+  static const yourAgentCode = 'Your agent code';
+  static const agentCode = 'Agent code';
+  static const agentCodeCopied = 'Agent code copied';
+  static const agentCodeHint =
+      'Clients can link to you in $customerAppName with this code. Tap to copy.';
+  static String agentCodeIssued(String code) => 'Your agent code is $code';
+  static const agentCodeIssuedBody =
+      'It is permanent and yours alone. Share it with your clients — they can choose you '
+      'in $customerAppName with it.';
+  static const tapToCopy = 'Tap to copy';
+  static const statesNotLoaded = 'The list of states could not be loaded.';
+  static const searchAgentsAdmin = 'Search name, phone or agent code';
+  static const noAgentsFound = 'No agents match your search';
+
+  // ---- v3.0 profile / customer IDs (SPEC §9.18 C)
+  static String idLabel(String code) => 'ID $code';
+  static const idCopied = 'ID copied';
+
+  // ---- v3.0 details hidden by the family (SPEC §9.18 D)
+  static const maskedNote =
+      'Some details are hidden by the family — they are shared when your contact request '
+      'is approved.';
+  static const hiddenByFamily = 'Hidden by the family';
+
+  // ---- v3.0 four-step profile form (SPEC §9.18 F)
+  static const stepPersonal = 'Personal details';
+  static const stepProfessional = 'Professional details';
+  static const stepHoroscope = 'Horoscope';
+  static const stepFamily = 'Family & contact';
+  // The same, broken for the narrow step header.
+  static const stepPersonalShort = 'Personal\ndetails';
+  static const stepProfessionalShort = 'Professional\ndetails';
+  static const stepHoroscopeShort = 'Horoscope';
+  static const stepFamilyShort = 'Family &\ncontact';
+  static const stepCompleted = 'completed';
+  static const back = 'Back';
+  static const next = 'Next';
+  static const dobRequired = 'Select the date of birth';
+  static const communityRequired = 'Select a community';
+  static const fullNameRequired = 'Enter the full name';
+  static const checkHighlighted = 'Please check the highlighted fields';
+  static const discardChangesTitle = 'Discard changes?';
+  static const discardChangesBody =
+      'This profile has not been saved. If you leave now, what you entered is lost.';
+  static const discard = 'Discard';
+  static const keepEditing = 'Keep editing';
+  static const onRequestTitle = 'Visible only after approval';
+  static const onRequestWorkNote =
+      'The exact work place and place abroad are shown only after you approve a request — '
+      'never in shares. The country above is public.';
+  static const onRequestBirthNote =
+      'Birth place, state and country are shown only after you approve a request — never '
+      'in shares. Star, rasi and birth time are public.';
+  static const onRequestFamilyNote =
+      'Everything on this step — parents, siblings, family, property, native place and the '
+      'contact person — is visible only to you until you approve a request. It is never '
+      'included in shares or downloads.';
+  static const highestQualification = 'Highest qualification';
+  static const otherEducationDetails = 'Other education details';
+  static const nativeState = 'Native state';
+  static const contactPerson = 'Contact person';
+  static const parents = 'Parents';
+  static const aiCheckSteps = 'Could not match everything — please check: ';
+
+  // ---- v3.0 privacy card (SPEC §9.18 D / E)
+  static const privacy = 'Privacy';
+  static const privacyBody =
+      'Decide for the family what others see before a request is approved. A switched-off '
+      'detail is shared only after approval and never appears in shares.';
+  static const alwaysShown = 'Always shown';
+  static const shownToEveryone = 'Shown to everyone';
+  static const onlyAfterApproval = 'Only after approval';
+  static const hiddenWithCommunity = 'Hidden with the community';
+  static const showProfileTo = 'Show this profile to';
+  static const audienceOwn = 'Own community only';
+  static const audienceOwnHint = 'Agents who work with this community';
+  static const audienceSelected = 'Selected communities';
+  static const audienceSelectedHint = 'Its own community, and the ones you pick';
+  static const audienceAll = 'All communities';
+  static const audienceAllHint = 'Every agent can see it';
+  static const audiencePick = 'Pick the additional communities';
+  static const audienceNoOthers = 'There are no other communities to pick.';
+
+  // ---- v3.1 OTP through Firebase phone auth (SPEC §9.19 A)
+  static const otpSendFailed = 'Could not send the code — please try again.';
+  static const verifyingAutomatically = 'Verifying automatically…';
+  static const phoneAuthWrongCode = 'Incorrect code — check the SMS and try again.';
+  static const phoneAuthCodeExpired = 'This code has expired — tap Resend OTP to get a new one.';
+  static const phoneAuthTooManyAttempts =
+      'Too many attempts from this phone — please try again later.';
+  static const phoneAuthQuotaExceeded =
+      'The SMS limit for today has been reached — please try again later.';
+  static const phoneAuthInvalidNumber = 'Enter a valid 10-digit mobile number.';
+  static const phoneAuthNetwork = 'Cannot reach the network. Check your internet connection.';
+  static const phoneAuthNotSetUp =
+      'Phone verification is not set up yet — please contact the admin.';
+  static const phoneAuthFailed = 'Could not verify the number — try again.';
 }

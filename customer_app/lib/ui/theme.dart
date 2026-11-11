@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
 
-/// Brand palette — the wine wordmark and gold rings of the MILI logo, on the
-/// logo's cream tile (SPEC §9.17). Mirrored in the backend's public
-/// registration form so the web page matches the app.
+/// Brand palette — the wine tile and gold rings of the Wedbook Matrimony logo
+/// on a cream ground (SPEC §9.18 A; the wine family is sampled from the
+/// tile). Mirrored in the backend's public registration form so the web page
+/// matches the app.
 class AppColors {
-  static const wineDeep = Color(0xFF3F0E1A);
-  static const wine = Color(0xFF6A1B2D);
-  static const wineLight = Color(0xFF8C2D44);
+  static const wineDeep = Color(0xFF3A0419);
+  static const wine = Color(0xFF540729);
+  static const wineLight = Color(0xFF7A1B45);
   static const gold = Color(0xFFC8A056);
 
   /// Gold dark enough for text and icons on white (4.5:1).
   static const goldDark = Color(0xFF94702F);
-  static const goldLight = Color(0xFFF5E7C8);
+  static const goldLight = Color(0xFFF4E6C4);
 
-  /// The glow at the centre of the logo tile.
-  static const peach = Color(0xFFFED4C4);
+  /// A soft rose that sits next to the wine — tinted panels and tertiary
+  /// containers. Wine and ink text on it are far above 4.5:1.
+  static const rose = Color(0xFFF7DEE6);
   static const cream = Color(0xFFFFF8EE);
 
   /// A slightly deeper neutral than cream — used for chips and tinted panels.
@@ -55,7 +57,7 @@ class AppTheme {
       onSecondaryContainer: AppColors.wineDeep,
       tertiary: AppColors.wineLight,
       onTertiary: Colors.white,
-      tertiaryContainer: const Color(0xFFFDE6DC),
+      tertiaryContainer: AppColors.rose,
       onTertiaryContainer: AppColors.wineDeep,
       surface: Colors.white,
       onSurface: AppColors.ink,

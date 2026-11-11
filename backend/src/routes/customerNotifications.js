@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import { many, one } from '../lib/db.js';
 import { asyncHandler } from '../lib/errors.js';
+import { displayName } from '../lib/privacy.js';
 
 export const customerNotificationsRouter = Router();
 
@@ -55,6 +56,7 @@ export async function customerFeed(me) {
       ),
       many(
         `SELECT ci.id, ci.profile_id, ci.from_profile_id, ci.status, ci.decided_at, p.full_name,
+                p.hidden_fields, (ci.status = 'accepted' AND ci.access_expires_at > now()) AS live,
                 fp.full_name AS from_name
            FROM customer_interests ci
            JOIN profiles p ON p.id = ci.profile_id
@@ -125,21 +127,26 @@ export async function customerFeed(me) {
       });
     }
     updates.push(
-      ...interests.map((r) => ({
-        type: `interest_${r.status}`,
-        id: r.id,
-        interest_id: r.id,
-        profile_id: r.profile_id,
-        my_profile_id: r.from_profile_id ?? undefined,
-        title: INTEREST_TITLES[r.status],
-        body:
-          r.status === 'accepted'
-            ? `${r.full_name}'s family shared their details${r.from_name ? ` (for ${r.from_name})` : ''} — your agent will follow up`
-            : r.status === 'declined'
-              ? `Your interest in ${r.full_name} was declined`
-              : `${r.full_name}'s details are no longer shared with you`,
-        at: r.decided_at,
-      })),
+      ...interests.map((r) => {
+        // The other family's name only while their acceptance is live — a
+        // name they switched off is otherwise the neutral label (SPEC §9.18 D).
+        const name = displayName({ id: r.profile_id, full_name: r.full_name, hidden_fields: r.hidden_fields }, Boolean(r.live));
+        return {
+          type: `interest_${r.status}`,
+          id: r.id,
+          interest_id: r.id,
+          profile_id: r.profile_id,
+          my_profile_id: r.from_profile_id ?? undefined,
+          title: INTEREST_TITLES[r.status],
+          body:
+            r.status === 'accepted'
+              ? `${name}'s family shared their details${r.from_name ? ` (for ${r.from_name})` : ''} — your agent will follow up`
+              : r.status === 'declined'
+                ? `Your interest in ${name} was declined`
+                : `${name}'s details are no longer shared with you`,
+          at: r.decided_at,
+        };
+      }),
       ...payments.map((r) => ({
         type: 'payment_received',
         id: r.id,

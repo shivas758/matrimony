@@ -1,3 +1,14 @@
+/**
+ * The agent columns every "who am I" response needs, with the state joined
+ * (SPEC §9.18 B). Never the password hash. Alias `a`; append a WHERE on a.*.
+ */
+export const AGENT_SELECT = `
+  SELECT a.id, a.full_name, a.phone, a.agency_name, a.role, a.status,
+         a.must_change_password, a.city, a.registration_token, a.created_at,
+         a.state_id, a.agent_code, st.name AS state_name, st.code AS state_code
+    FROM agents a
+    LEFT JOIN states st ON st.id = a.state_id`;
+
 /** Public shape of an agent. Never leaks password_hash or the registration token. */
 export function agentPublic(agent, communities) {
   return {
@@ -6,6 +17,9 @@ export function agentPublic(agent, communities) {
     phone: agent.phone,
     agency_name: agent.agency_name,
     city: agent.city ?? null,
+    // SPEC §9.18 B: the state the agent chose (once) and their permanent code.
+    state: agent.state_id ? { id: agent.state_id, name: agent.state_name, code: agent.state_code } : null,
+    agent_code: agent.agent_code ?? null,
     role: agent.role,
     status: agent.status,
     // True after an admin issued a temporary password (forgot-password flow).
@@ -17,7 +31,8 @@ export function agentPublic(agent, communities) {
 
 /**
  * An agent as customers see them (SPEC §9.6 directory, the "my agent" card):
- * business details only.
+ * business details only. The agent code is one of them (SPEC §9.18 B) — a
+ * customer can link their agent by it.
  */
 export function agentDirectory(agent, communities) {
   return {
@@ -26,6 +41,7 @@ export function agentDirectory(agent, communities) {
     agency_name: agent.agency_name,
     city: agent.city ?? null,
     phone: agent.phone,
+    agent_code: agent.agent_code ?? null,
     ...(communities ? { communities } : {}),
   };
 }

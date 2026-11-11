@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../config.dart';
 import '../../strings.dart';
 import '../../widgets/common.dart';
 
@@ -72,7 +73,7 @@ Future<void> showTemporaryPasswordIssued(
   required String phone,
   required String password,
 }) {
-  final message = 'Hello $agentName, your temporary password for the Mediator app is: '
+  final message = 'Hello $agentName, your temporary password for the ${AppConfig.appName} app is: '
       '$password\nLog in with it and set your own password when asked.';
   return showDialog<void>(
     context: context,

@@ -1,8 +1,18 @@
 import { Router } from 'express';
 import { many } from '../lib/db.js';
 import { asyncHandler } from '../lib/errors.js';
+import { displayName } from '../lib/privacy.js';
 
 export const notificationsRouter = Router();
+
+/**
+ * A profile's name for a notification body: the real one only when `reveal`
+ * — the reader is on that profile's owner side or holds a live approval —
+ * else the neutral label when the family hides the name (SPEC §9.18 D). These
+ * bodies also travel as push notifications, through Google's servers.
+ */
+const nameOf = (id, fullName, hiddenFields, reveal) =>
+  displayName({ id, full_name: fullName, hidden_fields: hiddenFields }, Boolean(reveal));
 
 /**
  * GET /api/notifications — v1 is in-app polling (SPEC §4).
@@ -61,7 +71,9 @@ export async function agentFeed(agent) {
     ] = await Promise.all([
       many(inboxSql, req.agent.is_admin ? [] : [me]),
       many(
-        `SELECT cr.id, cr.profile_id, cr.status, cr.decided_at, cr.expires_at, p.full_name
+        `SELECT cr.id, cr.profile_id, cr.status, cr.decided_at, cr.expires_at, p.full_name,
+                p.hidden_fields, p.uploaded_by,
+                (cr.status = 'approved' AND cr.expires_at > now()) AS live
            FROM contact_requests cr JOIN profiles p ON p.id = cr.profile_id
           WHERE cr.requester_id = $1 AND cr.decided_at IS NOT NULL
           ORDER BY cr.decided_at DESC LIMIT 20`,
@@ -86,7 +98,11 @@ export async function agentFeed(agent) {
         : Promise.resolve([]),
       many(holdInboxSql, req.agent.is_admin ? [] : [me]),
       many(
-        `SELECT h.id, h.profile_id, h.status, h.decided_at, h.released_at, p.full_name
+        `SELECT h.id, h.profile_id, h.status, h.decided_at, h.released_at, p.full_name,
+                p.hidden_fields, p.uploaded_by,
+                EXISTS (SELECT 1 FROM contact_requests cr
+                         WHERE cr.profile_id = p.id AND cr.requester_id = h.requester_id
+                           AND cr.status = 'approved' AND cr.expires_at > now()) AS live
            FROM hold_requests h JOIN profiles p ON p.id = h.profile_id
           WHERE h.requester_id = $1 AND h.status IN ('approved', 'rejected', 'released')
             AND COALESCE(h.released_at, h.decided_at) IS NOT NULL
@@ -104,10 +120,12 @@ export async function agentFeed(agent) {
       // Pending interests on my uploads — I decide them (SPEC §9.4).
       many(
         `SELECT ci.id, ci.profile_id, ci.customer_id, ci.created_at,
-                cu.full_name AS customer_name, p.full_name AS profile_name
+                cu.full_name AS customer_name, cu.agent_id AS customer_agent_id, p.full_name AS profile_name,
+                fp.id AS from_id, fp.hidden_fields AS from_hidden
            FROM customer_interests ci
            JOIN customers cu ON cu.id = ci.customer_id
            JOIN profiles p ON p.id = ci.profile_id
+           LEFT JOIN profiles fp ON fp.id = ci.from_profile_id
           WHERE ci.status = 'pending' ${mineOr('p.uploaded_by')}
           ORDER BY ci.created_at DESC LIMIT 50`,
         inboxParams,
@@ -115,7 +133,9 @@ export async function agentFeed(agent) {
       // Decisions on my clients' interests.
       many(
         `SELECT ci.id, ci.profile_id, ci.customer_id, ci.status, ci.decided_at,
-                cu.full_name AS customer_name, p.full_name AS profile_name
+                cu.full_name AS customer_name, p.full_name AS profile_name,
+                p.hidden_fields, p.uploaded_by,
+                (ci.status = 'accepted' AND ci.access_expires_at > now()) AS live
            FROM customer_interests ci
            JOIN customers cu ON cu.id = ci.customer_id
            JOIN profiles p ON p.id = ci.profile_id
@@ -156,6 +176,10 @@ export async function agentFeed(agent) {
       ),
     ]);
 
+    // Who may read a profile's real name in a body (SPEC §9.18 D): its own
+    // agent and admins always; anyone else only while their approval is live.
+    const mayRead = (r) => req.agent.is_admin || r.uploaded_by === me || Boolean(r.live);
+
     const items = [
       ...inbox.map((r) => ({
         type: 'contact_request_received',
@@ -170,7 +194,7 @@ export async function agentFeed(agent) {
         id: r.id,
         profile_id: r.profile_id,
         title: `Request ${r.status}`,
-        body: `Your request for ${r.full_name} was ${r.status}`,
+        body: `Your request for ${nameOf(r.profile_id, r.full_name, r.hidden_fields, mayRead(r))} was ${r.status}`,
         at: r.decided_at,
       })),
       ...communityDecisions.map((r) => ({
@@ -207,7 +231,7 @@ export async function agentFeed(agent) {
         id: r.id,
         profile_id: r.profile_id,
         title: `Hold ${r.status}`,
-        body: `Your hold on ${r.full_name} was ${r.status}`,
+        body: `Your hold on ${nameOf(r.profile_id, r.full_name, r.hidden_fields, mayRead(r))} was ${r.status}`,
         at: r.released_at ?? r.decided_at,
       })),
       // ---- SPEC §9.10
@@ -216,7 +240,7 @@ export async function agentFeed(agent) {
         id: r.id,
         customer_id: r.id,
         title: 'New client awaiting approval',
-        body: `${r.full_name} registered ${r.source === 'form' ? 'through your form' : 'in the MILI app'}`,
+        body: `${r.full_name} registered ${r.source === 'form' ? 'through your form' : 'in the Wedbook Matrimony app'}`,
         at: r.created_at,
       })),
       ...interestInbox.map((r) => ({
@@ -225,7 +249,13 @@ export async function agentFeed(agent) {
         profile_id: r.profile_id,
         customer_id: r.customer_id,
         title: 'New interest',
-        body: `${r.customer_name} is interested in ${r.profile_name}`,
+        // The interested customer is someone else's client: their name follows
+        // their own profile's privacy toggle (the profile asked about is mine).
+        body: `${
+          r.from_id == null
+            ? r.customer_name
+            : nameOf(r.from_id, r.customer_name, r.from_hidden, req.agent.is_admin || r.customer_agent_id === me)
+        } is interested in ${r.profile_name}`,
         at: r.created_at,
       })),
       ...interestDecisions.map((r) => ({
@@ -234,7 +264,7 @@ export async function agentFeed(agent) {
         profile_id: r.profile_id,
         customer_id: r.customer_id,
         title: `Interest ${r.status}`,
-        body: `${r.customer_name}'s interest in ${r.profile_name} was ${r.status}`,
+        body: `${r.customer_name}'s interest in ${nameOf(r.profile_id, r.profile_name, r.hidden_fields, mayRead(r))} was ${r.status}`,
         at: r.decided_at,
       })),
       ...changeInbox.map((r) => ({

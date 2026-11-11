@@ -459,16 +459,16 @@ sudo rsync -a ~/backups/uploads-mirror/ ~/matrimony-agents/backend/uploads/
 docker compose restart api
 ```
 
-## 10. Build the APKs — Mediator for agents, MILI for customers
+## 10. Build the APKs — Wedbook Agent for agents, Wedbook Matrimony for customers
 
 **On your PC**, pointed at the live domain:
 
 ```bash
-cd app            # Mediator (agents)
+cd app            # Wedbook Agent (agents)
 flutter build apk --release --target-platform android-arm,android-arm64 \
   --dart-define=API_BASE_URL=https://your-domain.example.com
 
-cd ../customer_app   # MILI (customers)
+cd ../customer_app   # Wedbook Matrimony (customers)
 flutter build apk --release --target-platform android-arm,android-arm64 \
   --dart-define=API_BASE_URL=https://your-domain.example.com
 ```
@@ -479,8 +479,9 @@ details). You approve them under **More → Admin → Pending agents**.
 
 Agents send `customer_app/build/app/outputs/flutter-apk/app-release.apk` to their customers,
 or share their registration-form link from **Clients → Registration form**. A customer who
-installs MILI signs up with their number (OTP) and the agent's mobile number; the agent
-approves them under **Clients**.
+installs Wedbook Matrimony signs up with their number (OTP) and then chooses their agent by the
+agent's mobile number or **agent code** (e.g. `KA1A` — every agent sees their own code in the app
+under Settings); the agent approves them under **Clients**.
 
 The domain is compiled into both APKs, so if you ever change the domain you must rebuild
 and redistribute both.
@@ -513,57 +514,216 @@ The API is down for the few minutes the image rebuilds (longer on a 1 GB Micro).
 database dump: `VM_HOST=ubuntu@YOUR_PUBLIC_IP ./deploy/update.sh`.
 
 **Schema changes** go in `backend/db/migrations/` as numbered, idempotent files and are applied
-by the loop above. `001_subcastes.sql` is the first; `009_one_profile_per_customer.sql` (one profile per
-customer — a unique index, skipped with a NOTICE if a customer already owns several) is the latest.
+by the loop above. `001_subcastes.sql` is the first; `011_razorpay_settlement.sql` is the latest: it
+lets a payment be marked `refund_due` and keeps one row per Razorpay order (v2.9, no data
+changes). `010_wedbook_codes_privacy.sql` added the
+`states` list, agent codes, customer / profile IDs, the privacy toggles and the community audience
+(Wedbook, v2.8). It only adds tables and columns — no codes are issued by the migration: each agent
+registered earlier is asked once, on opening Wedbook Agent 3.0.0, to choose their State; that gives them
+their code and gives every profile they uploaded its ID. Agents still on an older app build keep working
+without a code until they update. `009_one_profile_per_customer.sql` made it one profile per
+customer (a unique index, skipped with a NOTICE if a customer already owns several).
 `008_push_devices.sql` added push notification devices. `007_delete_requests_cash.sql` added delete requests for paid customer profiles and cash
 payments recorded by agents. `006_guest_mode_payments.sql`
-added guest mode in the customer app (then called Gandharva, now MILI), the ₹150 registration fee and up to 5 profiles per customer (one since 009). 006 grandfathers the
+added guest mode in the customer app (then called Gandharva, now Wedbook Matrimony), the ₹150 registration fee and up to 5 profiles per customer (one since 009). 006 grandfathers the
 customer profiles that exist when it first runs as paid; re-running it later changes nothing.
 
 **OTP for signups and customer logins** — the backend ships with `OTP_PROVIDER=mock`: no SMS is
 sent, the code is always `123456` and both apps show it as a hint. That is fine for testing with
-your own agents but means anyone can sign up a customer with any number, so switch to real SMS
-before opening MILI to the public:
+your own agents but means **anyone can log in as any customer number**, so switch to real codes
+before opening Wedbook Matrimony to the public. Real options: **StartMessaging** (below — the one
+chosen), Fast2SMS, Firebase phone auth (both further below, kept as alternatives) or MSG91
+(`OTP_PROVIDER=msg91  MSG91_AUTH_KEY=...  MSG91_TEMPLATE_ID=...  MSG91_SENDER=...`, needs a
+DLT-registered template).
+
+#### StartMessaging (SPEC §9.19 C2) — the one in use
+
+₹0.25 per SMS, no DLT registration of your own (StartMessaging sends through its pre-approved OTP
+templates and shared sender IDs). The server makes the 6-digit code and checks it, so it works
+with **every** app version — no APK update needed.
+
+1. Sign up at https://startmessaging.com, finish their one-time **KYC** and top up the wallet.
+2. In the dashboard: create / copy the **API key** (starts `sm_live_`, shown only once) and the
+   **Template ID** of the OTP template you will use.
+3. On the VM:
 
 ```bash
-nano .env          # OTP_PROVIDER=msg91  MSG91_AUTH_KEY=...  MSG91_TEMPLATE_ID=...  MSG91_SENDER=...
+cd ~/matrimony-agents/backend
+nano .env     # set / add:
+              # OTP_PROVIDER=startmessaging
+              # STARTMESSAGING_API_KEY=sm_live_...
+              # STARTMESSAGING_TEMPLATE_ID=<template id>
+              # STARTMESSAGING_APP_NAME=Wedbook       (optional — the app name in the SMS)
 docker compose up -d
+docker compose logs api | grep "OTP provider"     # should say: OTP provider startmessaging
 ```
 
-Since v2.2 (SPEC §9.12) a customer who signs up is a **guest** straight away and can scroll
-profile cards — primary photo (watermarked), age, job, caste and package, never names or
-contacts. With the mock OTP that means anyone who installs MILI can see those cards under
-any number, so turn on real SMS before sharing the app widely. Opening a profile still needs an
-agent's approval and a paid profile.
+4. Try it in Wedbook Matrimony with your own number. If the app says "Could not send the SMS",
+   `docker compose logs api | grep startmessaging` shows StartMessaging's reason. To go back to
+   test codes: `OTP_PROVIDER=mock`, `docker compose up -d`.
+
+#### Fast2SMS (SPEC §9.19 C — alternative; its cheap route needs a website verification)
+
+The server sends a 6-digit code through Fast2SMS's ready-made OTP route (the SMS reads like
+"Your OTP: 482913"); no DLT registration of your own is needed. Works with **every** app version
+already installed — no APK update needed for this.
+
+1. Sign up at https://www.fast2sms.com. In the panel open the **OTP Message** menu and complete
+   **website verification** with `https://YOUR_DOMAIN/` (the public site of SPEC §9.19 E). Until
+   Fast2SMS approves it, every send fails with error 996 "Before using OTP Message API, complete
+   website verification" (seen on 2026-11-11). Complete KYC too if the panel asks.
+2. Recharge the wallet with at least **₹100** in one go (the API refuses until the first ₹100
+   recharge — error 999). Each OTP SMS is charged from this wallet at your plan's rate.
+3. *Dev API* (left menu) → copy the **API key**.
+4. On the VM:
+
+```bash
+cd ~/matrimony-agents/backend
+nano .env     # set / add:
+              # OTP_PROVIDER=fast2sms
+              # FAST2SMS_API_KEY=<your API key>
+docker compose up -d
+docker compose logs api | grep "OTP provider"     # should say: OTP provider fast2sms
+```
+
+5. Try it: Wedbook Matrimony → enter your number → the SMS arrives within seconds. If the app
+   says "Could not send the SMS", see why with
+   `docker compose logs api | grep fast2sms` — the line shows Fast2SMS's reason (wrong key, no
+   balance, KYC pending, …). To go back to test codes: `OTP_PROVIDER=mock`, `docker compose up -d`.
+
+#### Firebase phone OTP (SPEC §9.19 A — alternative, not in use)
+
+Needs **Wedbook Agent 3.1.0 and Wedbook Matrimony 3.1.0** (older apps answer "Please update the
+app to get your code"), so send the new APKs to everyone *before* step 7.
+
+**Cost:** Firebase only sends phone-auth SMS on the pay-as-you-go **Blaze** plan. Roughly the
+first 10 SMS a day are free; after that each SMS to India costs about US$0.07 (≈ ₹6) — check
+the current rate at https://cloud.google.com/identity-platform/pricing. A customer logs in once
+per phone (the login lasts 30 days), so a small bureau network stays near the free part.
+
+1. https://console.firebase.google.com → *Add project* (or open the one you use for push — one
+   project serves both). Google Analytics is not needed.
+2. *Upgrade* (bottom-left) → **Blaze** → add a card. Then in Google Cloud Console → *Billing →
+   Budgets & alerts* set a monthly budget (e.g. ₹500) so you get an email if usage jumps.
+3. *Project settings → General → Your apps → Add app → Android*, package name
+   `com.matrimonyagents.matrimony_agents` (Wedbook Agent). Skip the google-services.json and SDK
+   steps. Repeat for `com.matrimonyagents.gandharva` (Wedbook Matrimony — the package id kept its
+   old name). Skip if they already exist.
+4. In each of the two apps: *Add fingerprint* twice — the SHA-1 and the SHA-256 of the key that
+   signs the APKs. The APKs are signed with the key on the build PC
+   (`C:\Users\<you>\.android\debug.keystore`; print them with
+   `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`):
+
+   ```
+   SHA-1:   0C:70:81:B2:C2:9E:32:D5:58:05:F3:56:CE:03:36:32:5B:79:BB:79
+   SHA-256: 4A:5F:A7:39:FA:40:3E:09:A5:CB:E7:55:81:BB:04:3D:07:F4:23:46:F7:27:04:BD:E8:4A:95:C4:C8:6B:4F:EB
+   ```
+
+   **Back up that keystore file.** An APK signed with any other key cannot update the installed
+   apps, and Firebase would reject its OTP requests until its fingerprints are added.
+5. *Build → Authentication → Get started → Sign-in method → Phone → Enable → Save.* Then
+   *Authentication → Settings → SMS region policy → Allow → India*, so nobody can run up SMS
+   charges to other countries. Optional: under *Phone → Phone numbers for testing* add e.g.
+   `+91 9000000001` with code `123456` — such numbers never get (or pay for) an SMS.
+6. Note the settings: *Project settings → General* → **Project ID**, **Web API key**,
+   **Project number** (that is the sender id), and the **App ID** (`1:…:android:…`) of each
+   Android app.
+7. On the VM:
+
+```bash
+cd ~/matrimony-agents/backend
+nano .env     # set / add:
+              # OTP_PROVIDER=firebase
+              # FIREBASE_PROJECT_ID=<project id>
+              # FIREBASE_API_KEY=<web api key>
+              # FIREBASE_SENDER_ID=<project number>
+              # FIREBASE_APP_ID_AGENT=<App ID of com.matrimonyagents.matrimony_agents>
+              # FIREBASE_APP_ID_CUSTOMER=<App ID of com.matrimonyagents.gandharva>
+docker compose up -d
+docker compose logs api | grep "OTP provider"     # should say: OTP provider firebase
+```
+
+8. Try it: Wedbook Matrimony → enter your number → an SMS arrives (often Android reads it by
+   itself). Because the APKs are not from the Play Store, Firebase may briefly open a browser page
+   the first time (sometimes an "I'm not a robot" check) — that is expected. "Phone verification
+   is not set up yet" in the app means one of steps 2–5 is missing (most often the fingerprints
+   or the Blaze plan). To go back to test codes: `OTP_PROVIDER=mock`, `docker compose up -d`.
 
 **Registration fee (₹150 per customer profile)** — ships with `PAYMENT_PROVIDER=mock`: the app
 shows a test checkout (*Pay ₹150* / *Simulate failure*) and nothing is charged. `PROFILE_FEE_INR`
-changes the amount. Each customer registers one profile (SPEC §9.17 — fixed, not an env setting). To take real
-payments later: create a Razorpay account, then
+changes the amount. Each customer registers one profile (SPEC §9.17 — fixed, not an env setting).
+
+#### Razorpay (SPEC §9.19 B)
+
+Wedbook Matrimony **3.1.0** opens Razorpay Checkout (UPI, cards, net banking). Older apps say
+"Online payment is coming soon — contact your agent" (agents can still *Mark paid (cash)*), so
+switching the server first does no harm. Start in **Test mode** — no real money moves:
+
+1. https://dashboard.razorpay.com → switch to **Test mode** (top bar) → *Account & Settings →
+   API keys → Generate key*. Copy the **Key Id** (`rzp_test_…`) and **Key Secret** (shown once).
+2. *Account & Settings → Webhooks → Add new webhook*: URL
+   `https://YOUR_DOMAIN/api/payments/razorpay/webhook`, a **Secret** you make up (e.g.
+   `openssl rand -hex 24`), events **order.paid** and **payment.captured**. (Optional but
+   recommended: if a customer's app closes right after paying, the webhook still marks the
+   profile paid; without it the payment is picked up the next time they open the checkout.)
+3. On the VM:
 
 ```bash
-nano .env          # PAYMENT_PROVIDER=razorpay  RAZORPAY_KEY_ID=rzp_live_...  RAZORPAY_KEY_SECRET=...
+cd ~/matrimony-agents/backend
+nano .env     # set / add:
+              # PAYMENT_PROVIDER=razorpay
+              # RAZORPAY_KEY_ID=rzp_test_...
+              # RAZORPAY_KEY_SECRET=...
+              # RAZORPAY_WEBHOOK_SECRET=<the secret from step 2>
 docker compose up -d
+docker compose logs api | grep "payments razorpay"
 ```
 
-— but only together with a MILI app update that includes the Razorpay Checkout plugin (the
-current app refuses non-mock payments and tells the customer to contact their agent). The
-backend's Razorpay path (order creation + signature check) is written but has not been tested
-against a live Razorpay account yet.
+4. Test: Wedbook Matrimony → *Pay ₹150* → Checkout shows a "Test mode" banner → pay with UPI id
+   `success@razorpay` or a test card from https://razorpay.com/docs/payments/payments/test-card-details/
+   → the profile shows as paid. The payment appears in the Razorpay dashboard (Test mode).
+5. **Go live** once your Razorpay account is activated: switch the dashboard to **Live mode**,
+   generate live keys (`rzp_live_…`), add the same webhook again in Live mode (webhooks are per
+   mode), put the live values in `.env`, `docker compose up -d`.
 
-**Push notifications (both apps)** — off until you add Firebase keys. The apps already
-contain the push code and read the keys from the server, so **no new APK is needed** to switch
-it on. One-time setup (free, ~15 minutes, on your PC):
+**Razorpay's website / app review** asks for the link where payments are collected and a test
+login (SPEC §9.19 E–F). Both are ready on the server:
 
-1. Go to https://console.firebase.google.com → *Add project* (e.g. "Mediator"), Google
-   Analytics not needed.
-2. In the project: *Add app → Android*, package name `com.matrimonyagents.matrimony_agents`
-   (Mediator). Skip the "download google-services.json" and SDK steps. Repeat for
-   `com.matrimonyagents.gandharva` (MILI — the package id kept its old name).
-3. *Project settings → General*: note the **Project ID**, the **Web API key**, and for each
-   Android app its **App ID** (`1:1234…:android:…`). *Project settings → Cloud Messaging*: note
-   the **Sender ID**.
-4. *Project settings → Service accounts → Generate new private key* → a `.json` file downloads.
+- **App / website URL:** `https://YOUR_DOMAIN/` — a public page with both app downloads and the
+  pages Razorpay checks: `/about`, `/contact`, `/pricing`, `/terms`, `/privacy`, `/refunds`,
+  `/shipping`. The business name, address, email and phone come from `SITE_BUSINESS_NAME`,
+  `SITE_ADDRESS`, `SITE_EMAIL`, `SITE_PHONE` in `.env` (use exactly what you gave Razorpay in
+  KYC). Put the current APKs where the download buttons find them:
+
+```bash
+# from the PC (project folder)
+scp -i ~/.ssh/<your key> wedbook-matrimony-v3.1.0.apk ubuntu@YOUR_PUBLIC_IP:~/matrimony-agents/backend/uploads/downloads/wedbook-matrimony.apk
+scp -i ~/.ssh/<your key> wedbook-agent-v3.1.0.apk     ubuntu@YOUR_PUBLIC_IP:~/matrimony-agents/backend/uploads/downloads/wedbook-agent.apk
+```
+
+- **Test account:** customers log in with an SMS code, so `OTP_REVIEW_PHONE` + `OTP_REVIEW_CODE`
+  make one number log in with a fixed code (no SMS). Username = that number, password = that
+  code. It is the "Demo Customer" of the "Wedbook Demo Agent", with an unpaid demo profile, so
+  the reviewer lands on *Pay ₹150*. Delete both demo accounts after approval (Admin → Agents /
+  Customers) and empty the two `OTP_REVIEW_*` lines.
+
+The server captures every confirmed payment itself if your account is on manual capture, and
+never counts a profile twice. If a slow UPI payment completes after the customer already paid
+again, the extra payment is marked `refund_due` (the admin dashboard counts them as
+`refunds_due`). Find them and refund each from the Razorpay dashboard (*Payments → the payment →
+Refund*):
+
+```bash
+docker compose exec db psql -U matrimony -d matrimony -c \
+  "SELECT id, provider_order_id, provider_payment_id, amount_paise/100 AS rupees, note FROM payments WHERE status = 'refund_due'"
+```
+
+**Push notifications (both apps)** — off until you add the Firebase service account. The apps
+already contain the push code and read the settings from the server, so **no new APK is needed**
+to switch it on. Uses the same Firebase project as the phone OTP — do steps 1, 3 and 6 of
+"Firebase phone OTP" above first (push itself needs no Blaze plan), then:
+
+1. *Project settings → Service accounts → Generate new private key* → a `.json` file downloads.
    Keep it secret. Copy it to the VM and turn it into one line:
 
 ```bash
@@ -571,24 +731,21 @@ scp -i ~/.ssh/<your key> firebase-key.json ubuntu@YOUR_PUBLIC_IP:~/
 ssh ... 'base64 -w0 ~/firebase-key.json; echo; rm ~/firebase-key.json'   # copy the output
 ```
 
-5. On the VM:
+2. On the VM:
 
 ```bash
 cd ~/matrimony-agents/backend
-nano .env     # add:
-              # FCM_PROJECT_ID=<project id>
-              # FCM_API_KEY=<web api key>
-              # FCM_SENDER_ID=<sender id>
-              # FCM_APP_ID_MEDIATOR=<mediator app id>
-              # FCM_APP_ID_GANDHARVA=<gandharva app id>
-              # FCM_SERVICE_ACCOUNT=<the long base64 line>
+nano .env     # the FIREBASE_PROJECT_ID / _API_KEY / _SENDER_ID / _APP_ID_AGENT /
+              # _APP_ID_CUSTOMER lines from the OTP setup, plus:
+              # FIREBASE_SERVICE_ACCOUNT=<the long base64 line>
 docker compose up -d
 docker compose logs api | grep "Push provider"     # should say: Push provider fcm
 ```
 
-Then open each app once (log out and in if it was already open) and allow notifications.
-Pushes follow the in-app Notifications screens, checked every minute; the text passes through
-Google's servers.
+(The pre-v2.9 names `FCM_PROJECT_ID`, `FCM_API_KEY`, `FCM_SENDER_ID`, `FCM_APP_ID_MEDIATOR`,
+`FCM_APP_ID_GANDHARVA`, `FCM_SERVICE_ACCOUNT` still work.) Then open each app once (log out and
+in if it was already open) and allow notifications. Pushes follow the in-app Notifications
+screens, checked every minute; the text passes through Google's servers.
 
 **Enabling AI import ("Fill from bio-data")** — optional, and off until you do this:
 

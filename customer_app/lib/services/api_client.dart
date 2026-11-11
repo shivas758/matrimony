@@ -67,8 +67,8 @@ class ApiClient {
     ));
   }
 
-  /// Separate key from Mediator's `auth_token` — a customer token never
-  /// works on agent routes and vice versa (SPEC §9.2).
+  /// Separate key from the agents' app's `auth_token` — a customer token
+  /// never works on agent routes and vice versa (SPEC §9.2).
   static const _tokenKey = 'customer_token';
 
   late final Dio _dio;

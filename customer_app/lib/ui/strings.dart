@@ -2,8 +2,10 @@
 /// without touching screens (SPEC §9.11 — "Strings live in
 /// customer_app/lib/ui/strings.dart"). Warm, simple words — no jargon.
 class S {
-  // ---- brand
-  static const appTagline = 'MATRIMONY';
+  // ---- brand (SPEC §9.18 A: the app is "Wedbook Matrimony"; its full name
+  // is AppConfig.appName, the wordmark reads "Wedbook" over "Matrimony")
+  static const brandShort = 'Wedbook';
+  static const appTagline = 'Matrimony';
   static const appIntro = "Your agent's app for finding a match";
 
   // ---- phone screen
@@ -28,17 +30,30 @@ class S {
   static const changeNumber = 'Change number';
   static const otpResent = 'A new code has been sent';
 
+  // ---- Firebase phone verification (SPEC §9.19 A) — Firebase's error
+  // codes in plain words (see phoneAuthMessage)
+  static const otpVerifyingAuto = 'Verifying automatically…';
+  static const otpCouldNotSend = 'Could not send the code. Please try again.';
+  static const phoneAuthTooManyRequests = 'Too many attempts from this phone. Please try again later.';
+  static const phoneAuthQuotaExceeded = 'The SMS limit for today has been reached. Please try again later.';
+  static const phoneAuthInvalidNumber = 'Enter a valid 10-digit mobile number.';
+  static const phoneAuthNotSetUp = 'Phone verification is not set up yet — please contact support.';
+  static const phoneAuthFailed = 'Could not verify the number — please try again.';
+
   // ---- signup
   static const signupTitle = 'Create your account';
   static const signupBody =
-      'This number is new to MILI. Tell us your name and start looking around.';
+      'This number is new to Wedbook Matrimony. Tell us your name and start looking around.';
   static const yourNumber = 'Your number';
   static const fullName = 'Full name';
   static const fullNameHelper = 'As the family knows you';
   static const fullNameInvalid = 'Enter your full name';
-  static const agentPhone = "Agent's mobile number";
-  static const agentPhoneHelper = 'Ask your marriage bureau agent for their number';
-  static const agentPhoneInvalid = "Enter your agent's 10-digit mobile number";
+  // One field takes either (SPEC §9.18 B / G).
+  static const agentPhoneOrCode = "Agent's mobile number or agent code";
+  static const agentPhoneOrCodeHint = '98765 43210 or KA1A';
+  static const agentPhoneOrCodeHelper = 'Ask your marriage bureau agent for their number or their agent code';
+  static const agentPhoneOrCodeInvalid =
+      "Enter your agent's 10-digit mobile number, or their agent code (like KA1A)";
   static const createAccount = 'Create account';
   static const startAgain = 'Start again';
   static const signupNote =
@@ -81,7 +96,7 @@ class S {
   static String changeAgentPending(String name) => 'Waiting for approval to move to $name';
   static const logout = 'Logout';
   static const logoutConfirm = 'You will need a new one-time code to log in again.';
-  static const version = 'v2.0';
+  static const version = 'v3.1.0';
   static const accountStatus = 'Account';
 
   // ---- customer statuses
@@ -190,6 +205,10 @@ class S {
   static const expiredBody =
       'The shared details are hidden again after 15 days. You can express interest again.';
   static const expressAgain = 'Express interest again';
+  // A profile whose family switched some details off (SPEC §9.18 D).
+  static const someDetailsHidden =
+      'Some details are hidden — they are shared after your interest is accepted.';
+  static const someDetailsHiddenShort = 'Some details hidden';
   static const sharedDetailsTitle = 'Family & contact details';
   static const noPersonalDetails = 'Nothing more has been recorded yet.';
   static const sharedOnlyAfterApproval =
@@ -234,16 +253,39 @@ class S {
   static const profilePublicSection = 'What other families see';
   static const profilePrivateSection = 'Shared only after approval';
 
-  // ---- profile form (the paper form's order — SPEC §9.11 item 5)
+  // ---- profile form: four steps (SPEC §9.18 F)
   static const newProfileTitle = 'Register a profile';
   static const editProfileTitle = 'Edit profile';
+  static const stepPersonal = 'Personal details';
+  static const stepProfessional = 'Professional details';
+  static const stepHoroscope = 'Horoscope';
+  static const stepFamily = 'Family & contact';
+
+  /// The short labels under the numbered circles of the step header.
+  static const stepPersonalShort = 'Personal';
+  static const stepProfessionalShort = 'Professional';
+  static const stepHoroscopeShort = 'Horoscope';
+  static const stepFamilyShort = 'Family & contact';
+  static String stepOf(int step, int total) => 'Step $step of $total';
+  static const next = 'Next';
+  static const back = 'Back';
+  static String stepHasErrors(String step) => 'Please check the marked details in "$step".';
+  static const discardTitle = 'Leave without saving?';
+  static const discardBody = 'You have changes that are not saved yet. They will be lost if you leave now.';
+  static const discard = 'Leave';
+  static const keepEditing = 'Keep editing';
   static const basicDetails = 'Basic details';
-  static const communitySection = 'Community';
+  static const communitySection = 'Community & language';
   static const appearance = 'Appearance & lifestyle';
   static const educationSection = 'Education';
   static const professional = 'Work & income';
+  static const starSection = 'Star & gothram';
+  static const parents = 'Parents';
   static const family = 'Family';
   static const property = 'Property';
+  static const nativePlaceSection = 'Native place';
+  static const afterApprovalOnly = 'Visible only after approval';
+  static const birthPlaceNote = 'Birth place, state and country are visible only after approval.';
   static const nameRequired = 'Enter your full name';
   static const dobRequired = 'Select your date of birth';
   static const communityRequired = 'Select your community';
@@ -296,7 +338,7 @@ class S {
       'Your request to move will be withdrawn. You stay with your current agent.';
   static const requestCancelled = 'Request cancelled';
   static const agentDirectory = 'Find an agent';
-  static const searchAgents = 'Search by name or agency';
+  static const searchAgents = 'Name, agency or agent code';
   static const cityFilterHint = 'Filter by city';
   static const allCommunities = 'All communities';
   static const noAgents = 'No agents found';
@@ -387,7 +429,7 @@ class S {
   static const errOtpLimit = 'Too many codes requested. Please try again after an hour.';
   static const errPhoneNotVerified = 'Your number check has expired. Please start again.';
   static const errPhoneTaken = 'This number is already registered. Log in with it instead.';
-  static const errAgentNotFound = 'No agent found with that mobile number. Check with your agent.';
+  static const errAgentNotFound = 'No agent found with that mobile number or code. Check with your agent.';
   static const errAgentNotActive = "That agent's account is not active yet. Check with your agent.";
   static const errNetwork = 'Cannot reach the server. Check your internet connection.';
   static const errAccountPending = 'Your account is waiting for your agent\'s approval.';
@@ -428,7 +470,8 @@ class S {
       'Four steps to see full profiles, express interest and let your agent take it forward.';
   static const lockedProfile = 'Locked';
   static const step1Title = 'Choose your agent';
-  static const step1Body = "Enter your marriage bureau agent's mobile number, or pick one from the list.";
+  static const step1Body =
+      "Enter your marriage bureau agent's mobile number or agent code, or pick one from the list.";
   static const step2Title = 'Register your profile';
   static const step2Body = 'Fill in the registration form for the bride or groom.';
   static String step3Title(num? fee) => 'Pay ${feeLabel(fee)}';
@@ -508,7 +551,71 @@ class S {
   static const onBehalfOfBody = 'Which of your profiles is interested?';
   static String forProfile(String name) => 'for $name';
 
-  // ---- checkout (mock now, Razorpay later)
+  // ---- IDs and agent codes (SPEC §9.18 B / C)
+  static const yourId = 'Your ID';
+  static const idCopied = 'ID copied';
+  static const tapToCopy = 'Tap to copy';
+  static String idLine(String code) => 'ID $code';
+  static const agentCode = 'Agent code';
+  static String agentCodeLine(String code) => 'Agent code $code';
+  static const agentCodeCopied = 'Agent code copied';
+
+  // ---- privacy settings (SPEC §9.18 D / E)
+  static const privacyTitle = 'Privacy settings';
+  static const privacyIntro =
+      'Choose what other families see before you approve them. Hidden details are shared only after you accept an interest or your agent approves a request.';
+  static const privacyHeadline = 'You decide what others see';
+  static const privacyAlwaysShown = 'Always shown';
+  static const privacyAlwaysShownNote = 'Every family sees these — they cannot be hidden.';
+  static const privacyShown = 'Shown to everyone';
+  static const privacyHidden = 'Only after approval';
+  static const privacyHiddenWithCommunity = 'Hidden together with your community';
+  static const privacySearchNote = 'Hidden details cannot be used by others to find your profile.';
+  static const privacyOtherSection = 'Other details';
+  static String privacySectionTitle(String section) => switch (section) {
+        'personal' => 'Personal',
+        'professional' => 'Professional',
+        'horoscope' => 'Horoscope',
+        _ => privacyOtherSection,
+      };
+  static const audienceTitle = 'Show my profile to';
+  static const audienceOwn = 'My community only';
+  static String audienceOwnHint(String? community) => community == null || community.isEmpty
+      ? 'Families of your own community'
+      : 'Families of the $community community';
+  static const audienceSelected = 'Selected communities';
+  static const audienceSelectedHint = 'Your own community and the ones you pick';
+  static const audienceAll = 'All communities';
+  static const audienceAllHint = 'For families with no caste preference';
+  static const audiencePickHint = 'Tap the communities that may also see your profile.';
+  static const audienceNoOthers = 'There are no other communities to pick yet.';
+  static const privacySaved = 'Privacy settings saved';
+  static const privacyUnavailable = 'Privacy settings are not available right now. Please try again in a while.';
+  static const privacyAfterCreateTitle = 'Profile registered';
+  static const privacyAfterCreateBody =
+      'One more thing — choose what other families may see. You can change this any time from My profile.';
+  static const skipForNow = 'Skip for now';
+  static const saveAndContinue = 'Save and continue';
+  static const continueLabel = 'Continue';
+
+  /// "3 details hidden · shown to all communities" — the one-line state of
+  /// the privacy settings on the My profile page.
+  static String privacySummary({required int hidden, required bool allCommunities, int extraCommunities = 0}) {
+    final details = switch (hidden) {
+      0 => 'All details shown',
+      1 => '1 detail hidden',
+      _ => '$hidden details hidden',
+    };
+    final audience = allCommunities
+        ? 'shown to all communities'
+        : switch (extraCommunities) {
+            0 => 'shown to your community only',
+            _ => 'shown to your community + $extraCommunities more',
+          };
+    return '$details · $audience';
+  }
+
+  // ---- checkout (mock, or Razorpay since v3.1 — SPEC §9.19 B)
   static const checkoutTitle = 'Registration fee';
   static String checkoutFor(String name) => 'For the profile of $name';
   static const checkoutWhat =
@@ -523,6 +630,13 @@ class S {
       "Waiting for your agent's approval — the profile goes live once they approve.";
   static const paymentFailedTitle = 'Payment failed';
   static const paymentFailedBody = 'No money was taken. You can try again.';
+  static const razorpaySecure = 'Secure payment by Razorpay — UPI, cards, net banking';
+  static const paymentCancelled = 'Payment cancelled';
+  static const paymentCancelledBody = 'No payment was made. You can pay whenever you are ready.';
+  static const razorpayFailedTitle = 'Payment did not complete';
+  static const razorpayFailedBody =
+      'If money was deducted, it will show as paid within a few minutes — contact your agent if it does not.';
+  static const errPaymentProviderChanged = 'The payment method has just changed. Please try again.';
   static const tryAgain = 'Try again';
   static const amount = 'Amount';
 

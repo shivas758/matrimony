@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../models/profile.dart';
 import '../../../services/api_client.dart';
+import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 
@@ -25,6 +26,7 @@ class ProfileCard extends StatelessWidget {
       if (profile.heightShort != null) profile.heightShort!,
     ].join(' · ');
     final place = profile.placeLine;
+    final communityHidden = profile.isMasked('community');
     final genderColor = profile.isBride ? const Color(0xFFC2185B) : const Color(0xFF1565C0);
 
     return Card(
@@ -49,7 +51,7 @@ class ProfileCard extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.center,
                         end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xCC081C33)],
+                        colors: [Colors.transparent, Color(0xD9021E4A)],
                       ),
                     ),
                   ),
@@ -77,14 +79,31 @@ class ProfileCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // The permanent ID (SPEC §9.18 C) — only on my own
+                        // uploads (admins: every card); the server leaves the
+                        // key out for everyone else. It sits on the photo so
+                        // the text block below keeps its two lines.
+                        if (profile.hasProfileCode)
+                          Text(
+                            S.idLabel(profile.profileCode!),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
                         Text(
                           profile.fullName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          // A hidden name arrives as "Profile 1042" (SPEC §9.18 D).
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 15,
+                            fontStyle: profile.nameHidden ? FontStyle.italic : null,
                           ),
                         ),
                         if (subtitle.isNotEmpty)
@@ -108,10 +127,18 @@ class ProfileCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // A community the family hides arrives as null (SPEC §9.18 D).
                   _Line(
-                    icon: Icons.groups_rounded,
-                    text: profile.communityLine ?? '—',
-                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                    icon: communityHidden ? Icons.lock_outline_rounded : Icons.groups_rounded,
+                    text: profile.communityLine ?? (communityHidden ? S.hiddenByFamily : '—'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontStyle:
+                          profile.communityLine == null && communityHidden ? FontStyle.italic : null,
+                      color: profile.communityLine == null && communityHidden
+                          ? theme.colorScheme.outline
+                          : null,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   // NRI country / work country (SPEC §9.8) — never a protected

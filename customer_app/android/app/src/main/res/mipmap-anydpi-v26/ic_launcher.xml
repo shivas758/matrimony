@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive launcher icon: the cream glow tile + the MILI rings and wordmark (tool/gen_logo.mjs). -->
+<!-- Adaptive launcher icon (SPEC §9.18 A): the logo tile's wine, full bleed, + the gold
+     rings and the "Wedbook Matrimony" wordmark inside the safe zone (tool/gen_logo.mjs). -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@mipmap/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>

@@ -60,9 +60,9 @@ export async function runPushPass() {
         });
         const batch =
           items.length > MAX_PER_PASS
-            ? [{ title: 'Mediator', body: `${items.length} new notifications`, data: { type: 'summary' } }]
+            ? [{ title: 'Wedbook Agent', body: `${items.length} new notifications`, data: { type: 'summary' } }]
             : items.map((i) => ({ title: i.title, body: i.body, data: dataOf(i) }));
-        if (device.app === 'gandharva' && batch[0]?.data?.type === 'summary') batch[0].title = 'Gandharva';
+        if (device.app === 'gandharva' && batch[0]?.data?.type === 'summary') batch[0].title = 'Wedbook Matrimony';
         let dead = false;
         for (const msg of batch) {
           const r = await sendPush(device, msg);

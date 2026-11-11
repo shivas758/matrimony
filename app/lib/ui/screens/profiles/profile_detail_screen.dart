@@ -477,13 +477,15 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                   p.fullName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  // A hidden name arrives as "Profile 1042" (SPEC §9.18 D).
+                  style: TextStyle(
                     fontFamily: AppTheme.displayFont,
                     fontWeight: FontWeight.w600,
-                    fontVariations: [FontVariation('wght', 600)],
+                    fontVariations: const [FontVariation('wght', 600)],
+                    fontStyle: p.nameHidden ? FontStyle.italic : null,
                     color: Colors.white,
                     fontSize: 18,
-                    shadows: [Shadow(color: Color(0x99000000), blurRadius: 12)],
+                    shadows: const [Shadow(color: Color(0x99000000), blurRadius: 12)],
                   ),
                 ),
                 background: _PhotoCarousel(
@@ -521,8 +523,18 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                             label: p.status.label,
                             color: StatusColors.forProfileStatus(p.status.apiValue, theme.colorScheme),
                           ),
+                        // The permanent ID (SPEC §9.18 C) — owner side only;
+                        // tap to copy.
+                        if (p.hasProfileCode)
+                          IdChip(code: p.profileCode!, copyable: true, color: AppColors.goldDark),
                       ],
                     ),
+                    // The family keeps some details for after approval
+                    // (SPEC §9.18 D) — say so instead of showing empty rows.
+                    if (p.hasMaskedFields) ...[
+                      const SizedBox(height: 12),
+                      const LockNote(text: S.maskedNote),
+                    ],
                     const SizedBox(height: 16),
                     _HoldBanner(
                       profile: p,
@@ -705,7 +717,7 @@ class _PhotoCarousel extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment(0, 0.1),
                 end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Color(0xD9081C33)],
+                colors: [Colors.transparent, Color(0xE0021E4A)],
               ),
             ),
           ),
@@ -716,7 +728,7 @@ class _PhotoCarousel extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment(0, -0.4),
-                colors: [Color(0x80081C33), Colors.transparent],
+                colors: [Color(0x8C021E4A), Colors.transparent],
               ),
             ),
           ),

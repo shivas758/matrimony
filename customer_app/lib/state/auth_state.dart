@@ -65,6 +65,14 @@ class AuthState extends ChangeNotifier {
     return result;
   }
 
+  /// Step 2 with Firebase phone auth (SPEC §9.19 A): the ID token instead of
+  /// the code — same answers as [verifyOtp].
+  Future<OtpVerifyResult> verifyFirebaseToken({required String phone, required String idToken}) async {
+    final result = await _auth.verifyFirebaseToken(phone: phone, idToken: idToken);
+    if (result is LoggedIn) _set(AuthPhase.loggedIn, result.customer);
+    return result;
+  }
+
   /// Step 3 (new numbers only) — just the name: the account starts as a
   /// guest and lands on Home straight away (SPEC §9.12).
   Future<void> signup({

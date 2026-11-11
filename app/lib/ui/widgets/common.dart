@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/api_client.dart';
@@ -128,7 +129,7 @@ class AuthedPhoto extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF1B4F82), Color(0xFF0F2F52)],
+          colors: [AppColors.navyLight, AppColors.navy],
         ),
       ),
       alignment: Alignment.center,
@@ -174,9 +175,15 @@ class StatusChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[Icon(icon, size: 14, color: fg), const SizedBox(width: 5)],
-          Text(
-            label,
-            style: TextStyle(color: fg, fontSize: 12.5, fontWeight: FontWeight.w600),
+          // Loose, so a long label ("Agent: … (KA1A) · … Bureau") shortens
+          // inside a Wrap instead of overflowing the screen.
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: fg, fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
@@ -350,6 +357,134 @@ String initialsOf(String name) {
   if (parts.isEmpty) return '';
   if (parts.length == 1) return parts.first.characters.first.toUpperCase();
   return (parts.first.characters.first + parts.last.characters.first).toUpperCase();
+}
+
+/// Copies [text] to the clipboard and says so with a snackbar.
+void copyText(BuildContext context, String text, String message) {
+  Clipboard.setData(ClipboardData(text: text));
+  showSnack(context, message);
+}
+
+/// "ID GN-KA1A-A001" — a profile's / customer's permanent ID (SPEC §9.18 C),
+/// shown on the owner side only. With [copyable], a tap copies the bare ID.
+class IdChip extends StatelessWidget {
+  const IdChip({super.key, required this.code, this.copyable = false, this.color = AppColors.navy});
+
+  final String code;
+  final bool copyable;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final chip = StatusChip(
+      label: S.idLabel(code),
+      color: color,
+      icon: copyable ? Icons.copy_rounded : Icons.tag_rounded,
+    );
+    if (!copyable) return chip;
+    return Tooltip(
+      message: S.tapToCopy,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => copyText(context, code, S.idCopied),
+        child: chip,
+      ),
+    );
+  }
+}
+
+/// An agent's permanent code ("KA1A", SPEC §9.18 B) as a small gold pill —
+/// next to the agent's name on admin rows and on the other agent's card.
+class AgentCodeChip extends StatelessWidget {
+  const AgentCodeChip({super.key, required this.code, this.copyable = false});
+
+  final String code;
+  final bool copyable;
+
+  @override
+  Widget build(BuildContext context) {
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.goldPale,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.55)),
+      ),
+      child: Text(
+        code,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.fade,
+        style: const TextStyle(
+          color: AppColors.navyDeep,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+    if (!copyable) return chip;
+    return Tooltip(
+      message: S.tapToCopy,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(7),
+        onTap: () => copyText(context, code, S.agentCodeCopied),
+        child: chip,
+      ),
+    );
+  }
+}
+
+/// The lock note of SPEC §9.18 D: shown on a profile whose family keeps some
+/// details for after approval, and as the "visible only after approval" note
+/// on the profile form.
+class LockNote extends StatelessWidget {
+  const LockNote({super.key, required this.text, this.title, this.icon = Icons.lock_outline_rounded});
+
+  final String text;
+  final String? title;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 18, color: AppColors.goldDark),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (title != null) ...[
+                  Text(title!, style: theme.textTheme.labelLarge?.copyWith(color: AppColors.navy)),
+                  const SizedBox(height: 2),
+                ],
+                Text(
+                  text,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 void showSnack(BuildContext context, String message, {bool error = false}) {

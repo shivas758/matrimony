@@ -1,10 +1,12 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/customer.dart';
 import '../../services/api_client.dart';
+import '../../services/phone_auth_gateway.dart';
 import '../strings.dart';
 import '../theme.dart';
 
@@ -441,6 +443,8 @@ String friendlyMessage(ApiException e) => switch (e.code) {
       'phone_taken' => S.errPhoneTaken,
       'agent_not_found' => S.errAgentNotFound,
       'agent_not_active' => S.errAgentNotActive,
+      // "This number cannot take customers…" — the server words it.
+      'agent_has_no_communities' => e.message,
       'network_error' => S.errNetwork,
       'account_pending' => S.errAccountPending,
       'account_rejected' => S.errAccountRejected,
@@ -467,10 +471,43 @@ String friendlyMessage(ApiException e) => switch (e.code) {
       'approval_required' => S.errApprovalRequired,
       'not_paid' => S.errNotPaid,
       'payment_verification_failed' => S.errPaymentVerification,
+      'payment_provider_changed' => S.errPaymentProviderChanged,
       // The server names the field; its own message is the most useful text.
       'validation_failed' => e.fieldErrors?.values.firstOrNull ?? S.errValidation,
       _ => e.message,
     };
+
+/// Firebase phone-auth errors in plain words (SPEC §9.19 A) — never
+/// Firebase's own text. Configuration problems (app not registered, SHA
+/// fingerprints, phone sign-in off, no Blaze billing) all read "not set up".
+String phoneAuthMessage(PhoneAuthFailure f) {
+  if ((f.message ?? '').toUpperCase().contains('BILLING_NOT_ENABLED')) return S.phoneAuthNotSetUp;
+  return switch (f.code) {
+    'invalid-verification-code' => S.errInvalidOtp,
+    'session-expired' || 'code-expired' => S.errOtpExpired,
+    'too-many-requests' => S.phoneAuthTooManyRequests,
+    'quota-exceeded' => S.phoneAuthQuotaExceeded,
+    'invalid-phone-number' => S.phoneAuthInvalidNumber,
+    'network-request-failed' => S.errNetwork,
+    'app-not-authorized' ||
+    'missing-client-identifier' ||
+    'invalid-app-credential' ||
+    'operation-not-allowed' ||
+    'billing-not-enabled' ||
+    'invalid-api-key' =>
+      S.phoneAuthNotSetUp,
+    _ => S.phoneAuthFailed,
+  };
+}
+
+/// Linking an agent — by mobile number, agent code or from the directory
+/// (SPEC §9.18 G): "not found", "not active", "cannot take customers" and
+/// "already your agent" are shown in the server's own words (it knows what
+/// was looked up); everything else as [friendlyMessage].
+String linkAgentMessage(ApiException e) =>
+    _linkAgentCodes.contains(e.code) && e.message.trim().isNotEmpty ? e.message : friendlyMessage(e);
+
+const _linkAgentCodes = {'agent_not_found', 'agent_not_active', 'agent_has_no_communities', 'same_agent'};
 
 /// Label + phone number + Call, for the shared family/contact details.
 /// The app never dials by itself: Call opens the phone's dialler.
@@ -654,6 +691,16 @@ class AgentRow extends StatelessWidget {
                   agent.agencyLine!,
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
                 ),
+              // The code a customer can link this agent with (SPEC §9.18 B).
+              if (agent.agentCode != null)
+                Text(
+                  S.agentCodeLine(agent.agentCode!),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppColors.goldDark,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
               if (phone != null && phone.isNotEmpty)
                 Text('+91 $phone', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
             ],
@@ -663,4 +710,155 @@ class AgentRow extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Copies [text] and says so ("ID copied").
+Future<void> copyText(BuildContext context, String text, String doneMessage) async {
+  await Clipboard.setData(ClipboardData(text: text));
+  if (context.mounted) showSnack(context, doneMessage);
+}
+
+/// A code people quote to each other — "Your ID GN-KA1A-A001", "Agent code
+/// KA1A" (SPEC §9.18 B / C): the label, the code in large letters and a copy
+/// icon. Tap anywhere to copy. A long code shrinks instead of overflowing.
+class CodeTile extends StatelessWidget {
+  const CodeTile({
+    super.key,
+    required this.label,
+    required this.code,
+    required this.copiedMessage,
+    this.icon = Icons.badge_outlined,
+  });
+
+  final String label;
+  final String code;
+  final String copiedMessage;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final radius = BorderRadius.circular(16);
+    return Semantics(
+      button: true,
+      label: '$label $code. ${S.tapToCopy}',
+      excludeSemantics: true,
+      child: Material(
+        color: AppColors.goldLight.withValues(alpha: 0.6),
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(color: AppColors.gold.withValues(alpha: 0.7)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => copyText(context, code, copiedMessage),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                  alignment: Alignment.center,
+                  child: Icon(icon, size: 20, color: AppColors.wine),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          code,
+                          maxLines: 1,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: AppColors.wine,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Icon(Icons.copy_rounded, size: 20, color: AppColors.wine),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A grey panel with a lock and a line of text — "visible only after
+/// approval" on the form, "some details are hidden" on a profile.
+class LockNote extends StatelessWidget {
+  const LockNote({super.key, required this.text, this.icon = Icons.lock_rounded});
+
+  final String text;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Leave without saving?" — asked before a form with unsaved changes is
+/// left (SPEC §9.18 F). True when the user chose to leave.
+Future<bool> confirmDiscard(BuildContext context) async {
+  final leave = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text(S.discardTitle),
+      content: const Text(S.discardBody),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text(S.discard)),
+        FilledButton(onPressed: () => Navigator.pop(ctx, false), child: const Text(S.keepEditing)),
+      ],
+    ),
+  );
+  return leave == true;
 }

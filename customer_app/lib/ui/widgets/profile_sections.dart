@@ -77,13 +77,19 @@ class ProfileFactGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final facts = _facts(profile);
     if (facts.isEmpty) return const SizedBox.shrink();
-    return GridView.count(
-      crossAxisCount: 2,
+    return GridView(
       shrinkWrap: true,
+      padding: EdgeInsets.zero,
       physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 2.4,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        // Room for the label and a value of two lines whatever the screen
+        // width or the text size (a width-based ratio clipped the second
+        // line on a narrow phone).
+        mainAxisExtent: MediaQuery.textScalerOf(context).scale(52) + 26,
+      ),
       children: [for (final f in facts) FactTile(icon: f.$1, label: f.$2, value: f.$3)],
     );
   }

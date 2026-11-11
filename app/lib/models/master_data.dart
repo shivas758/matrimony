@@ -61,6 +61,76 @@ class Subcaste {
   int get hashCode => id;
 }
 
+/// An Indian state / union territory with its two-letter code (SPEC §9.18 B).
+/// The code starts every agent code issued in that state ("KA" → KA1A).
+class StateItem {
+  const StateItem({required this.id, required this.name, required this.code, this.active = true});
+
+  final int id;
+  final String name;
+
+  /// Two letters, fixed once the state exists: KA, AP, TS …
+  final String code;
+  final bool active;
+
+  /// "KA — Karnataka" — how dropdowns and confirmations show a state.
+  String get label => code.isEmpty ? name : '$code — $name';
+
+  static StateItem? fromJsonOrNull(Object? j) =>
+      j is Map<String, dynamic> && j['id'] != null ? StateItem.fromJson(j) : null;
+
+  factory StateItem.fromJson(Map<String, dynamic> j) => StateItem(
+        id: (j['id'] as num).toInt(),
+        name: '${j['name'] ?? ''}',
+        code: '${j['code'] ?? ''}',
+        active: j['active'] != false,
+      );
+
+  @override
+  bool operator ==(Object other) => other is StateItem && other.id == id;
+
+  @override
+  int get hashCode => id;
+}
+
+/// One switchable detail of a profile (SPEC §9.18 D): the family decides
+/// whether it is shown to everyone or only after approval. The list is served
+/// by the API so the apps never hardcode it.
+class PrivacyField {
+  const PrivacyField({required this.key, required this.label, required this.section, this.hint});
+
+  /// What travels in `hidden_fields` / `masked_fields`: name, dob, community …
+  final String key;
+  final String label;
+
+  /// personal | professional | horoscope.
+  final String section;
+
+  /// A short note under the label ("Age stays visible"); null when none.
+  final String? hint;
+
+  /// Section values in the order the privacy card shows them.
+  static const sections = ['personal', 'professional', 'horoscope'];
+
+  /// "Personal" — the heading for a section value.
+  static String sectionLabel(String section) => switch (section) {
+        'personal' => 'Personal',
+        'professional' => 'Professional',
+        'horoscope' => 'Horoscope',
+        _ => section.isEmpty ? 'Other' : '${section[0].toUpperCase()}${section.substring(1)}',
+      };
+
+  factory PrivacyField.fromJson(Map<String, dynamic> j) {
+    final hint = j['hint'];
+    return PrivacyField(
+      key: '${j['key'] ?? ''}',
+      label: '${j['label'] ?? j['key'] ?? ''}',
+      section: '${j['section'] ?? 'personal'}',
+      hint: hint is String && hint.trim().isNotEmpty ? hint : null,
+    );
+  }
+}
+
 class MasterData {
   const MasterData({
     required this.communities,
@@ -76,6 +146,9 @@ class MasterData {
     this.occupationTypes = const [],
     required this.zodiacSigns,
     required this.nakshatrams,
+    this.states = const [],
+    this.privacyFields = const [],
+    this.privacyAlwaysVisible = const [],
   });
 
   final List<MasterItem> communities;
@@ -106,6 +179,17 @@ class MasterData {
   final List<ZodiacSign> zodiacSigns;
   final List<MasterItem> nakshatrams;
 
+  /// States and union territories (SPEC §9.18 B) — an agent's state decides
+  /// their agent code. Empty on a server older than v2.8.
+  final List<StateItem> states;
+
+  /// The profile details a family can switch off (SPEC §9.18 D), in display
+  /// order. Empty on an older server — the privacy card is hidden then.
+  final List<PrivacyField> privacyFields;
+
+  /// What can never be hidden: "Main photo", "Age", "Gender".
+  final List<String> privacyAlwaysVisible;
+
   static List<MasterItem> _items(dynamic list) =>
       (list as List? ?? []).map((e) => MasterItem.fromJson(e as Map<String, dynamic>)).toList();
 
@@ -127,6 +211,18 @@ class MasterData {
             .map((e) => ZodiacSign.fromJson(e as Map<String, dynamic>))
             .toList(),
         nakshatrams: _items(j['nakshatrams']),
+        states: (j['states'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .where((e) => e['id'] != null)
+            .map(StateItem.fromJson)
+            .toList(),
+        privacyFields: (j['privacy_fields'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(PrivacyField.fromJson)
+            .where((f) => f.key.isNotEmpty)
+            .toList(),
+        privacyAlwaysVisible:
+            (j['privacy_always_visible'] as List? ?? []).map((e) => '$e').toList(),
       );
 
   static const empty = MasterData(
@@ -145,6 +241,32 @@ class MasterData {
   /// Subcastes for any of several communities (filter sheet multi-select).
   List<Subcaste> subcastesForAny(Set<int> communityIds) =>
       communityIds.isEmpty ? const [] : subcastes.where((s) => communityIds.contains(s.communityId)).toList();
+
+  /// The state with this id; null when unknown (or the list has not loaded).
+  StateItem? stateById(int? id) {
+    if (id == null) return null;
+    for (final s in states) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  /// States an agent can pick: the active ones, in the served order.
+  List<StateItem> get activeStates => states.where((s) => s.active).toList();
+
+  /// [privacyFields] of one section, in the served order.
+  List<PrivacyField> privacyFieldsIn(String section) =>
+      privacyFields.where((f) => f.section == section).toList();
+
+  /// Sections that actually have fields: the three known ones first, then
+  /// anything a newer server adds.
+  List<String> get privacySections {
+    final present = privacyFields.map((f) => f.section).toSet();
+    return [
+      ...PrivacyField.sections.where(present.contains),
+      ...present.where((s) => !PrivacyField.sections.contains(s)),
+    ];
+  }
 
   String? communityName(int? id) => _nameOf(communities, id);
   String? educationName(int? id) => _nameOf(educations, id);

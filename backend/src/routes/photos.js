@@ -5,6 +5,7 @@ import { many, one, query, tx } from '../lib/db.js';
 import { asyncHandler, forbidden, notFound } from '../lib/errors.js';
 import { deleteStoredPhoto, resolveStoredPath } from '../lib/photos.js';
 import { visibilityClause } from '../lib/profiles.js';
+import { hiddenSet } from '../lib/privacy.js';
 
 export const photosRouter = Router();
 
@@ -13,12 +14,23 @@ async function loadVisiblePhoto(photoId, agent) {
   if (!Number.isInteger(photoId) || photoId <= 0) throw notFound('photo_not_found', 'Photo not found');
   const vis = visibilityClause(agent, 2);
   const row = await one(
-    `SELECT ph.id, ph.file_path, ph.profile_id, ph.is_primary, p.uploaded_by
+    `SELECT ph.id, ph.file_path, ph.profile_id, ph.is_primary, p.uploaded_by, p.hidden_fields,
+            ph.id = (SELECT x.id FROM profile_photos x WHERE x.profile_id = p.id
+                      ORDER BY x.is_primary DESC, x.sort_order, x.id LIMIT 1) AS is_first,
+            EXISTS (SELECT 1 FROM contact_requests cr
+                     WHERE cr.profile_id = p.id AND cr.requester_id = $${vis.next}
+                       AND cr.status = 'approved' AND cr.expires_at > now()) AS has_access
        FROM profile_photos ph JOIN profiles p ON p.id = ph.profile_id
       WHERE ph.id = $1 AND ${vis.clause}`,
-    [photoId, ...vis.params],
+    [photoId, ...vis.params, agent.id],
   );
   if (!row) throw notFound('photo_not_found', 'Photo not found');
+  // A family that hides its other photos shows only the main one until a
+  // contact request is approved (SPEC §9.18 D). Uploader and admins see all.
+  const owner = agent.is_admin || row.uploaded_by === agent.id;
+  if (!owner && !row.is_first && !row.has_access && hiddenSet(row.hidden_fields).has('photos')) {
+    throw notFound('photo_not_found', 'Photo not found');
+  }
   return row;
 }
 

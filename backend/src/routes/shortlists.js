@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { many, one, query } from '../lib/db.js';
 import { asyncHandler, conflict, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { displayName, hiddenSet } from '../lib/privacy.js';
 import { loadRow } from './profiles.js';
 
 // Mounted at /api/profiles
@@ -45,11 +46,15 @@ shortlistsRouter.get(
   asyncHandler(async (req, res) => {
     const rows = await many(
       `SELECT s.id, s.client_label, s.created_at,
-              p.id AS profile_id, p.full_name, p.gender, p.status,
+              p.id AS profile_id, p.full_name, p.gender, p.status, p.hidden_fields, p.uploaded_by,
               date_part('year', age(p.dob))::int AS age,
               c.name AS community_name,
               wc.name AS work_country_name,
               CASE WHEN p.is_nri THEN co.name END AS nri_country_name,
+              -- A live contact approval lifts the family's privacy toggles (SPEC §9.18 D).
+              EXISTS (SELECT 1 FROM contact_requests cr
+                       WHERE cr.profile_id = p.id AND cr.requester_id = $1
+                         AND cr.status = 'approved' AND cr.expires_at > now()) AS has_access,
               (SELECT ph.id FROM profile_photos ph WHERE ph.profile_id = p.id
                 ORDER BY ph.is_primary DESC, ph.sort_order, ph.id LIMIT 1) AS photo_id
          FROM shortlists s
@@ -66,15 +71,21 @@ shortlistsRouter.get(
     for (const r of rows) {
       const key = r.client_label || '';
       if (!groups.has(key)) groups.set(key, []);
+      // What the family switched off stays off here too, unless the profile is
+      // my own upload or I currently hold contact access (SPEC §9.18 D).
+      const reveal = req.agent.is_admin || r.uploaded_by === req.agent.id || Boolean(r.has_access);
+      const hidden = reveal ? new Set() : hiddenSet(r.hidden_fields);
+      const place = !hidden.has('work_location');
       groups.get(key).push({
         shortlist_id: r.id,
         profile_id: r.profile_id,
-        full_name: r.full_name,
+        full_name: displayName({ id: r.profile_id, full_name: r.full_name, hidden_fields: r.hidden_fields }, reveal),
+        name_hidden: hidden.has('name'),
         gender: r.gender,
         age: r.age,
-        work_country: r.work_country_name ?? null,
-        nri_country: r.nri_country_name ?? null,
-        community: r.community_name,
+        work_country: place ? r.work_country_name ?? null : null,
+        nri_country: place ? r.nri_country_name ?? null : null,
+        community: hidden.has('community') ? null : r.community_name,
         status: r.status,
         photo_url: r.photo_id ? `/api/photos/${r.photo_id}` : null,
         created_at: r.created_at,

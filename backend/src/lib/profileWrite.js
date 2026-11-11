@@ -15,6 +15,8 @@ import { badRequest, conflict, notFound } from './errors.js';
 import { parse } from './validate.js';
 import { EDUCATION_LEVELS, setEducationLevels, setKnownLanguages } from './profiles.js';
 import { deleteStoredPhoto, storeProfilePhoto } from './photos.js';
+import { issueProfileCode } from './codes.js';
+import { PRIVACY_KEYS } from './privacy.js';
 
 export const MAX_PHOTOS = 8;
 
@@ -76,10 +78,42 @@ const idListBody = z
   .transform((v) => {
     if (v === undefined) return undefined;
     if (v === null || v === '') return [];
-    const parts = (Array.isArray(v) ? v : [v]).flatMap((s) => String(s).split(','));
+    // A multipart field may also carry the list as a JSON array string: "[3,5]".
+    const parts = (Array.isArray(v) ? v : [v]).flatMap((s) => String(s).replace(/[[\]\s"]/g, '').split(','));
     const ids = parts.map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
     return [...new Set(ids)];
   });
+
+/**
+ * hidden_fields (SPEC §9.18 D): the details the family switched off, as a
+ * JSON array of PRIVACY_KEYS — or, in multipart, a JSON string or a
+ * comma-separated string. undefined = untouched, []/''/null = show everything.
+ * An unknown key is a validation error, so a typo can never silently leave a
+ * detail public.
+ */
+const hiddenFieldsBody = z.preprocess(
+  (v) => {
+    if (v === undefined) return undefined;
+    if (v === null || v === '') return [];
+    if (typeof v === 'string') {
+      const text = v.trim();
+      if (text.startsWith('[')) {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return v; // fails the array check below → 400 validation_failed
+        }
+      }
+      return text.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    return v;
+  },
+  z
+    .array(z.enum(PRIVACY_KEYS, { message: `Each hidden detail must be one of ${PRIVACY_KEYS.join(', ')}` }))
+    .max(PRIVACY_KEYS.length * 2)
+    .transform((keys) => [...new Set(keys)])
+    .optional(),
+);
 
 /** One row of the registration form's education table (SPEC §9.7). */
 const educationLevelSchema = z.object({
@@ -176,6 +210,11 @@ export const profileBodySchema = z.object({
     }),
   about: nullableText(4000),
   status: z.enum(['active', 'engaged', 'married', 'hidden', 'on_hold']).optional(),
+  // ---- Privacy toggles and the community audience (SPEC §9.18 D / E).
+  hidden_fields: hiddenFieldsBody,
+  audience_all: looseBoolean.optional(),
+  // Extra communities the profile is shown to; its own community is implicit.
+  audience_community_ids: idListBody,
   // ---- PROTECTED ("on request", SPEC §3.2 / §9.8): birth place, work place,
   // NRI place, siblings, family, property, native place, parents, contact person.
   birth_place: nullableText(120),
@@ -227,7 +266,12 @@ const PROFILE_COLUMNS = [
   'city', 'state', 'father_name', 'father_occupation', 'father_phone',
   'mother_name', 'mother_occupation', 'mother_phone', 'contact_name', 'contact_phone',
 ];
-const UPDATABLE_COLUMNS = new Set([...PROFILE_COLUMNS, 'subcaste_id', 'status']);
+/** NOT NULL columns with their own defaults — written apart from PROFILE_COLUMNS (SPEC §9.18 D / E). */
+const PRIVACY_COLUMNS = ['hidden_fields', 'audience_all', 'audience_community_ids'];
+const UPDATABLE_COLUMNS = new Set([...PROFILE_COLUMNS, ...PRIVACY_COLUMNS, 'subcaste_id', 'status']);
+
+/** The audience list without the profile's own community — that one is always implied. */
+const extraAudience = (ids, communityId) => (ids ?? []).filter((id) => id !== communityId);
 
 // ---------------------------------------------------------------- body rules
 
@@ -308,6 +352,12 @@ export async function assertMastersExist(data) {
   if (countryIds.length) {
     const found = await one('SELECT count(*)::int AS n FROM countries WHERE id = ANY($1::int[])', [countryIds]);
     if (found.n !== countryIds.length) throw badRequest('invalid_reference', 'Unknown education country');
+  }
+  if (data.audience_community_ids?.length) {
+    const found = await one('SELECT count(*)::int AS n FROM communities WHERE id = ANY($1::int[])', [
+      data.audience_community_ids,
+    ]);
+    if (found.n !== data.audience_community_ids.length) throw badRequest('invalid_reference', 'Unknown community');
   }
 }
 
@@ -446,6 +496,10 @@ export async function createProfileRecord({ uploadedBy, customerId = null, body,
     record.customer_id = customerId;
     record.subcaste_id = await resolveSubcaste(data, data.community_id, c);
     record.status = status ?? data.status ?? 'active';
+    // Privacy and audience (SPEC §9.18 D / E): everything shown, own community only, unless said.
+    record.hidden_fields = data.hidden_fields ?? [];
+    record.audience_all = Boolean(data.audience_all);
+    record.audience_community_ids = extraAudience(data.audience_community_ids, data.community_id);
 
     const cols = Object.keys(record);
     const { rows } = await c.query(
@@ -458,6 +512,8 @@ export async function createProfileRecord({ uploadedBy, customerId = null, body,
     if (data.known_language_ids?.length) await setKnownLanguages(c, id, data.known_language_ids);
     if (data.education_levels?.length) await setEducationLevels(c, id, data.education_levels);
     await addPhotos(id, files, c);
+    // The permanent profile ID (SPEC §9.18 C) — null while the agent has no code yet.
+    await issueProfileCode(c, id);
     return { id };
   };
   return client ? run(client) : tx(run);
@@ -469,7 +525,9 @@ export async function createProfileRecord({ uploadedBy, customerId = null, body,
 export async function loadEditableRow(id) {
   if (!Number.isInteger(id) || id <= 0) throw notFound('profile_not_found', 'Profile not found');
   const row = await one(
-    'SELECT id, uploaded_by, customer_id, community_id, is_nri, has_siblings, status, paid_at FROM profiles WHERE id = $1',
+    `SELECT id, uploaded_by, customer_id, community_id, is_nri, has_siblings, status, paid_at,
+            audience_community_ids
+       FROM profiles WHERE id = $1`,
     [id],
   );
   if (!row) throw notFound('profile_not_found', 'Profile not found');
@@ -502,6 +560,14 @@ export async function updateProfileRecord({ id, existing, body, actorAgentId }) 
   }
   applyNriRule(data, existing.is_nri);
   applySiblingsRule(data, existing.has_siblings);
+
+  // The audience never lists the profile's own community (SPEC §9.18 E) — also
+  // not after the community itself changes.
+  if (data.audience_community_ids !== undefined) {
+    data.audience_community_ids = extraAudience(data.audience_community_ids, effectiveCommunity);
+  } else if (data.community_id && (existing.audience_community_ids ?? []).includes(data.community_id)) {
+    data.audience_community_ids = extraAudience(existing.audience_community_ids, data.community_id);
+  }
 
   // Known languages and education levels live in their own tables, not columns.
   const languageIds = data.known_language_ids;

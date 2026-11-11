@@ -27,6 +27,7 @@ class AgentCard {
   const AgentCard({
     required this.id,
     required this.fullName,
+    this.agentCode,
     this.agencyName,
     this.city,
     this.phone,
@@ -36,6 +37,10 @@ class AgentCard {
 
   final int id;
   final String fullName;
+
+  /// The agent's permanent code, e.g. `KA1A` (SPEC §9.18 B) — a customer can
+  /// link their agent with it. Null until the agent has chosen a State.
+  final String? agentCode;
   final String? agencyName;
   final String? city;
   final String? phone;
@@ -56,6 +61,7 @@ class AgentCard {
   factory AgentCard.fromJson(Map<String, dynamic> j) => AgentCard(
         id: (j['id'] as num).toInt(),
         fullName: '${j['full_name'] ?? ''}',
+        agentCode: _code(j['agent_code']),
         agencyName: j['agency_name'] as String?,
         city: j['city'] as String?,
         phone: j['phone'] as String?,
@@ -64,6 +70,9 @@ class AgentCard {
             .toList(),
         isCurrent: j['is_current'] == true,
       );
+
+  /// A code as shown to people; null when absent or blank.
+  static String? _code(dynamic v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
 }
 
 /// The customer's open request to move to another agent (SPEC §9.6).
@@ -128,6 +137,7 @@ class Customer {
     this.profileFeeInr,
     this.paymentProvider = 'mock',
     this.unlock = const UnlockChecklist(),
+    this.customerCode,
   });
 
   final int id;
@@ -135,7 +145,11 @@ class Customer {
   final String phone;
   final CustomerStatus status;
 
-  /// 'app' (signed up in Gandharva) or 'form' (the agent's web form).
+  /// My ID, e.g. `GN-KA1A-A001` — the ID of my profile (SPEC §9.18 C); null
+  /// until I have a profile and its agent has a code.
+  final String? customerCode;
+
+  /// 'app' (signed up in this app) or 'form' (the agent's web form).
   final String source;
   final DateTime? phoneVerifiedAt;
   final DateTime? approvedAt;
@@ -160,7 +174,7 @@ class Customer {
   /// app); null only if the server did not say.
   final num? profileFeeInr;
 
-  /// 'mock' | 'razorpay' — this app version can only check out with 'mock'.
+  /// 'mock' | 'razorpay' — both check out in the app since v3.1 (SPEC §9.19 B).
   final String paymentProvider;
   final UnlockChecklist unlock;
 
@@ -216,6 +230,7 @@ class Customer {
         profileFeeInr: j['profile_fee_inr'] as num?,
         paymentProvider: '${j['payment_provider'] ?? 'mock'}',
         unlock: UnlockChecklist.fromJson(j['unlock'] as Map<String, dynamic>?),
+        customerCode: AgentCard._code(j['customer_code']),
       );
 
   static DateTime? _date(dynamic v) => v == null ? null : DateTime.tryParse('$v')?.toLocal();

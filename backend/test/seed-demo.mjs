@@ -92,6 +92,8 @@ async function signupOrLoginAgent(spec) {
     password: DEMO_PASS,
     agency_name: spec.agency,
     community_ids: spec.comm,
+    // The agent's State decides their agent code (SPEC §9.18 B).
+    state_id: spec.state,
     phone_verification_token: verify.body?.verification_token,
   });
 }
@@ -156,11 +158,13 @@ async function main() {
   }
   console.log(`Communities ready: ${wanted.join(', ')}`);
 
-  // Three demo agents: two in Kamma, one in Reddy.
+  // Three demo agents: two in Kamma, one in Reddy — in Telangana, Andhra
+  // Pradesh and Karnataka, so their agent codes start TS / AP / KA (SPEC §9.18 B).
+  const stateId = (code) => masters.states?.find((s) => s.code === code)?.id;
   const agentSpecs = [
-    { full_name: 'Suresh Bureau', phone: '9000000001', agency: 'Sri Sai Marriage Bureau', comm: [communityIds[0]] },
-    { full_name: 'Padma Bureau', phone: '9000000002', agency: 'Padma Matrimony', comm: [communityIds[0]] },
-    { full_name: 'Kiran Bureau', phone: '9000000003', agency: 'Kiran Alliances', comm: [communityIds[1]] },
+    { full_name: 'Suresh Bureau', phone: '9000000001', agency: 'Sri Sai Marriage Bureau', comm: [communityIds[0]], state: stateId('TS') },
+    { full_name: 'Padma Bureau', phone: '9000000002', agency: 'Padma Matrimony', comm: [communityIds[0]], state: stateId('AP') },
+    { full_name: 'Kiran Bureau', phone: '9000000003', agency: 'Kiran Alliances', comm: [communityIds[1]], state: stateId('KA') },
   ];
 
   const tokens = [];
@@ -171,6 +175,8 @@ async function main() {
       continue;
     }
     await api('POST', `/api/admin/agents/${res.body.agent.id}/activate`, admin);
+    // A demo agent seeded before v2.8 has no code yet: choose the state now.
+    if (!res.body.agent.agent_code && spec.state) await api('POST', '/api/my/state', res.body.token, { state_id: spec.state });
     await api('PATCH', '/api/my/account', res.body.token, { city: pick(['Hyderabad', 'Vijayawada', 'Guntur'], tokens.length) });
     tokens.push({ token: res.body.token, ...spec });
   }

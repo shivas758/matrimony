@@ -1,6 +1,7 @@
 import { many, one } from '../lib/db.js';
 import { verifyToken } from '../lib/auth.js';
 import { forbidden, unauthorized } from '../lib/errors.js';
+import { AGENT_SELECT } from '../lib/serialize.js';
 
 /** Bearer token from the Authorization header, or null. */
 export function bearerToken(req) {
@@ -27,12 +28,7 @@ export async function requireAuth(req, _res, next) {
     }
     if (payload.typ) throw unauthorized('invalid_token', 'Sign in with an agent account');
 
-    const agent = await one(
-      `SELECT id, full_name, phone, agency_name, role, status, must_change_password, city,
-              registration_token, created_at
-         FROM agents WHERE id = $1`,
-      [Number(payload.sub)],
-    );
+    const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [Number(payload.sub)]);
     if (!agent) throw unauthorized('unknown_agent', 'Account no longer exists');
 
     const rows = await many('SELECT community_id FROM agent_communities WHERE agent_id = $1', [agent.id]);

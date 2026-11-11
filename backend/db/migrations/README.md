@@ -38,3 +38,11 @@ Applied so far:
 - `009_one_profile_per_customer.sql` — one profile per customer again (SPEC §9.17): the
   partial unique index `uq_profiles_one_per_customer` (skipped with a NOTICE if a customer
   already owns several)
+- `010_wedbook_codes_privacy.sql` — Wedbook (SPEC §9.18): the `states` master,
+  `agents.state_id` / `agent_code` / `profile_seq`, `agent_code_counters`,
+  `profiles.profile_code`, the privacy toggles (`profiles.hidden_fields`) and the community
+  audience (`profiles.audience_all` / `audience_community_ids`). Issues no codes itself —
+  agents choose their State in the app
+- `011_razorpay_settlement.sql` — Razorpay settlement (SPEC §9.19 B): `payments.status`
+  gains `refund_due`; unique index `uq_payments_razorpay_order` on the Razorpay order id.
+  No data changes

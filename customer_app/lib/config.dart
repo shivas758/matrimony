@@ -15,7 +15,9 @@ class AppConfig {
   /// Everything under /api. Customer routes live under /api/customer.
   static String get apiRoot => '$apiBaseUrl/api';
 
-  static const String appName = 'MILI';
+  /// The name people read (SPEC §9.18 A). The package id and the Dart package
+  /// keep the internal code name "gandharva" so installs update in place.
+  static const String appName = 'Wedbook Matrimony';
 
   /// How long an accepted interest keeps the on-request fields visible — mirrors the server default.
   static const int accessDays = 15;

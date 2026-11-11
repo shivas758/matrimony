@@ -285,9 +285,11 @@ void main() {
       expect(r.customer, isNull);
     });
 
-    test('only the mock provider can be completed in this app version', () {
+    test('mock and razorpay can be completed in the app (SPEC §9.19 B)', () {
       expect(PaymentService.supportsInApp('mock'), isTrue);
-      expect(PaymentService.supportsInApp('razorpay'), isFalse);
+      expect(PaymentService.supportsInApp('razorpay'), isTrue);
+      expect(PaymentService.supportsInApp('waived'), isFalse);
+      expect(PaymentService.supportsInApp('cashfree'), isFalse);
     });
 
     test('fee labels come from the API amount', () {

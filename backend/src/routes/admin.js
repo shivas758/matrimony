@@ -36,20 +36,27 @@ adminRouter.get(
       where.push(`a.status = $${params.length}`);
     }
     if (f.q) {
+      // Name, phone or agent code (SPEC §9.18 B: the code is searchable).
       params.push(`%${f.q}%`);
-      where.push(`(a.full_name ILIKE $${params.length} OR a.phone ILIKE $${params.length})`);
+      where.push(
+        `(a.full_name ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.agent_code ILIKE $${params.length})`,
+      );
     }
 
     const rows = await many(
       `SELECT a.id, a.full_name, a.phone, a.agency_name, a.role, a.status, a.must_change_password, a.created_at,
+              a.city, a.agent_code,
+              CASE WHEN st.id IS NULL THEN NULL
+                   ELSE json_build_object('id', st.id, 'name', st.name, 'code', st.code) END AS state,
               COALESCE(json_agg(json_build_object('id', c.id, 'name', c.name)
                        ORDER BY c.sort_order) FILTER (WHERE c.id IS NOT NULL), '[]') AS communities,
               (SELECT count(*)::int FROM profiles p WHERE p.uploaded_by = a.id) AS profile_count
          FROM agents a
+         LEFT JOIN states st ON st.id = a.state_id
          LEFT JOIN agent_communities ac ON ac.agent_id = a.id
          LEFT JOIN communities c ON c.id = ac.community_id
          ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-        GROUP BY a.id
+        GROUP BY a.id, st.id
         ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END, a.created_at DESC`,
       params,
     );
@@ -161,6 +168,7 @@ const SIMPLE_MASTERS = {
   food_habits: 'food_habits',
   occupation_types: 'occupation_types',
   nakshatrams: 'nakshatrams',
+  states: 'states', // POST additionally needs the 2-letter code — handled below
 };
 
 const simpleMasterSchema = z.object({
@@ -216,6 +224,28 @@ adminRouter.post(
          RETURNING *`,
         [body.community_id, body.name, body.active ?? null, body.sort_order ?? null],
       ).catch(rethrowUnique(`'${body.name}' already exists in that community`));
+      return res.status(201).json({ row });
+    }
+
+    if (table === 'states') {
+      // A state's code starts agent codes (SPEC §9.18 B): two capital letters,
+      // unique, and fixed once the state exists (PATCH ignores `code`).
+      const body = parse(
+        simpleMasterSchema.extend({
+          code: z
+            .string()
+            .trim()
+            .toUpperCase()
+            .regex(/^[A-Z]{2}$/, 'The state code is two letters, like KA'),
+        }),
+        req.body ?? {},
+      );
+      const row = await one(
+        `INSERT INTO states (name, code, active, sort_order)
+         VALUES ($1, $2, COALESCE($3, TRUE), COALESCE($4, (SELECT COALESCE(max(sort_order), 0) + 1 FROM states)))
+         RETURNING *`,
+        [body.name, body.code, body.active ?? null, body.sort_order ?? null],
+      ).catch(rethrowUnique(`A state named '${body.name}' or with the code ${body.code} already exists`));
       return res.status(201).json({ row });
     }
 
@@ -436,8 +466,12 @@ adminRouter.get(
       where.push(`cu.status = $${params.length}`);
     }
     if (f.q) {
+      // Name, phone or the customer's ID (SPEC §9.18 C).
       params.push(`%${f.q}%`);
-      where.push(`(cu.full_name ILIKE $${params.length} OR cu.phone ILIKE $${params.length})`);
+      where.push(
+        `(cu.full_name ILIKE $${params.length} OR cu.phone ILIKE $${params.length}
+          OR EXISTS (SELECT 1 FROM profiles cp WHERE cp.customer_id = cu.id AND cp.profile_code ILIKE $${params.length}))`,
+      );
     }
     const rows = await many(
       `${CLIENT_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -588,6 +622,7 @@ adminRouter.get(
              (SELECT count(*)::int FROM customers WHERE status = 'active') AS active_customers,
              (SELECT count(*)::int FROM customers WHERE status = 'guest') AS guest_customers,
              (SELECT count(*)::int FROM payments WHERE status = 'paid' AND provider <> 'waived') AS paid_registrations,
+             (SELECT count(*)::int FROM payments WHERE status = 'refund_due') AS refunds_due,
              (SELECT count(*)::int FROM customer_interests WHERE status = 'pending') AS pending_interests,
              (SELECT count(*)::int FROM agent_change_requests WHERE status = 'pending') AS pending_agent_changes`);
     res.json({ stats });

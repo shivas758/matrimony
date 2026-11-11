@@ -21,6 +21,8 @@ class AdminAgentsScreen extends StatefulWidget {
 
 class _AdminAgentsScreenState extends State<AdminAgentsScreen> {
   late String? _status = widget.initialStatus;
+  final _search = TextEditingController();
+  int _requests = 0;
   List<AdminAgent> _agents = [];
   bool _loading = true;
   String? _error;
@@ -32,14 +34,26 @@ class _AdminAgentsScreenState extends State<AdminAgentsScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
+    final request = ++_requests;
     try {
-      final agents = await context.read<AdminService>().agents(status: _status);
-      if (mounted) setState(() => _agents = agents);
+      // The server's `q` matches name, phone, agency and the agent code
+      // (SPEC §9.18 B).
+      final agents = await context
+          .read<AdminService>()
+          .agents(status: _status, q: _search.text.trim());
+      // A slower, older answer must not replace a newer search.
+      if (mounted && request == _requests) setState(() => _agents = agents);
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } finally {
@@ -136,6 +150,7 @@ class _AdminAgentsScreenState extends State<AdminAgentsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final me = context.watch<AuthState>().agent;
+    final searching = _search.text.trim().isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(title: Text(_status == 'pending' ? S.pendingAgents : S.allAgents)),
@@ -143,6 +158,34 @@ class _AdminAgentsScreenState extends State<AdminAgentsScreen> {
         // Keeps the horizontal chip bar full-width instead of centred.
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: TextField(
+              controller: _search,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _load(),
+              onChanged: (v) {
+                // Clearing the box brings the full list back at once.
+                if (v.isEmpty) _load();
+                setState(() {});
+              },
+              decoration: InputDecoration(
+                hintText: S.searchAgentsAdmin,
+                prefixIcon: const Icon(Icons.search_rounded),
+                isDense: true,
+                suffixIcon: searching
+                    ? IconButton(
+                        tooltip: S.clearAll,
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () {
+                          _search.clear();
+                          _load();
+                        },
+                      )
+                    : null,
+              ),
+            ),
+          ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
@@ -177,9 +220,9 @@ class _AdminAgentsScreenState extends State<AdminAgentsScreen> {
                 : _error != null && _agents.isEmpty
                     ? ErrorState(message: _error!, onRetry: _load)
                     : _agents.isEmpty
-                        ? const EmptyState(
-                            icon: Icons.badge_outlined,
-                            title: 'No agents in this list',
+                        ? EmptyState(
+                            icon: searching ? Icons.search_off_rounded : Icons.badge_outlined,
+                            title: searching ? S.noAgentsFound : 'No agents in this list',
                           )
                         : RefreshIndicator(
                             onRefresh: _load,
@@ -241,6 +284,30 @@ class _AdminAgentsScreenState extends State<AdminAgentsScreen> {
                                           ),
                                         ],
                                       ),
+                                      // The permanent agent code and its state
+                                      // (SPEC §9.18 B); agents from before
+                                      // v2.8 have none until they choose.
+                                      if (agent.hasAgentCode || agent.state != null) ...[
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            if (agent.hasAgentCode) ...[
+                                              AgentCodeChip(code: agent.agentCode!, copyable: true),
+                                              const SizedBox(width: 8),
+                                            ],
+                                            if (agent.state != null)
+                                              Expanded(
+                                                child: Text(
+                                                  agent.state!.name,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: theme.textTheme.bodySmall?.copyWith(
+                                                      color: theme.colorScheme.outline),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ],
                                       const SizedBox(height: 10),
                                       Wrap(
                                         spacing: 6,

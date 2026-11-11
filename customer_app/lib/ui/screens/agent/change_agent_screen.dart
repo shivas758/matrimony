@@ -13,7 +13,9 @@ import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 
-/// The agent directory (search, community chips, city filter), in two modes:
+/// The agent directory (search by name, agency or agent code — SPEC §9.18 B;
+/// community chips, city filter; every row shows the agent's code), in two
+/// modes:
 ///
 /// * Change agent (SPEC §9.11 Gandharva 6, active customers): an explanation
 ///   card; while a request is pending, the new agent with Cancel; otherwise
@@ -120,7 +122,7 @@ class _ChangeAgentScreenState extends State<ChangeAgentScreen> {
       showSnack(context, S.agentLinkedSnack);
       Navigator.of(context).pop(true);
     } on ApiException catch (e) {
-      if (mounted) showSnack(context, friendlyMessage(e), error: true);
+      if (mounted) showSnack(context, linkAgentMessage(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -264,6 +266,7 @@ class _ChangeAgentScreenState extends State<ChangeAgentScreen> {
                 textInputAction: TextInputAction.search,
                 decoration: const InputDecoration(
                   hintText: S.searchAgents,
+                  hintMaxLines: 2,
                   prefixIcon: Icon(Icons.search_rounded),
                 ),
                 onChanged: (_) => _onFilterChanged(),

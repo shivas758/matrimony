@@ -15,7 +15,12 @@ class AppConfig {
   /// Everything under /api; public share pages live at the bare origin.
   static String get apiRoot => '$apiBaseUrl/api';
 
-  static const String appName = 'Mediator';
+  /// What people read: launcher label, task switcher, About line. ("Mediator"
+  /// until v2.7 — it stays the internal code name; SPEC §9.18 A.)
+  static const String appName = 'Wedbook Agent';
+
+  /// Shown on the More screen. Keep in step with `version:` in pubspec.yaml.
+  static const String appVersion = '3.1.0';
 
   /// How long an approved contact stays visible — mirrors the server default.
   static const int contactAccessDays = 15;

@@ -2,6 +2,6 @@
 <resources>
     <!-- Native splash background — the app's cream surface (lib/ui/theme.dart). -->
     <color name="launch_background">#FFF8EE</color>
-    <!-- Tint of push notifications — MILI wine (AppColors.wine). -->
-    <color name="notification_color">#6A1B2D</color>
+    <!-- Tint of push notifications — the Wedbook Matrimony wine (AppColors.wine). -->
+    <color name="notification_color">#540729</color>
 </resources>

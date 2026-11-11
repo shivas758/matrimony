@@ -10,7 +10,9 @@ import '../../widgets/common.dart';
 /// One row of the Browse list: photo on the left, then name, age (DOB) and
 /// height, community · subcaste, education, profession, and an "Interested"
 /// chip once I have marked it (SPEC §9.11 Gandharva 3). Only public fields —
-/// list rows never carry the on-request block.
+/// list rows never carry the on-request block. A detail the family switched
+/// off (SPEC §9.18 D) arrives null: its line is simply left out (a hidden
+/// name comes as "Profile 1042"), and a lock line says some are hidden.
 class ProfileCard extends StatelessWidget {
   const ProfileCard({
     super.key,
@@ -32,6 +34,13 @@ class ProfileCard extends StatelessWidget {
       if (p.ageDobLine != null) p.ageDobLine!,
       if (p.heightShort != null) p.heightShort!,
     ].join(' · ');
+    // Up to three lines; one that is missing or hidden leaves no empty row.
+    final facts = <(IconData, String)>[
+      if (p.communityLine != null) (Icons.groups_rounded, p.communityLine!),
+      if (p.education != null) (Icons.school_outlined, p.education!.name),
+      if (p.profession != null) (Icons.work_outline_rounded, p.profession!.name),
+    ];
+    final showLock = p.hasMaskedFields && facts.length < 3;
 
     return Card(
       child: InkWell(
@@ -49,7 +58,7 @@ class ProfileCard extends StatelessWidget {
                     AuthedPhoto(
                       url: p.primaryPhotoUrl,
                       api: api,
-                      placeholderInitials: initialsOf(p.fullName),
+                      placeholderInitials: initialsOf(p.initialsSource ?? ''),
                     ),
                     if (p.isNri)
                       const Positioned(
@@ -76,7 +85,7 @@ class ProfileCard extends StatelessWidget {
                         children: [
                           Expanded(
                             child: Text(
-                              p.fullName,
+                              p.displayName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleMedium?.copyWith(
@@ -107,12 +116,15 @@ class ProfileCard extends StatelessWidget {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 8),
-                      _Line(icon: Icons.groups_rounded, text: p.communityLine ?? '—', bold: true),
                       const SizedBox(height: 4),
-                      _Line(icon: Icons.school_outlined, text: p.education?.name ?? '—'),
-                      const SizedBox(height: 4),
-                      _Line(icon: Icons.work_outline_rounded, text: p.profession?.name ?? '—'),
+                      for (final (i, fact) in facts.indexed) ...[
+                        const SizedBox(height: 4),
+                        _Line(icon: fact.$1, text: fact.$2, bold: i == 0 && p.communityLine != null),
+                      ],
+                      if (showLock) ...[
+                        const SizedBox(height: 4),
+                        const _Line(icon: Icons.lock_outline_rounded, text: S.someDetailsHiddenShort, muted: true),
+                      ],
                       const Spacer(),
                       // Public location: NRI country / work country (SPEC §9.8).
                       if (p.placeLine != null)
@@ -162,7 +174,8 @@ class _Line extends StatelessWidget {
 }
 
 /// A guest-mode teaser card (SPEC §9.12): ONLY photo, age, job, caste and
-/// package, with a lock — no name. Tapping it opens Get started.
+/// package, with a lock — no name. Tapping it opens Get started. A hidden
+/// community, job or package (SPEC §9.18 D) is not sent: its line is left out.
 class GuestProfileCard extends StatelessWidget {
   const GuestProfileCard({super.key, required this.profile, required this.onTap});
 
@@ -228,12 +241,19 @@ class GuestProfileCard extends StatelessWidget {
                           const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.goldDark),
                         ],
                       ),
-                      const SizedBox(height: 10),
-                      _Line(icon: Icons.groups_rounded, text: p.communityLine ?? '—', bold: true),
-                      const SizedBox(height: 4),
-                      _Line(icon: Icons.work_outline_rounded, text: p.jobLabel ?? '—'),
-                      const SizedBox(height: 4),
-                      _Line(icon: Icons.payments_outlined, text: p.incomeText ?? '—'),
+                      const SizedBox(height: 6),
+                      if (p.communityLine != null) ...[
+                        const SizedBox(height: 4),
+                        _Line(icon: Icons.groups_rounded, text: p.communityLine!, bold: true),
+                      ],
+                      if (p.jobLabel != null) ...[
+                        const SizedBox(height: 4),
+                        _Line(icon: Icons.work_outline_rounded, text: p.jobLabel!),
+                      ],
+                      if ((p.incomeText ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        _Line(icon: Icons.payments_outlined, text: p.incomeText!),
+                      ],
                     ],
                   ),
                 ),

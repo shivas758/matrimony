@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../state/auth_state.dart';
 import '../../strings.dart';
+import '../../widgets/agent_code_card.dart';
 
 /// Shown to agents whose account is still `pending` (or `suspended`).
 /// They hold a valid token but every data route returns 403 (CLAUDE.md rule 2).
@@ -81,6 +82,12 @@ class _PendingScreenState extends State<PendingScreen> {
                     : const Icon(Icons.refresh_rounded),
                 label: const Text(S.checkAgain),
               ),
+            ],
+            // Issued at signup (SPEC §9.18 B), so a pending agent can already
+            // pass it on to clients.
+            if (agent != null && agent.hasAgentCode) ...[
+              const SizedBox(height: 28),
+              AgentCodeCard(code: agent.agentCode!, stateName: agent.state?.name),
             ],
             if (agent != null && agent.communities.isNotEmpty) ...[
               const SizedBox(height: 40),

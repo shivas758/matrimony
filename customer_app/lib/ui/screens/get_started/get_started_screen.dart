@@ -18,8 +18,9 @@ import '../my_profile/profile_form_screen.dart';
 import '../payment/checkout_screen.dart';
 
 /// Get started (SPEC §9.12): the checklist from guest to full access —
-/// 1 Choose your agent · 2 Register a profile · 3 Pay the fee · 4 Agent
-/// approval. Done steps are ticked; only the next open step's button is
+/// 1 Choose your agent (by their mobile number OR their agent code, SPEC
+/// §9.18 B, or from the directory) · 2 Register a profile · 3 Pay the fee ·
+/// 4 Agent approval. Done steps are ticked; only the next open step's button is
 /// primary. Reached from the Browse banner and locked cards, the Interested
 /// tab, My profiles, More and a locked profile detail. Re-reads the account
 /// on open, after every action and every [AppConfig.statusPollInterval].
@@ -34,7 +35,8 @@ class GetStartedScreen extends StatefulWidget {
 }
 
 class _GetStartedScreenState extends State<GetStartedScreen> {
-  final _agentPhone = TextEditingController();
+  /// The agent's mobile number or agent code — one field takes either.
+  final _agentRef = TextEditingController();
   Timer? _poll;
   bool _busy = false;
   String? _linkError;
@@ -55,7 +57,7 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
   @override
   void dispose() {
     _poll?.cancel();
-    _agentPhone.dispose();
+    _agentRef.dispose();
     super.dispose();
   }
 
@@ -73,10 +75,12 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
 
   // ------------------------------------------------------------ step 1
 
-  Future<void> _linkByPhone() async {
-    final phone = _agentPhone.text.trim();
-    if (phone.length != 10) {
-      setState(() => _linkError = S.agentPhoneInvalid);
+  /// Ten digits link by mobile number, anything shaped like `KA1A` by agent
+  /// code ([AgentLookup.parse] decides).
+  Future<void> _linkByPhoneOrCode() async {
+    final lookup = AgentLookup.parse(_agentRef.text);
+    if (lookup == null) {
+      setState(() => _linkError = S.agentPhoneOrCodeInvalid);
       return;
     }
     FocusScope.of(context).unfocus();
@@ -84,14 +88,16 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final customer = await context.read<AgentsService>().linkAgent(agentPhone: phone);
+      final customer = await context.read<AgentsService>().linkAgentBy(lookup);
       if (!mounted) return;
       context.read<AuthState>().setCustomer(customer);
-      _agentPhone.clear();
+      _agentRef.clear();
       setState(() => _editingAgent = false);
       showSnack(context, S.agentLinkedSnack);
     } on ApiException catch (e) {
-      if (mounted) setState(() => _linkError = friendlyMessage(e));
+      // Not found / not active / cannot take customers / already my agent:
+      // the server's own sentence (it knows whether a number or a code failed).
+      if (mounted) setState(() => _linkError = linkAgentMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -112,9 +118,8 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
   // ------------------------------------------------------------ steps 2–4
 
   Future<void> _register(Customer customer) async {
-    final saved = await Navigator.of(context).push<Profile>(
-      MaterialPageRoute(builder: (_) => ProfileFormScreen(prefillName: customer.profiles.isEmpty)),
-    );
+    // The four-step form, then the privacy settings once (SPEC §9.18 G).
+    final saved = await ProfileFormScreen.create(context, prefillName: customer.profiles.isEmpty);
     if (saved == null || !mounted) return;
     showSnack(context, S.profileSaved);
     await context.read<AuthState>().refresh();
@@ -290,23 +295,36 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _Line(S.step1Body),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
+        // Above the field, not inside it: the label is too long for the
+        // field's own (single-line) label on a phone.
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 6),
+          child: Text(
+            S.agentPhoneOrCode,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(color: AppColors.wine),
+          ),
+        ),
         TextField(
-          controller: _agentPhone,
-          keyboardType: TextInputType.phone,
+          controller: _agentRef,
+          // A number or a code like KA1A: letters must be typeable.
+          keyboardType: TextInputType.text,
+          textCapitalization: TextCapitalization.characters,
+          autocorrect: false,
+          enableSuggestions: false,
           textInputAction: TextInputAction.done,
           inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(10),
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9A-Za-z+ \-]')),
+            LengthLimitingTextInputFormatter(16),
           ],
-          onSubmitted: (_) => _linkByPhone(),
+          onSubmitted: (_) => _linkByPhoneOrCode(),
           decoration: InputDecoration(
-            labelText: S.agentPhone,
-            helperText: S.agentPhoneHelper,
+            hintText: S.agentPhoneOrCodeHint,
+            helperText: S.agentPhoneOrCodeHelper,
+            helperMaxLines: 3,
             prefixIcon: const Icon(Icons.support_agent_rounded),
-            prefixText: '+91 ',
             errorText: _linkError,
-            errorMaxLines: 3,
+            errorMaxLines: 4,
           ),
         ),
         const SizedBox(height: 12),
@@ -315,7 +333,7 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
           icon: Icons.link_rounded,
           primary: primary,
           busy: _busy,
-          onPressed: _busy ? null : _linkByPhone,
+          onPressed: _busy ? null : _linkByPhoneOrCode,
         ),
         const SizedBox(height: 4),
         Wrap(

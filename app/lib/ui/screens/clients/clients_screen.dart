@@ -348,6 +348,8 @@ class _ClientTile extends StatelessWidget {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
+                  // The customer's permanent ID (SPEC §9.18 C).
+                  if (c.code != null) IdChip(code: c.code!, color: AppColors.goldDark),
                   if (c.profile != null)
                     StatusChip(
                       label: '${S.profilePrefix}${c.profile!.fullName}',
@@ -387,7 +389,7 @@ class _ClientTile extends StatelessWidget {
                     ),
                   if (change != null)
                     StatusChip(
-                      label: '${S.wantsToMoveTo} ${change.toAgent.fullName}',
+                      label: '${S.wantsToMoveTo} ${change.toAgent.nameWithCode}',
                       color: AppColors.warning,
                       icon: Icons.swap_horiz_rounded,
                     ),
@@ -647,6 +649,8 @@ class InterestCard extends StatelessWidget {
             ContactLine(
               caption: it.customerAgent != null ? S.theirAgent : S.uploadedBy,
               name: otherAgent.fullName,
+              // The other agent's code (SPEC §9.18 B) sits beside their name.
+              code: otherAgent.agentCode,
               subtitle: otherAgent.agencyName,
               phone: otherAgent.phone,
             ),
@@ -654,12 +658,18 @@ class InterestCard extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              StatusChip(
-                label: it.statusLabel,
-                color: clientStatusColor(it.status, theme.colorScheme),
-                icon: it.isAccepted ? Icons.lock_open_rounded : null,
+              // Takes the room that is left, so a long status shortens
+              // instead of pushing the Revoke button off the row.
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: StatusChip(
+                    label: it.statusLabel,
+                    color: clientStatusColor(it.status, theme.colorScheme),
+                    icon: it.isAccepted ? Icons.lock_open_rounded : null,
+                  ),
+                ),
               ),
-              const Spacer(),
               if (it.isAccepted && it.canDecide && onRevoke != null)
                 TextButton.icon(
                   onPressed: busy ? null : onRevoke,
@@ -760,7 +770,7 @@ class _TransfersTabState extends State<_TransfersTab> with AutomaticKeepAliveCli
   Future<void> _confirmApprove(AgentChangeRequest r) async {
     final ok = await confirmAction(
       context,
-      title: '${r.customer.fullName} → ${r.toAgent.fullName}',
+      title: '${r.customer.fullName} → ${r.toAgent.nameWithCode}',
       body: S.approveTransferBody,
       confirmLabel: S.approve,
     );
@@ -971,8 +981,10 @@ class TransferTile extends StatelessWidget {
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       TextSpan(text: ' $verb ', style: TextStyle(color: theme.colorScheme.outline)),
+                      // "Suresh (KA2B), Om Bureau" — the other agent's code
+                      // beside the name (SPEC §9.18 B).
                       TextSpan(
-                        text: other.labelComma,
+                        text: other.labelCommaWithCode,
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ],

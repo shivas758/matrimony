@@ -3,5 +3,5 @@
     <!-- Matches AppTheme.surfaceTint so the native splash flows into the Flutter one. -->
     <color name="launch_background">#F7F5F0</color>
     <!-- Push notification accent (AppColors.navy). -->
-    <color name="notification_accent">#0F2F52</color>
+    <color name="notification_accent">#043270</color>
 </resources>

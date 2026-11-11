@@ -9,7 +9,7 @@ import { one, query } from '../lib/db.js';
 import { checkPhoneVerification, signCustomerToken, signPhoneVerification } from '../lib/auth.js';
 import { asyncHandler, badRequest, conflict, notFound } from '../lib/errors.js';
 import { parse, phoneSchema } from '../lib/validate.js';
-import { requestOtp, verifyOtp } from '../lib/otp.js';
+import { checkOtp, otpSendSchema, otpVerifySchema, startOtp } from '../lib/otp.js';
 import { findCustomerByPhone, loadCustomerMe } from '../lib/customers.js';
 import { requireCustomer } from '../middleware/customerAuth.js';
 
@@ -17,31 +17,26 @@ export const customerAuthRouter = Router();
 
 const PURPOSE = 'customer_login';
 
-const sendSchema = z.object({ phone: phoneSchema });
-const verifySchema = z.object({
-  phone: phoneSchema,
-  code: z.string().trim().regex(/^\d{4,8}$/, 'Enter the 6-digit code'),
-});
-
-// POST /api/customer/auth/otp/send {phone}
+// POST /api/customer/auth/otp/send {phone, firebase?} (SPEC §9.1 / §9.19 A)
 // Works for any number — the response never says whether it is registered.
 customerAuthRouter.post(
   '/otp/send',
   asyncHandler(async (req, res) => {
-    const { phone } = parse(sendSchema, req.body ?? {});
-    res.json(await requestOtp(phone, PURPOSE));
+    const { phone, firebase } = parse(otpSendSchema, req.body ?? {});
+    res.json(await startOtp(phone, PURPOSE, { app: 'customer', firebase }));
   }),
 );
 
-// POST /api/customer/auth/otp/verify {phone, code}
+// POST /api/customer/auth/otp/verify {phone, code | firebase_id_token}
 // Existing customer → login ({token, customer}); unknown number → {new: true,
 // verification_token} for /signup. Pending/suspended customers still get a
 // token so the app can show the right screen (their routes are gated).
 customerAuthRouter.post(
   '/otp/verify',
   asyncHandler(async (req, res) => {
-    const { phone, code } = parse(verifySchema, req.body ?? {});
-    await verifyOtp(phone, PURPOSE, code);
+    const body = parse(otpVerifySchema, req.body ?? {});
+    const { phone } = body;
+    await checkOtp(phone, PURPOSE, body);
 
     const customer = await findCustomerByPhone(phone);
     if (!customer) {

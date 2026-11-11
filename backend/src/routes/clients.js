@@ -60,8 +60,12 @@ clientsRouter.get(
       where.push(`cu.status = $${params.length}`);
     }
     if (f.q) {
+      // Name, phone or the customer's ID (SPEC §9.18 C).
       params.push(`%${f.q}%`);
-      where.push(`(cu.full_name ILIKE $${params.length} OR cu.phone ILIKE $${params.length})`);
+      where.push(
+        `(cu.full_name ILIKE $${params.length} OR cu.phone ILIKE $${params.length}
+          OR EXISTS (SELECT 1 FROM profiles cp WHERE cp.customer_id = cu.id AND cp.profile_code ILIKE $${params.length}))`,
+      );
     }
     const rows = await many(
       `${CLIENT_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -91,7 +95,7 @@ async function registrationLink(agent) {
   const whatsapp_text =
     `Namaste! This is ${who}. Please fill in this registration form so I can add your profile ` +
     `and start looking for matches:\n${url}\n\n` +
-    'After submitting, install the MILI app and log in with the same mobile number to browse profiles.';
+    'After submitting, install the Wedbook Matrimony app and log in with the same mobile number to browse profiles.';
   return { url, whatsapp_text };
 }
 

@@ -198,9 +198,17 @@ class Profile {
     this.contactName,
     this.contactPhone,
     this.createdAt,
+    this.profileCode,
+    this.maskedFields = const [],
+    this.hiddenFields,
+    this.audienceAll = false,
+    this.audienceCommunities = const [],
   });
 
   final int id;
+
+  /// The name — or, when the family hides it and I have no access, the
+  /// server's neutral label "Profile 1042" (SPEC §9.18 D; see [nameHidden]).
   final String fullName;
   final String gender; // 'bride' | 'groom'
   final ProfileStatus status;
@@ -288,7 +296,7 @@ class Profile {
   final List<ProfilePhoto> photos;
   final bool isMine;
 
-  /// Owned by a Gandharva customer account (SPEC §9.2).
+  /// Owned by a Wedbook Matrimony customer account (SPEC §9.2).
   final bool isCustomerProfile;
   final bool canEdit;
 
@@ -324,6 +332,37 @@ class Profile {
   final String? contactPhone;
 
   final DateTime? createdAt;
+
+  /// The permanent profile / customer ID, e.g. "GN-KA1A-A001" (SPEC §9.18 C).
+  /// OWNER SIDE ONLY — it contains the agent's code, so the server sends it
+  /// to the uploader and admins and leaves the key out for everyone else.
+  final String? profileCode;
+
+  /// Privacy keys withheld from ME (SPEC §9.18 D): the family switched them
+  /// off and I have no approved access. Their values arrive as null / empty,
+  /// so every reader of this class must cope with a null community, dob …
+  /// Empty when nothing is withheld.
+  final List<String> maskedFields;
+
+  /// OWNER SIDE ONLY: the family's setting — the privacy keys switched off.
+  /// Null when the server did not send it (not my upload, or an older server).
+  final List<String>? hiddenFields;
+
+  /// OWNER SIDE ONLY (SPEC §9.18 E): shown to every community / to these
+  /// additional communities besides the profile's own.
+  final bool audienceAll;
+  final List<MasterItem> audienceCommunities;
+
+  /// Something is hidden from me — the detail screen shows the lock note.
+  bool get hasMaskedFields => maskedFields.isNotEmpty;
+
+  /// Whether one privacy key (name, community, education …) is withheld.
+  bool isMasked(String key) => maskedFields.contains(key);
+
+  /// [fullName] is the neutral "Profile 1042" label, not the real name.
+  bool get nameHidden => isMasked('name');
+
+  bool get hasProfileCode => (profileCode ?? '').isNotEmpty;
 
   bool get isBride => gender == 'bride';
   String get genderLabel => isBride ? 'Bride' : 'Groom';
@@ -512,15 +551,30 @@ class Profile {
         _ => ContactAccess.none,
       };
 
+  /// A `{id, name}` reference; null when absent, masked (SPEC §9.18 D) or
+  /// not an object at all.
   static MasterItem? _ref(dynamic j) =>
-      j == null ? null : MasterItem.fromJson(j as Map<String, dynamic>);
+      j is Map<String, dynamic> && j['id'] != null ? MasterItem.fromJson(j) : null;
 
-  static int? _int(dynamic v) => (v as num?)?.toInt();
+  static int? _int(dynamic v) => v is num ? v.toInt() : null;
+
+  /// A list of privacy keys; tolerant of null and of non-string entries.
+  static List<String> _keys(dynamic v) =>
+      v is List ? [for (final e in v) if (e != null) '$e'] : const [];
+
+  /// The name to show. A hidden name already arrives as "Profile 1042"; the
+  /// fallback only guards against a null / empty value so nothing ever
+  /// prints "null".
+  static String _name(Map<String, dynamic> j) {
+    final name = j['full_name'];
+    if (name is String && name.trim().isNotEmpty) return name;
+    return 'Profile ${j['id']}';
+  }
 
   factory Profile.fromJson(Map<String, dynamic> j) => Profile(
-        id: j['id'] as int,
-        fullName: '${j['full_name']}',
-        gender: '${j['gender']}',
+        id: (j['id'] as num).toInt(),
+        fullName: _name(j),
+        gender: '${j['gender'] ?? ''}',
         status: ProfileStatus.fromApi(j['status'] as String?),
         dob: DateTime.tryParse('${j['dob']}'),
         age: _int(j['age']),
@@ -533,14 +587,16 @@ class Profile {
         gothram: j['gothram'] as String?,
         motherTongue: _ref(j['mother_tongue']),
         knownLanguages: (j['known_languages'] as List? ?? [])
-            .map((e) => MasterItem.fromJson(e as Map<String, dynamic>))
+            .whereType<Map<String, dynamic>>()
+            .map(MasterItem.fromJson)
             .toList(),
         foodHabit: _ref(j['food_habit']),
         nationality: _ref(j['nationality']),
         education: _ref(j['education']),
         educationDetails: j['education_details'] as String?,
         educationLevels: (j['education_levels'] as List? ?? [])
-            .map((e) => EducationLevel.fromJson(e as Map<String, dynamic>))
+            .whereType<Map<String, dynamic>>()
+            .map(EducationLevel.fromJson)
             .toList(),
         profession: _ref(j['profession']),
         professionDetails: j['profession_details'] as String?,
@@ -548,7 +604,9 @@ class Profile {
         workCountry: _ref(j['work_country']),
         workPlace: j['work_place'] as String?,
         maritalStatus: _ref(j['marital_status']),
-        zodiac: j['zodiac'] == null ? null : ZodiacSign.fromJson(j['zodiac'] as Map<String, dynamic>),
+        zodiac: j['zodiac'] is Map<String, dynamic>
+            ? ZodiacSign.fromJson(j['zodiac'] as Map<String, dynamic>)
+            : null,
         nakshatram: _ref(j['nakshatram']),
         birthTime: j['birth_time'] as String?,
         birthPlace: j['birth_place'] as String?,
@@ -571,7 +629,8 @@ class Profile {
         propertyShare: j['property_share'] as String?,
         propertyDetails: j['property_details'] as String?,
         photos: (j['photos'] as List? ?? [])
-            .map((e) => ProfilePhoto.fromJson(e as Map<String, dynamic>))
+            .whereType<Map<String, dynamic>>()
+            .map(ProfilePhoto.fromJson)
             .toList(),
         isMine: j['is_mine'] == true,
         isCustomerProfile: j['is_customer_profile'] == true,
@@ -597,7 +656,18 @@ class Profile {
         contactName: j['contact_name'] as String?,
         contactPhone: j['contact_phone'] as String?,
         createdAt: DateTime.tryParse('${j['created_at']}'),
+        profileCode: _code(j['profile_code']),
+        maskedFields: _keys(j['masked_fields']),
+        hiddenFields: j['hidden_fields'] is List ? _keys(j['hidden_fields']) : null,
+        audienceAll: j['audience_all'] == true,
+        audienceCommunities: (j['audience_communities'] as List? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .where((e) => e['id'] != null)
+            .map(MasterItem.fromJson)
+            .toList(),
       );
+
+  static String? _code(Object? v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
 }
 
 class ProfilePage {

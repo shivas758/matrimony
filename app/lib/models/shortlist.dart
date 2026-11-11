@@ -12,11 +12,17 @@ class ShortlistEntry {
     this.nriCountry,
     this.community,
     this.photoUrl,
+    this.nameHidden = false,
   });
 
   final int shortlistId;
   final int profileId;
+
+  /// The name, or the neutral "Profile 1042" when [nameHidden] (SPEC §9.18 D).
   final String fullName;
+
+  /// The family hides the name and I have no access to it.
+  final bool nameHidden;
   final String gender;
   final String status;
   final int? age;
@@ -25,6 +31,8 @@ class ShortlistEntry {
   /// NRI profiles, the country abroad. The native place is never sent here.
   final String? workCountry;
   final String? nriCountry;
+
+  /// Null when not recorded or hidden by the family.
   final String? community;
   final String? photoUrl;
 
@@ -37,18 +45,29 @@ class ShortlistEntry {
     return w.isEmpty || w.toLowerCase() == 'india' ? null : w;
   }
 
-  factory ShortlistEntry.fromJson(Map<String, dynamic> j) => ShortlistEntry(
-        shortlistId: j['shortlist_id'] as int,
-        profileId: j['profile_id'] as int,
-        fullName: '${j['full_name']}',
-        gender: '${j['gender']}',
-        status: '${j['status']}',
-        age: (j['age'] as num?)?.toInt(),
-        workCountry: j['work_country'] as String?,
-        nriCountry: j['nri_country'] as String?,
-        community: j['community'] as String?,
-        photoUrl: j['photo_url'] as String?,
-      );
+  /// A plain string, or the `name` of a `{id, name}` object; null otherwise.
+  static String? _text(Object? v) {
+    if (v is Map) return v['name'] as String?;
+    return v is String && v.isNotEmpty ? v : null;
+  }
+
+  factory ShortlistEntry.fromJson(Map<String, dynamic> j) {
+    final profileId = (j['profile_id'] as num).toInt();
+    final name = j['full_name'];
+    return ShortlistEntry(
+      shortlistId: (j['shortlist_id'] as num).toInt(),
+      profileId: profileId,
+      fullName: name is String && name.trim().isNotEmpty ? name : 'Profile $profileId',
+      gender: '${j['gender'] ?? ''}',
+      status: '${j['status'] ?? 'active'}',
+      age: (j['age'] as num?)?.toInt(),
+      workCountry: _text(j['work_country']),
+      nriCountry: _text(j['nri_country']),
+      community: _text(j['community']),
+      photoUrl: j['photo_url'] as String?,
+      nameHidden: j['name_hidden'] == true,
+    );
+  }
 }
 
 class ShortlistGroup {

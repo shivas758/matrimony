@@ -12,8 +12,8 @@ const ROW_STEP = 36;
 const FONT = 'DejaVu Sans, Noto Sans, Arial, sans-serif';
 
 // Brand palette — mirrors app/lib/ui/theme.dart and lib/pdf.js.
-const NAVY = '#0F2F52';
-const NAVY_DEEP = '#081C33';
+const NAVY = '#043270';
+const NAVY_DEEP = '#021E4A';
 const GOLD = '#C9962E';
 const GOLD_LIGHT = '#E8C25F';
 const INK = '#1C2430';
@@ -112,7 +112,7 @@ export function publicRows(profile, { maxDetail = Infinity } = {}) {
  * on-request field or uploader identity here (CLAUDE.md rule 3, SPEC §9.8).
  */
 export async function renderProfileCard(profile, { agencyLabel } = {}) {
-  const label = agencyLabel || 'Mediator';
+  const label = agencyLabel || 'Wedbook';
 
   // One line per row on the card, so long descriptions get cut short.
   const rows = publicRows(profile, { maxDetail: 34 });
@@ -175,7 +175,7 @@ export async function renderProfileCard(profile, { agencyLabel } = {}) {
        <text x="${PAD}" y="${H - 36}" font-family="${FONT}" font-size="24"
              fill="#ffffff" fill-opacity="0.8">Contact your agent for details</text>
        <text x="${W - PAD}" y="${H - 52}" font-family="${FONT}" font-size="26" font-weight="bold"
-             fill="#ffffff" fill-opacity="0.55" text-anchor="end">Mediator</text>
+             fill="#ffffff" fill-opacity="0.55" text-anchor="end">Wedbook</text>
      </svg>`,
   );
 

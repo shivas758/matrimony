@@ -12,7 +12,7 @@ import '../../widgets/common.dart';
 import '../clients/client_detail_screen.dart';
 import '../clients/client_widgets.dart';
 
-/// Every Gandharva customer across all agents (SPEC §9.5 admin): filter by
+/// Every Wedbook Matrimony customer across all agents (SPEC §9.5 admin): filter by
 /// status, search, activate / suspend / reject, and move one to another agent.
 class AdminCustomersScreen extends StatefulWidget {
   const AdminCustomersScreen({super.key, this.initialStatus});
@@ -257,7 +257,7 @@ class _AdminCustomersScreenState extends State<AdminCustomersScreen> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    '${S.agentLabel}: ${c.agent?.label ?? S.noAgentYet}',
+                    '${S.agentLabel}: ${c.agent?.labelWithCode ?? S.noAgentYet}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall,
@@ -270,6 +270,8 @@ class _AdminCustomersScreenState extends State<AdminCustomersScreen> {
               spacing: 6,
               runSpacing: 6,
               children: [
+                // The customer's permanent ID (SPEC §9.18 C).
+                if (c.code != null) IdChip(code: c.code!, color: AppColors.goldDark),
                 if (c.profile != null)
                   StatusChip(
                     label: '${S.profilePrefix}${c.profile!.fullName}',
@@ -303,7 +305,7 @@ class _AdminCustomersScreenState extends State<AdminCustomersScreen> {
                   ),
                 if (change != null)
                   StatusChip(
-                    label: '${S.wantsToMoveTo} ${change.toAgent.fullName}',
+                    label: '${S.wantsToMoveTo} ${change.toAgent.nameWithCode}',
                     color: AppColors.warning,
                     icon: Icons.swap_horiz_rounded,
                   ),
@@ -453,7 +455,8 @@ class _PickAgentDialogState extends State<_PickAgentDialog> {
               a.fullName.toLowerCase().contains(q) ||
               (a.agencyName ?? '').toLowerCase().contains(q) ||
               a.phone.contains(q) ||
-              (a.city ?? '').toLowerCase().contains(q),
+              (a.city ?? '').toLowerCase().contains(q) ||
+              (a.agentCode ?? '').toLowerCase().contains(q),
         )
         .toList();
   }
@@ -505,6 +508,7 @@ class _PickAgentDialogState extends State<_PickAgentDialog> {
                           title: Text(a.fullName),
                           subtitle: Text(
                             [
+                              a.agentCode,
                               a.agencyName,
                               a.city,
                               '+91 ${a.phone}',

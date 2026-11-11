@@ -107,6 +107,16 @@ CREATE TABLE subcastes (
 );
 CREATE UNIQUE INDEX uq_subcastes_community_lower_name ON subcastes (community_id, lower(name));
 
+-- Indian states / union territories with the 2-letter code that starts an
+-- agent code (SPEC §9.18 B). Also in db/migrations/010_*.sql.
+CREATE TABLE states (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  code TEXT NOT NULL UNIQUE CHECK (code ~ '^[A-Z]{2}$'),
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INT NOT NULL DEFAULT 0
+);
+
 -- ===== Agents =====
 CREATE TABLE agents (
   id SERIAL PRIMARY KEY,
@@ -122,7 +132,21 @@ CREATE TABLE agents (
   city TEXT,                   -- shown in the customer-facing agent directory (SPEC §9)
   -- Per-agent public registration link: /r/:token (SPEC §9.3).
   registration_token TEXT UNIQUE DEFAULT encode(gen_random_bytes(12), 'hex'),
+  -- Agent code (SPEC §9.18 B): STATE + NUMBER + LETTER(S) — KA1A, KA1B … Chosen
+  -- state and code are permanent; NULL until the agent picks a state.
+  state_id INT REFERENCES states(id),
+  agent_code TEXT,
+  -- Sequence for this agent's profile IDs (GN-KA1A-A001 …); only counts up.
+  profile_seq INT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_agents_agent_code ON agents(agent_code) WHERE agent_code IS NOT NULL;
+
+-- Per-state sequence for agent codes. Only counts up, so a code is never
+-- reused — also not after an agent is deleted.
+CREATE TABLE agent_code_counters (
+  state_id INT PRIMARY KEY REFERENCES states(id),
+  last_seq INT NOT NULL DEFAULT 0
 );
 
 -- ===== Customers (Gandharva app accounts, SPEC §9) =====
@@ -254,6 +278,18 @@ CREATE TABLE profiles (
   -- When the ₹150 registration fee for this customer profile was paid
   -- (SPEC §9.12). Unpaid customer profiles stay 'hidden'.
   paid_at TIMESTAMPTZ,
+  -- Customer / profile ID (SPEC §9.18 C): GN-<agent code>-<letter><3 digits>,
+  -- e.g. GN-KA1A-A001. Permanent; shown to the owner side only (it carries the
+  -- agent's code). NULL until the profile's agent has a code.
+  profile_code TEXT,
+  -- Privacy toggles (SPEC §9.18 D): the details the family switched off —
+  -- keys of PRIVACY_FIELDS in src/lib/privacy.js. They behave like the
+  -- protected fields: shown only after approval.
+  hidden_fields TEXT[] NOT NULL DEFAULT '{}',
+  -- Community audience (SPEC §9.18 E): extra communities the profile is shown
+  -- to. Its own community is always included and is not stored in the list.
+  audience_all BOOLEAN NOT NULL DEFAULT FALSE,
+  audience_community_ids INT[] NOT NULL DEFAULT '{}',
   -- 'on_hold' = talks in progress: hidden from other agents like engaged/married,
   -- except the agent whose hold request was approved (see hold_requests).
   status TEXT NOT NULL DEFAULT 'active'
@@ -272,6 +308,8 @@ CREATE INDEX idx_profiles_food_habit ON profiles(food_habit_id);
 CREATE INDEX idx_profiles_customer ON profiles(customer_id) WHERE customer_id IS NOT NULL;
 -- One profile per customer (SPEC §9.17, migration 009).
 CREATE UNIQUE INDEX uq_profiles_one_per_customer ON profiles(customer_id) WHERE customer_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_profiles_profile_code ON profiles(profile_code) WHERE profile_code IS NOT NULL;
+CREATE INDEX idx_profiles_audience ON profiles USING GIN (audience_community_ids);
 CREATE INDEX idx_profiles_work_country ON profiles(work_country_id);
 CREATE INDEX idx_profiles_occupation_type ON profiles(occupation_type_id);
 
@@ -398,7 +436,8 @@ CREATE TABLE payments (
   amount_paise INT NOT NULL CHECK (amount_paise >= 0),
   currency TEXT NOT NULL DEFAULT 'INR',
   provider TEXT NOT NULL CHECK (provider IN ('mock','razorpay','waived','cash')),
-  status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','paid','failed')),
+  -- 'refund_due': money that arrived for an already-paid / deleted profile (SPEC §9.19 B)
+  status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','paid','failed','refund_due')),
   provider_order_id TEXT,
   provider_payment_id TEXT,
   recorded_by INT REFERENCES agents(id),     -- 'cash': the agent who took it (SPEC §9.13)
@@ -409,6 +448,8 @@ CREATE TABLE payments (
 CREATE INDEX idx_payments_customer ON payments(customer_id, created_at DESC);
 CREATE UNIQUE INDEX uq_payments_profile_paid ON payments(profile_id)
   WHERE status = 'paid' AND purpose = 'profile_registration';
+CREATE UNIQUE INDEX uq_payments_razorpay_order ON payments(provider_order_id)
+  WHERE provider = 'razorpay';
 
 -- ===== Deleting a paid customer profile (SPEC §9.13) =====
 -- The customer asks; their agent (or an admin) approves, which deletes it.
@@ -478,6 +519,21 @@ INSERT INTO nakshatrams (name, sort_order) VALUES
  ('Swati',15),('Vishakha',16),('Anuradha',17),('Jyeshtha',18),('Mula',19),
  ('Purva Ashadha',20),('Uttara Ashadha',21),('Shravana',22),('Dhanishta',23),
  ('Shatabhisha',24),('Purva Bhadrapada',25),('Uttara Bhadrapada',26),('Revati',27);
+
+-- States / union territories (SPEC §9.18 B). The first six are the bureau's
+-- home region; the rest follow alphabetically.
+INSERT INTO states (name, code, sort_order) VALUES
+ ('Karnataka','KA',1), ('Andhra Pradesh','AP',2), ('Telangana','TS',3), ('Tamil Nadu','TN',4),
+ ('Kerala','KL',5), ('Maharashtra','MH',6),
+ ('Andaman and Nicobar Islands','AN',10), ('Arunachal Pradesh','AR',11), ('Assam','AS',12),
+ ('Bihar','BR',13), ('Chandigarh','CH',14), ('Chhattisgarh','CG',15),
+ ('Dadra and Nagar Haveli and Daman and Diu','DD',16), ('Delhi','DL',17), ('Goa','GA',18),
+ ('Gujarat','GJ',19), ('Haryana','HR',20), ('Himachal Pradesh','HP',21),
+ ('Jammu and Kashmir','JK',22), ('Jharkhand','JH',23), ('Ladakh','LA',24), ('Lakshadweep','LD',25),
+ ('Madhya Pradesh','MP',26), ('Manipur','MN',27), ('Meghalaya','ML',28), ('Mizoram','MZ',29),
+ ('Nagaland','NL',30), ('Odisha','OD',31), ('Puducherry','PY',32), ('Punjab','PB',33),
+ ('Rajasthan','RJ',34), ('Sikkim','SK',35), ('Tripura','TR',36), ('Uttar Pradesh','UP',37),
+ ('Uttarakhand','UK',38), ('West Bengal','WB',39);
 
 INSERT INTO marital_statuses (name, sort_order) VALUES
  ('Unmarried',1),('Widowed',2),('Divorced',3),('Awaiting Divorce',4),('Second Marriage',5);

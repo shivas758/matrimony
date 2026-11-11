@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -16,32 +17,100 @@ import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/photo_picker.dart';
+import '../../widgets/step_header.dart';
+import 'privacy_screen.dart';
 
-/// The registration form in the paper's order (SPEC §9.11 Gandharva 5):
-/// Basic → Birth → Community → Appearance → Education table → Work & income →
-/// Family → Property → About → Photos. Creates one of my (up to 5) profiles
-/// with POST /customer/my-profiles (multipart) or edits a specific one with
-/// PATCH /customer/my-profiles/:id + the photo routes (SPEC §9.12). Needs a
-/// linked agent. Pops the saved [Profile].
+part 'profile_form_fields.dart';
+part 'profile_form_steps.dart';
+
+/// The registration form in four steps (SPEC §9.18 F):
+///
+///  1. **Personal details** — name, gender, date of birth, marital status,
+///     religion, community, subcaste, mother tongue, languages, height,
+///     weight, complexion, food habit, nationality, about, photos.
+///  2. **Professional details** — the education table, highest
+///     qualification, occupation, income, work country, work place*, NRI.
+///  3. **Horoscope** — star, rasi, gothram, birth time, birth place*.
+///  4. **Family & contact** — parents*, siblings*, family*, property*, native
+///     place*, contact person*.           (* = on request, SPEC §9.8)
+///
+/// A step header shows where you are; **Back** / **Next** sit at the bottom
+/// and Next validates the step it leaves (the required fields — name, gender,
+/// date of birth, community — are all in step 1). The last step's button
+/// saves. When editing, every step can be opened from the header and Save is
+/// in the app bar on every step. Nothing is sent until Save, and leaving with
+/// unsaved changes asks first.
+///
+/// Creates my profile with POST /customer/my-profiles (multipart) or edits it
+/// with PATCH /customer/my-profiles/:id + the photo routes (SPEC §9.12).
+/// Needs a linked agent. Pops the saved [Profile].
+///
+/// The four steps live in `profile_form_steps.dart`, their field widgets in
+/// `profile_form_fields.dart`; all state stays here, so moving between the
+/// steps loses nothing.
 class ProfileFormScreen extends StatefulWidget {
   const ProfileFormScreen({super.key, this.existing, this.prefillName = false});
 
-  /// Edit this one of my profiles (PATCH /customer/my-profiles/:id); null
+  /// Edit this profile of mine (PATCH /customer/my-profiles/:id); null
   /// creates a new one (POST /customer/my-profiles).
   final Profile? existing;
 
-  /// A new profile starts with the account holder's name — only sensible for
-  /// the first one (later ones are usually for a son or daughter).
+  /// A new profile starts with the account holder's name.
   final bool prefillName;
 
   bool get isEdit => existing != null;
+
+  /// Registers a new profile: the form, and — once it is saved — the Privacy
+  /// settings, opened this one time automatically so the family decides what
+  /// others see before the profile goes anywhere (SPEC §9.18 G). Returns the
+  /// new profile (with the privacy choices when they were saved); null when
+  /// the form was left without saving.
+  static Future<Profile?> create(BuildContext context, {bool prefillName = false}) async {
+    final navigator = Navigator.of(context);
+    final masters = context.read<MastersState>();
+    final saved = await navigator.push<Profile>(
+      MaterialPageRoute(builder: (_) => ProfileFormScreen(prefillName: prefillName)),
+    );
+    // A server older than v2.8 has no toggles to offer.
+    if (saved == null || !masters.data.hasPrivacy || !navigator.mounted) return saved;
+    final withPrivacy = await navigator.push<Profile>(
+      MaterialPageRoute(builder: (_) => PrivacyScreen(profile: saved, afterCreate: true)),
+    );
+    return withPrivacy ?? saved;
+  }
 
   @override
   State<ProfileFormScreen> createState() => _ProfileFormScreenState();
 }
 
 class _ProfileFormScreenState extends State<ProfileFormScreen> {
-  final _formKey = GlobalKey<FormState>();
+  static const _stepCount = 4;
+  static const _stepTitles = [S.stepPersonal, S.stepProfessional, S.stepHoroscope, S.stepFamily];
+  static const _stepLabels = [
+    S.stepPersonalShort,
+    S.stepProfessionalShort,
+    S.stepHoroscopeShort,
+    S.stepFamilyShort,
+  ];
+
+  /// One form (and one scroll view) per step, all kept alive in an
+  /// [IndexedStack] — so a hidden step can still be validated on Save.
+  final _formKeys = List.generate(_stepCount, (_) => GlobalKey<FormState>());
+  final _scrolls = List.generate(_stepCount, (_) => ScrollController());
+
+  // Where to scroll when a field is wrong.
+  final _nameAnchor = GlobalKey();
+  final _dobAnchor = GlobalKey();
+  final _communityAnchor = GlobalKey();
+  final _weightAnchor = GlobalKey();
+  final _siblingsAnchor = GlobalKey();
+  final _dobField = GlobalKey<FormFieldState<DateTime>>();
+
+  int _step = 0;
+
+  /// The furthest step opened so far — a new profile's header lets you go
+  /// back to (and return from) the steps you have already passed.
+  int _reached = 0;
 
   late final TextEditingController _name;
   late final TextEditingController _birthPlace;
@@ -115,11 +184,15 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
   bool _busy = false;
   String? _error;
 
+  /// What the form held when it opened (after the defaults) — anything else
+  /// is an unsaved change.
+  String _baseline = '';
+
   @override
   void initState() {
     super.initState();
     final p = widget.existing;
-    // The first new profile starts with the account's name.
+    // A new profile starts with the account's name.
     final accountName = widget.prefillName ? context.read<AuthState>().customer?.fullName ?? '' : '';
     _name = TextEditingController(text: p?.fullName ?? accountName);
     _birthPlace = TextEditingController(text: p?.birthPlace ?? '');
@@ -159,7 +232,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
     _existingPhotos = [...?p?.photos];
 
     if (p != null) {
-      _gender = p.gender;
+      _gender = p.gender == 'groom' ? 'groom' : 'bride';
       _maritalStatusId = p.maritalStatus?.id;
       _dob = p.dob;
       _birthTime = _parseTime(p.birthTime);
@@ -181,9 +254,13 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       _isNri = p.isNri;
       _nriCountryId = p.nriCountry?.id;
       _hasSiblings = p.hasSiblings;
+      // Every step of an existing profile is open from the start.
+      _reached = _stepCount - 1;
     }
+    _baseline = _signature();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final mastersState = context.read<MastersState>();
       mastersState.load().then((_) {
         if (!mounted || widget.isEdit) return;
@@ -191,7 +268,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
         // otherwise (SPEC §9.7: countries start with India).
         final india = _indiaId(mastersState.data);
         if (india == null) return;
-        setState(() {
+        _applyDefaults(() {
           _nationalityId ??= india;
           _birthCountryId ??= india;
           _workCountryId ??= india;
@@ -200,7 +277,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       // One-community agents: skip a step.
       final agent = context.read<AuthState>().agent;
       if (_communityId == null && (agent?.communities.length ?? 0) == 1) {
-        setState(() => _communityId = agent!.communities.first.id);
+        _applyDefaults(() => _communityId = agent!.communities.first.id);
       }
     });
   }
@@ -216,7 +293,21 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
     ]) {
       c.dispose();
     }
+    for (final s in _scrolls) {
+      s.dispose();
+    }
     super.dispose();
+  }
+
+  /// `setState` for the step widgets in the part files.
+  void _update(VoidCallback fn) => setState(fn);
+
+  /// Values the form fills in by itself are not "changes": when nothing was
+  /// touched yet, the baseline moves with them.
+  void _applyDefaults(VoidCallback fn) {
+    final untouched = !_isDirty;
+    setState(fn);
+    if (untouched) _baseline = _signature();
   }
 
   static int? _indiaId(MasterData masters) {
@@ -261,6 +352,126 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
             },
       ];
 
+  // ------------------------------------------------------------------ validators
+
+  static String? _nameError(String? v) => (v ?? '').trim().length < 2 ? S.nameRequired : null;
+
+  static String? _weightError(String? v) {
+    final t = (v ?? '').trim();
+    if (t.isEmpty) return null;
+    final n = int.tryParse(t);
+    return n == null || n < 25 || n > 250 ? S.weightHint : null;
+  }
+
+  static String? _countError(String? v) {
+    final t = (v ?? '').trim();
+    if (t.isEmpty) return null;
+    final n = int.tryParse(t);
+    return n == null || n < 0 || n > 20 ? '0–20' : null;
+  }
+
+  List<TextEditingController> get _siblingCounts =>
+      [_elderSisters, _youngerSisters, _elderBrothers, _youngerBrothers];
+
+  /// The first thing wrong on [step], as the place to scroll to; null when
+  /// the step is fine. The required fields are all in step 1.
+  GlobalKey? _firstProblem(int step) => switch (step) {
+        0 => _nameError(_name.text) != null
+            ? _nameAnchor
+            : _dob == null
+                ? _dobAnchor
+                : _communityId == null
+                    ? _communityAnchor
+                    : _weightError(_weight.text) != null
+                        ? _weightAnchor
+                        : null,
+        3 => _hasSiblings == true && _siblingCounts.any((c) => _countError(c.text) != null) ? _siblingsAnchor : null,
+        _ => null,
+      };
+
+  /// Runs the validators of [step] (showing their messages) and says whether
+  /// it may be left.
+  bool _validateStep(int step) {
+    final fieldsOk = _formKeys[step].currentState?.validate() ?? true;
+    return _firstProblem(step) == null && fieldsOk;
+  }
+
+  /// Opens [step] and scrolls to its first problem.
+  void _showProblem(int step) {
+    final anchor = _firstProblem(step);
+    setState(() {
+      _step = step;
+      _error = S.stepHasErrors(_stepTitles[step]);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = anchor?.currentContext;
+      if (!mounted || target == null) return;
+      Scrollable.ensureVisible(
+        target,
+        alignment: 0.1,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  // ------------------------------------------------------------------ steps
+
+  void _open(int step) {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _step = step;
+      if (step > _reached) _reached = step;
+      _error = null;
+    });
+  }
+
+  void _next() {
+    if (_busy || _step >= _stepCount - 1) return;
+    if (_validateStep(_step)) {
+      _open(_step + 1);
+    } else {
+      _showProblem(_step);
+    }
+  }
+
+  void _back() {
+    if (_busy || _step == 0) return;
+    _open(_step - 1);
+  }
+
+  /// A new profile's header reaches the steps already passed; an existing
+  /// profile's reaches every step.
+  bool _canJump(int step) => !_busy && (widget.isEdit || step <= _reached);
+
+  /// Tapping a step in the header. Registering: moving forward still checks
+  /// the steps in between; editing: go anywhere (Save checks everything).
+  void _jump(int step) {
+    if (!_canJump(step) || step == _step) return;
+    if (!widget.isEdit) {
+      for (var s = _step; s < step; s++) {
+        if (!_validateStep(s)) {
+          _showProblem(s);
+          return;
+        }
+      }
+    }
+    _open(step);
+  }
+
+  // ------------------------------------------------------------------ unsaved changes
+
+  /// Everything the form would send, as one string.
+  String _signature() => jsonEncode([_fields(), for (final f in _newPhotos) f.path]);
+
+  bool get _isDirty => _signature() != _baseline;
+
+  Future<void> _leave() async {
+    if (_busy) return;
+    if (_isDirty && !await confirmDiscard(context)) return;
+    if (mounted) Navigator.of(context).pop();
+  }
+
   // ------------------------------------------------------------------ pickers
 
   int get _photoCount => _existingPhotos.length + _newPhotos.length;
@@ -289,15 +500,22 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
 
   Future<void> _pickDob() async {
     final now = DateTime.now();
-    final initial = _dob ?? DateTime(now.year - 25, now.month, now.day);
+    final latest = DateTime(now.year - 18, now.month, now.day);
+    final earliest = DateTime(now.year - 100);
+    var initial = _dob ?? DateTime(now.year - 25, now.month, now.day);
+    if (initial.isAfter(latest)) initial = latest;
+    if (initial.isBefore(earliest)) initial = earliest;
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
-      firstDate: DateTime(now.year - 100),
-      lastDate: DateTime(now.year - 18, now.month, now.day),
+      firstDate: earliest,
+      lastDate: latest,
       helpText: S.dob,
     );
-    if (picked != null) setState(() => _dob = picked);
+    if (picked == null || !mounted) return;
+    setState(() => _dob = picked);
+    // Clears "Select your date of birth" once it has been shown.
+    if (_dobField.currentState?.hasError ?? false) _dobField.currentState!.validate();
   }
 
   Future<void> _pickBirthTime() async {
@@ -306,102 +524,88 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       initialTime: _birthTime ?? const TimeOfDay(hour: 6, minute: 0),
       helpText: S.birthTime,
     );
-    if (picked != null) setState(() => _birthTime = picked);
+    if (picked != null && mounted) setState(() => _birthTime = picked);
   }
 
   /// Feet + inches on screen (that is how families quote height); cm on the wire.
   Future<void> _pickHeight() async {
     final selected = await _HeightPickerDialog.show(context, initialCm: _heightCm);
-    if (selected != null) setState(() => _heightCm = selected);
+    if (selected != null && mounted) setState(() => _heightCm = selected);
   }
 
   // ------------------------------------------------------------------ save
 
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) {
-      setState(() => _error = S.errValidation);
-      return;
-    }
-    if (_dob == null) {
-      setState(() => _error = S.dobRequired);
-      return;
-    }
-    if (_communityId == null) {
-      setState(() => _error = S.communityRequired);
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+  /// Which step holds the field the server complained about.
+  static const _fieldSteps = <String, int>{
+    'full_name': 0, 'gender': 0, 'dob': 0, 'marital_status_id': 0, 'religion_id': 0, 'community_id': 0,
+    'subcaste_name': 0, 'subcaste_id': 0, 'mother_tongue_id': 0, 'known_language_ids': 0, 'height_cm': 0,
+    'weight_kg': 0, 'complexion_id': 0, 'food_habit_id': 0, 'nationality_id': 0, 'about': 0, 'photos': 0,
+    'education_levels': 1, 'education_id': 1, 'education_details': 1, 'occupation_type_id': 1,
+    'profession_id': 1, 'profession_details': 1, 'income_text': 1, 'other_income': 1, 'work_country_id': 1,
+    'work_place': 1, 'is_nri': 1, 'nri_country_id': 1, 'nri_place': 1,
+    'nakshatram_id': 2, 'zodiac_id': 2, 'gothram': 2, 'birth_time': 2, 'birth_place': 2, 'birth_state': 2,
+    'birth_country_id': 2,
+  };
 
+  /// The request body — every field of the four steps.
+  Map<String, dynamic> _fields() {
     final isEdit = widget.isEdit;
     // Siblings: the counts travel only with "Yes"; the total is their sum.
     final hasSiblings = _hasSiblings == true;
-    final counts = [
-      _countOf(_elderSisters),
-      _countOf(_youngerSisters),
-      _countOf(_elderBrothers),
-      _countOf(_youngerBrothers),
-    ];
+    final counts = _siblingCounts.map(_countOf).toList();
     final sum = counts.whereType<int>().fold<int>(0, (a, b) => a + b);
     final siblingsCount = hasSiblings && counts.any((n) => n != null) ? sum : null;
 
-    final fields = <String, dynamic>{
-      // ---- Basic
+    return <String, dynamic>{
+      // ---- 1 Personal details
       'full_name': _text(_name),
       'gender': _gender,
+      'dob': _dob == null ? null : _fmtDob(_dob!),
       'marital_status_id': _maritalStatusId,
-      'dob': _fmtDob(_dob!),
-      // "HH:MM" 24h; an empty string clears the time on edit.
-      'birth_time': _birthTime == null ? '' : _fmtTime(_birthTime!),
-      // ---- Birth (place / state / country are on request; star & rasi public)
-      'birth_place': _text(_birthPlace),
-      'birth_state': _text(_birthState),
-      'birth_country_id': _birthCountryId,
-      'nakshatram_id': _nakshatramId,
-      'zodiac_id': _zodiacId,
-      // ---- Community
-      'nationality_id': _nationalityId,
       'religion_id': _religionId,
       'community_id': _communityId,
       // Free text: the server finds it in the community or creates it (SPEC §2).
       'subcaste_name': _text(_subcaste),
-      'gothram': _text(_gothram),
-      'city': _text(_city),
-      'state': _text(_state),
-      // ---- Appearance & lifestyle
-      'complexion_id': _complexionId,
       'mother_tongue_id': _motherTongueId,
       // Multipart takes a comma list; JSON takes an array so [] clears it.
       'known_language_ids': isEdit ? _languageIds.toList() : _languageIds.join(','),
-      'food_habit_id': _foodHabitId,
       'height_cm': _heightCm,
       'weight_kg': int.tryParse(_text(_weight)),
-      // ---- Education
+      'complexion_id': _complexionId,
+      'food_habit_id': _foodHabitId,
+      'nationality_id': _nationalityId,
+      'about': _text(_about),
+      // ---- 2 Professional details
       'education_levels': _educationLevelRows(),
-      'education_details': _text(_eduDetails),
       'education_id': _educationId,
-      // ---- Work & income
+      'education_details': _text(_eduDetails),
       'occupation_type_id': _occupationTypeId,
       'profession_id': _professionId,
+      'profession_details': _text(_profDetails),
       'income_text': _text(_income),
       'other_income': _text(_otherIncome),
-      'work_place': _text(_workPlace),
       'work_country_id': _workCountryId,
-      'profession_details': _text(_profDetails),
+      'work_place': _text(_workPlace),
       'is_nri': _isNri,
       'nri_country_id': _isNri ? _nriCountryId : null,
       'nri_place': _isNri ? _text(_nriPlace) : null,
-      // ---- Family (on request)
+      // ---- 3 Horoscope (star, rasi, gothram and time are public; the birth
+      // place, state and country are on request)
+      'nakshatram_id': _nakshatramId,
+      'zodiac_id': _zodiacId,
+      'gothram': _text(_gothram),
+      // "HH:MM" 24h; an empty string clears the time on edit.
+      'birth_time': _birthTime == null ? '' : _fmtTime(_birthTime!),
+      'birth_place': _text(_birthPlace),
+      'birth_state': _text(_birthState),
+      'birth_country_id': _birthCountryId,
+      // ---- 4 Family & contact (all on request)
       'father_name': _text(_fatherName),
       'father_occupation': _text(_fatherOccupation),
       'father_phone': _text(_fatherPhone),
       'mother_name': _text(_motherName),
       'mother_occupation': _text(_motherOccupation),
       'mother_phone': _text(_motherPhone),
-      'contact_name': _text(_contactName),
-      'contact_phone': _text(_contactPhone),
       // Tri-state: multipart drops '' (= not recorded); JSON null clears it.
       'has_siblings': isEdit ? _hasSiblings : (_hasSiblings?.toString() ?? ''),
       'siblings_count': siblingsCount,
@@ -411,18 +615,37 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       'younger_brothers': hasSiblings ? counts[3] : null,
       'siblings_details': hasSiblings ? _text(_siblingsDetails) : null,
       'family_details': _text(_family),
-      // ---- Property (on request)
       'property_share': _text(_propertyShare),
       'property_details': _text(_propertyDetails),
-      // ---- About
-      'about': _text(_about),
+      'city': _text(_city),
+      'state': _text(_state),
+      'contact_name': _text(_contactName),
+      'contact_phone': _text(_contactPhone),
     };
+  }
 
+  Future<void> _save() async {
+    if (_busy) return;
+    FocusScope.of(context).unfocus();
+    // Every step is checked — a problem on a step that is not on screen
+    // takes the user there.
+    for (var step = 0; step < _stepCount; step++) {
+      if (!_validateStep(step)) {
+        _showProblem(step);
+        return;
+      }
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    final fields = _fields();
     try {
       final service = context.read<ProfileService>();
       final paths = _newPhotos.map((f) => f.path).toList();
       Profile saved;
-      if (isEdit) {
+      if (widget.isEdit) {
         final id = widget.existing!.id;
         saved = await service.updateProfile(id, fields);
         if (paths.isNotEmpty) {
@@ -437,7 +660,17 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       context.read<MastersState>().load(force: true);
       Navigator.of(context).pop(saved);
     } on ApiException catch (e) {
-      if (mounted) setState(() => _error = friendlyMessage(e));
+      if (!mounted) return;
+      // The server names the field: open the (first) step it lives on.
+      int? step;
+      for (final field in e.fieldErrors?.keys ?? const <String>[]) {
+        final at = _fieldSteps[field] ?? _stepCount - 1;
+        if (step == null || at < step) step = at;
+      }
+      setState(() {
+        _error = friendlyMessage(e);
+        if (step != null) _step = step;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -458,7 +691,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
     if (ok != true || !mounted) return;
     try {
       await context.read<ProfileService>().deletePhoto(photo.id);
-      setState(() => _existingPhotos.removeWhere((p) => p.id == photo.id));
+      if (mounted) setState(() => _existingPhotos.removeWhere((p) => p.id == photo.id));
     } on ApiException catch (e) {
       if (mounted) showSnack(context, friendlyMessage(e), error: true);
     }
@@ -470,1089 +703,176 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
   Widget build(BuildContext context) {
     final masters = context.watch<MastersState>().data;
     final agent = context.watch<AuthState>().agent;
-    final theme = Theme.of(context);
+    final isEdit = widget.isEdit;
+    final last = _step == _stepCount - 1;
 
-    // My agent's communities first — that is where my profile will be seen.
-    final communities = (agent?.communities ?? const []).isNotEmpty
-        ? masters.communities.where((c) => agent!.communities.any((m) => m.id == c.id)).toList()
-        : masters.communities;
-    final communityOptions = communities.isEmpty ? masters.communities : communities;
+    final steps = <Widget>[
+      _PersonalStep(form: this, masters: masters, agentCommunities: agent?.communities ?? const []),
+      _ProfessionalStep(form: this, masters: masters),
+      _HoroscopeStep(form: this, masters: masters),
+      _FamilyStep(form: this),
+    ];
 
-    final subcasteOptions = masters.subcastesFor(_communityId);
-    final typedSubcaste = _text(_subcaste);
-    final subcasteIsNew = typedSubcaste.isNotEmpty &&
-        !subcasteOptions.any((s) => s.name.toLowerCase() == typedSubcaste.toLowerCase());
-
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.isEdit ? S.editProfileTitle : S.newProfileTitle)),
-      body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-            children: [
-              // ============================================================ Basic
-              const SectionHeader(S.basicDetails),
-              TextFormField(
-                controller: _name,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: S.fullName,
-                  prefixIcon: Icon(Icons.person_rounded),
-                ),
-                validator: (v) => (v ?? '').trim().length < 2 ? S.nameRequired : null,
-              ),
-              const SizedBox(height: 16),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'bride', label: Text(S.bride), icon: Icon(Icons.female_rounded)),
-                  ButtonSegment(value: 'groom', label: Text(S.groom), icon: Icon(Icons.male_rounded)),
-                ],
-                selected: {_gender},
-                onSelectionChanged: (s) => setState(() => _gender = s.first),
-              ),
-              const SizedBox(height: 16),
-              _MasterDropdown(
-                label: S.maritalStatus,
-                icon: Icons.favorite_border_rounded,
-                items: masters.maritalStatuses,
-                value: _maritalStatusId,
-                onChanged: (v) => setState(() => _maritalStatusId = v),
-              ),
-              const SizedBox(height: 16),
-              _TapField(
-                label: S.dob,
-                icon: Icons.cake_rounded,
-                value: _dob == null ? null : formatDate(_dob),
-                hint: S.selectDate,
-                onTap: _pickDob,
-              ),
-              const SizedBox(height: 16),
-              _TapField(
-                label: S.birthTime,
-                icon: Icons.schedule_rounded,
-                value: _birthTime?.format(context),
-                hint: S.selectTime,
-                onTap: _pickBirthTime,
-                onClear: _birthTime == null ? null : () => setState(() => _birthTime = null),
-              ),
-              // ============================================================ Birth
-              const SizedBox(height: 24),
-              const SectionHeader(S.birthDetails),
-              TextFormField(
-                controller: _birthPlace,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: S.birthPlace,
-                  prefixIcon: Icon(Icons.location_on_outlined),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _birthState,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: S.birthState,
-                  prefixIcon: Icon(Icons.map_outlined),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.birthCountry,
-                icon: Icons.flag_outlined,
-                items: masters.countries,
-                value: _birthCountryId,
-                onChanged: (v) => setState(() => _birthCountryId = v),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.nakshatram,
-                icon: Icons.auto_awesome_rounded,
-                items: masters.nakshatrams,
-                value: _nakshatramId,
-                onChanged: (v) => setState(() => _nakshatramId = v),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.rasi,
-                icon: Icons.brightness_5_rounded,
-                items: [for (final z in masters.zodiacSigns) MasterItem(id: z.id, name: z.label)],
-                value: _zodiacId,
-                onChanged: (v) => setState(() => _zodiacId = v),
-              ),
-              // ============================================================ Community
-              const SizedBox(height: 24),
-              const SectionHeader(S.communitySection),
-              _MasterDropdown(
-                label: S.nationality,
-                icon: Icons.flag_outlined,
-                items: masters.countries,
-                value: _nationalityId,
-                onChanged: (v) => setState(() => _nationalityId = v),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.religion,
-                icon: Icons.temple_hindu_rounded,
-                items: masters.religions,
-                value: _religionId,
-                onChanged: (v) => setState(() => _religionId = v),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.community,
-                icon: Icons.groups_rounded,
-                items: communityOptions,
-                value: _communityId,
-                onChanged: (v) => setState(() {
-                  // A subcaste belongs to one community — reset it on change.
-                  if (v != _communityId) _subcaste.clear();
-                  _communityId = v;
-                }),
-              ),
-              const SizedBox(height: 12),
-              _SubcasteField(
-                controller: _subcaste,
-                options: subcasteOptions,
-                enabled: _communityId != null,
-                isNew: subcasteIsNew,
-                onChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _gothram,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: S.gothram,
-                  hintText: S.gothramHint,
-                  prefixIcon: Icon(Icons.temple_hindu_rounded),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _city,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(
-                        labelText: S.nativeCity,
-                        prefixIcon: Icon(Icons.home_rounded),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _state,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(labelText: S.nativeState),
-                    ),
-                  ),
-                ],
-              ),
-              // ============================================================ Appearance
-              const SizedBox(height: 24),
-              const SectionHeader(S.appearance),
-              _MasterDropdown(
-                label: S.complexion,
-                icon: Icons.face_rounded,
-                items: masters.complexions,
-                value: _complexionId,
-                onChanged: (v) => setState(() => _complexionId = v),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.motherTongue,
-                icon: Icons.record_voice_over_outlined,
-                items: masters.languages,
-                value: _motherTongueId,
-                onChanged: (v) => setState(() => _motherTongueId = v),
-              ),
-              const SizedBox(height: 12),
-              _LanguageChips(
-                items: masters.languages,
-                selected: _languageIds,
-                onToggle: (id) => setState(() {
-                  _languageIds.contains(id) ? _languageIds.remove(id) : _languageIds.add(id);
-                }),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.foodHabit,
-                icon: Icons.restaurant_rounded,
-                items: masters.foodHabits,
-                value: _foodHabitId,
-                onChanged: (v) => setState(() => _foodHabitId = v),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: _TapField(
-                      label: S.height,
-                      icon: Icons.straighten_rounded,
-                      value: _heightCm == null ? null : '${Profile.feetInches(_heightCm!)} ($_heightCm cm)',
-                      hint: S.selectHeight,
-                      onTap: _pickHeight,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: TextFormField(
-                      controller: _weight,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(3),
-                      ],
-                      decoration: const InputDecoration(labelText: S.weight, suffixText: 'kg'),
-                      validator: (v) {
-                        final t = (v ?? '').trim();
-                        if (t.isEmpty) return null;
-                        final n = int.tryParse(t);
-                        return n == null || n < 25 || n > 250 ? S.weightHint : null;
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              // ============================================================ Education
-              const SizedBox(height: 24),
-              const SectionHeader(S.educationSection),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12, left: 4),
-                child: Text(
-                  S.educationLevelsHint,
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-                ),
-              ),
-              for (final level in EducationLevel.values) ...[
-                _EducationLevelRow(
-                  level: level,
-                  controller: _eduLevelDetails[level]!,
-                  countries: masters.countries,
-                  countryId: _eduLevelCountry[level],
-                  onCountryChanged: (v) => setState(() => _eduLevelCountry[level] = v),
-                ),
-                const SizedBox(height: 12),
-              ],
-              TextFormField(
-                controller: _eduDetails,
-                maxLines: 2,
-                maxLength: 500,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: S.otherEducation,
-                  alignLabelWithHint: true,
-                ),
-              ),
-              const SizedBox(height: 4),
-              _MasterDropdown(
-                label: S.highestQualification,
-                icon: Icons.school_rounded,
-                items: masters.educations,
-                value: _educationId,
-                onChanged: (v) => setState(() => _educationId = v),
-              ),
-              // ============================================================ Work & income
-              const SizedBox(height: 24),
-              const SectionHeader(S.professional),
-              _MasterDropdown(
-                label: S.occupationType,
-                icon: Icons.badge_outlined,
-                items: masters.occupationTypes,
-                value: _occupationTypeId,
-                onChanged: (v) => setState(() => _occupationTypeId = v),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.occupation,
-                icon: Icons.work_outline_rounded,
-                items: masters.professions,
-                value: _professionId,
-                onChanged: (v) => setState(() => _professionId = v),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _income,
-                maxLength: 80,
-                decoration: const InputDecoration(
-                  labelText: S.salary,
-                  hintText: S.salaryHint,
-                  prefixIcon: Icon(Icons.currency_rupee_rounded),
-                  counterText: '',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _otherIncome,
-                maxLength: 80,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: S.otherIncome,
-                  hintText: S.otherIncomeHint,
-                  prefixIcon: Icon(Icons.savings_outlined),
-                  counterText: '',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _workPlace,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: S.workPlace,
-                  hintText: S.workPlaceHint,
-                  prefixIcon: Icon(Icons.location_city_rounded),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _MasterDropdown(
-                label: S.workCountry,
-                icon: Icons.public_rounded,
-                items: masters.countries,
-                value: _workCountryId,
-                onChanged: (v) => setState(() => _workCountryId = v),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _profDetails,
-                maxLines: 2,
-                maxLength: 500,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: S.otherProfessional,
-                  hintText: S.otherProfessionalHint,
-                  alignLabelWithHint: true,
-                ),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text(S.nriSwitch),
-                secondary: const Icon(Icons.flight_takeoff_rounded, color: AppColors.wineLight),
-                value: _isNri,
-                onChanged: (v) => setState(() => _isNri = v),
-              ),
-              if (_isNri) ...[
-                const SizedBox(height: 8),
-                _MasterDropdown(
-                  label: S.nriCountry,
-                  icon: Icons.public_rounded,
-                  items: masters.countries,
-                  value: _nriCountryId,
-                  onChanged: (v) => setState(() => _nriCountryId = v),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _nriPlace,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: S.nriPlace,
-                    hintText: S.nriPlaceHint,
-                    prefixIcon: Icon(Icons.flight_takeoff_rounded),
-                  ),
-                ),
-              ],
-              // ============================================================ Family
-              const SizedBox(height: 24),
-              const SectionHeader(S.family),
-              _OnRequestNote(text: S.onRequestNote),
-              const SizedBox(height: 16),
-              _PersonBlock(
-                nameController: _fatherName,
-                occupationController: _fatherOccupation,
-                phoneController: _fatherPhone,
-                nameLabel: S.fatherName,
-                occupationLabel: S.fatherOccupation,
-                phoneLabel: S.fatherPhone,
-              ),
-              const SizedBox(height: 16),
-              _PersonBlock(
-                nameController: _motherName,
-                occupationController: _motherOccupation,
-                phoneController: _motherPhone,
-                nameLabel: S.motherName,
-                occupationLabel: S.motherOccupation,
-                phoneLabel: S.motherPhone,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _contactName,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: S.contactPersonName,
-                  prefixIcon: Icon(Icons.contact_page_outlined),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _PhoneField(controller: _contactPhone, label: S.contactPersonPhone),
-              const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8, left: 4),
-                child: Text(S.hasSiblings, style: theme.textTheme.labelLarge),
-              ),
-              SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: -1, label: Text(S.notRecorded)),
-                  ButtonSegment(value: 0, label: Text(S.no)),
-                  ButtonSegment(value: 1, label: Text(S.yes)),
-                ],
-                selected: {_hasSiblings == null ? -1 : (_hasSiblings! ? 1 : 0)},
-                onSelectionChanged: (s) => setState(() {
-                  _hasSiblings = switch (s.first) { 1 => true, 0 => false, _ => null };
-                }),
-              ),
-              if (_hasSiblings == true) ...[
-                const SizedBox(height: 16),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: _CountField(label: S.elderSisters, controller: _elderSisters)),
-                    const SizedBox(width: 12),
-                    Expanded(child: _CountField(label: S.youngerSisters, controller: _youngerSisters)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: _CountField(label: S.elderBrothers, controller: _elderBrothers)),
-                    const SizedBox(width: 12),
-                    Expanded(child: _CountField(label: S.youngerBrothers, controller: _youngerBrothers)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _siblingsDetails,
-                  maxLines: 3,
-                  maxLength: 1000,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    labelText: S.siblingsDetails,
-                    alignLabelWithHint: true,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _family,
-                maxLines: 3,
-                maxLength: 1000,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: S.familyDetails,
-                  hintText: S.familyDetailsHint,
-                  alignLabelWithHint: true,
-                ),
-              ),
-              // ============================================================ Property
-              const SizedBox(height: 16),
-              const SectionHeader(S.property),
-              TextFormField(
-                controller: _propertyShare,
-                maxLength: 500,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: S.propertyShare,
-                  hintText: S.propertyShareHint,
-                  prefixIcon: Icon(Icons.pie_chart_outline_rounded),
-                  counterText: '',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _propertyDetails,
-                maxLines: 3,
-                maxLength: 1000,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: S.propertyDetails,
-                  hintText: S.propertyDetailsHint,
-                  alignLabelWithHint: true,
-                ),
-              ),
-              // ============================================================ About
-              const SizedBox(height: 16),
-              const SectionHeader(S.about),
-              TextFormField(
-                controller: _about,
-                maxLines: 4,
-                maxLength: 1000,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(hintText: S.aboutHint, alignLabelWithHint: true),
-              ),
-              // ============================================================ Photos
-              const SizedBox(height: 16),
-              SectionHeader(
-                S.photos,
-                trailing: Text(
-                  '$_photoCount / ${AppConfig.maxPhotos}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-                ),
-              ),
-              _PhotoStrip(
-                existing: _existingPhotos,
-                added: _newPhotos,
-                onAdd: _pickPhotos,
-                onRemoveExisting: _deleteExistingPhoto,
-                onRemoveNew: (f) => setState(() => _newPhotos.remove(f)),
-                onEditNew: _editNewPhoto,
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 20),
-                ErrorBanner(message: _error!),
-              ],
-              const SizedBox(height: 28),
-              FilledButton(
-                onPressed: _busy ? null : _save,
-                child: _busy ? const ButtonSpinner() : Text(widget.isEdit ? S.saveChanges : S.saveProfile),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ==================================================================== fields
-
-class _MasterDropdown extends StatelessWidget {
-  const _MasterDropdown({
-    required this.label,
-    required this.icon,
-    required this.items,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String label;
-  final IconData icon;
-  final List<MasterItem> items;
-  final int? value;
-  final ValueChanged<int?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    // Guard against a stale id that is no longer in the list.
-    final safeValue = items.any((i) => i.id == value) ? value : null;
-    return DropdownButtonFormField<int>(
-      // Re-created when the value is set from code (defaults after the masters
-      // load), since a FormField only reads initialValue once.
-      key: ValueKey('$label:${safeValue ?? 0}:${items.length}'),
-      initialValue: safeValue,
-      isExpanded: true,
-      decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
-      items: [
-        const DropdownMenuItem(value: null, child: Text('—')),
-        for (final item in items) DropdownMenuItem(value: item.id, child: Text(item.name)),
-      ],
-      onChanged: onChanged,
-    );
-  }
-}
-
-class _TapField extends StatelessWidget {
-  const _TapField({
-    required this.label,
-    required this.icon,
-    required this.value,
-    required this.hint,
-    required this.onTap,
-    this.onClear,
-  });
-
-  final String label;
-  final IconData icon;
-  final String? value;
-  final String hint;
-  final VoidCallback onTap;
-  final VoidCallback? onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: Icon(icon),
-          suffixIcon: onClear == null
-              ? null
-              : IconButton(tooltip: S.clear, icon: const Icon(Icons.close_rounded), onPressed: onClear),
-        ),
-        child: Text(
-          value ?? hint,
-          style: TextStyle(color: value == null ? theme.colorScheme.outline : null),
-        ),
-      ),
-    );
-  }
-}
-
-/// Autocomplete over the community's subcastes; typing something new is fine —
-/// the server creates it on save (SPEC §2). Always sends `subcaste_name`.
-class _SubcasteField extends StatefulWidget {
-  const _SubcasteField({
-    required this.controller,
-    required this.options,
-    required this.enabled,
-    required this.isNew,
-    required this.onChanged,
-  });
-
-  final TextEditingController controller;
-  final List<Subcaste> options;
-  final bool enabled;
-  final bool isNew;
-  final VoidCallback onChanged;
-
-  @override
-  State<_SubcasteField> createState() => _SubcasteFieldState();
-}
-
-class _SubcasteFieldState extends State<_SubcasteField> {
-  final _focus = FocusNode();
-
-  @override
-  void dispose() {
-    _focus.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return RawAutocomplete<Subcaste>(
-      textEditingController: widget.controller,
-      focusNode: _focus,
-      displayStringForOption: (s) => s.name,
-      optionsBuilder: (value) {
-        final q = value.text.trim().toLowerCase();
-        if (q.isEmpty) return widget.options;
-        return widget.options.where((s) => s.name.toLowerCase().contains(q));
+    // System back and the app bar's arrow both ask before unsaved changes go.
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave();
       },
-      onSelected: (_) => widget.onChanged(),
-      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) => TextField(
-        controller: controller,
-        focusNode: focusNode,
-        enabled: widget.enabled,
-        textCapitalization: TextCapitalization.words,
-        decoration: InputDecoration(
-          labelText: S.subcaste,
-          prefixIcon: const Icon(Icons.account_tree_outlined),
-          hintText: widget.enabled ? S.subcasteHint : S.subcasteNeedsCommunity,
-          helperText: widget.isNew ? S.subcasteNew : null,
-          helperMaxLines: 2,
-        ),
-        onChanged: (_) => widget.onChanged(),
-        onSubmitted: (_) => onFieldSubmitted(),
-      ),
-      optionsViewBuilder: (context, onSelected, options) => Align(
-        alignment: Alignment.topLeft,
-        child: Material(
-          elevation: 4,
-          borderRadius: BorderRadius.circular(12),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 240, maxWidth: 360),
-            child: ListView(
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              children: [
-                for (final o in options) ListTile(title: Text(o.name), onTap: () => onSelected(o)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Multi-select chips for the languages a person knows.
-class _LanguageChips extends StatelessWidget {
-  const _LanguageChips({required this.items, required this.selected, required this.onToggle});
-
-  final List<MasterItem> items;
-  final Set<int> selected;
-  final ValueChanged<int> onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InputDecorator(
-      decoration: const InputDecoration(
-        labelText: S.knownLanguages,
-        prefixIcon: Icon(Icons.translate_rounded),
-        contentPadding: EdgeInsets.fromLTRB(12, 14, 12, 10),
-      ),
-      child: items.isEmpty
-          ? Text('—', style: TextStyle(color: theme.colorScheme.outline))
-          : Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final item in items)
-                  FilterChip(
-                    label: Text(item.name),
-                    selected: selected.contains(item.id),
-                    onSelected: (_) => onToggle(item.id),
-                    visualDensity: VisualDensity.compact,
-                  ),
-              ],
-            ),
-    );
-  }
-}
-
-/// One row of the education table (SPEC §9.7): the level as the label, free
-/// text for the school / college, and the country it was studied in.
-class _EducationLevelRow extends StatelessWidget {
-  const _EducationLevelRow({
-    required this.level,
-    required this.controller,
-    required this.countries,
-    required this.countryId,
-    required this.onCountryChanged,
-  });
-
-  final EducationLevel level;
-  final TextEditingController controller;
-  final List<MasterItem> countries;
-  final int? countryId;
-  final ValueChanged<int?> onCountryChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final safeValue = countries.any((c) => c.id == countryId) ? countryId : null;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 3,
-          child: TextFormField(
-            controller: controller,
-            maxLength: 300,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(
-              labelText: level.label,
-              hintText: S.educationLevelDetailsHint,
-              counterText: '',
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 2,
-          child: DropdownButtonFormField<int>(
-            key: ValueKey('${level.apiValue}:${safeValue ?? 0}:${countries.length}'),
-            initialValue: safeValue,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: S.country),
-            items: [
-              const DropdownMenuItem(value: null, child: Text('—')),
-              for (final c in countries)
-                DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)),
-            ],
-            onChanged: onCountryChanged,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Name + occupation + phone for a parent (on request, SPEC §9.8).
-class _PersonBlock extends StatelessWidget {
-  const _PersonBlock({
-    required this.nameController,
-    required this.occupationController,
-    required this.phoneController,
-    required this.nameLabel,
-    required this.occupationLabel,
-    required this.phoneLabel,
-  });
-
-  final TextEditingController nameController;
-  final TextEditingController occupationController;
-  final TextEditingController phoneController;
-  final String nameLabel;
-  final String occupationLabel;
-  final String phoneLabel;
-
-  @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          TextFormField(
-            controller: nameController,
-            textCapitalization: TextCapitalization.words,
-            decoration: InputDecoration(
-              labelText: nameLabel,
-              prefixIcon: const Icon(Icons.person_outline_rounded),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: occupationController,
-            maxLength: 120,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(
-              labelText: occupationLabel,
-              hintText: S.occupationHint,
-              prefixIcon: const Icon(Icons.work_outline_rounded),
-              counterText: '',
-            ),
-          ),
-          const SizedBox(height: 12),
-          _PhoneField(controller: phoneController, label: phoneLabel),
-        ],
-      );
-}
-
-class _PhoneField extends StatelessWidget {
-  const _PhoneField({required this.controller, required this.label});
-
-  final TextEditingController controller;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => TextFormField(
-        controller: controller,
-        keyboardType: TextInputType.phone,
-        inputFormatters: [
-          FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-          LengthLimitingTextInputFormatter(15),
-        ],
-        decoration: InputDecoration(labelText: label, prefixIcon: const Icon(Icons.phone_outlined)),
-      );
-}
-
-/// A small 0–20 number field for the siblings breakdown.
-class _CountField extends StatelessWidget {
-  const _CountField({required this.label, required this.controller});
-
-  final String label;
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) => TextFormField(
-        controller: controller,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(2)],
-        decoration: InputDecoration(labelText: label),
-        validator: (v) {
-          final t = (v ?? '').trim();
-          if (t.isEmpty) return null;
-          final n = int.tryParse(t);
-          return n == null || n < 0 || n > 20 ? '0–20' : null;
-        },
-      );
-}
-
-/// The "shared only after approval" note above the family block.
-class _OnRequestNote extends StatelessWidget {
-  const _OnRequestNote({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.lock_rounded, size: 18, color: theme.colorScheme.outline),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PhotoStrip extends StatelessWidget {
-  const _PhotoStrip({
-    required this.existing,
-    required this.added,
-    required this.onAdd,
-    required this.onRemoveExisting,
-    required this.onRemoveNew,
-    required this.onEditNew,
-  });
-
-  final List<ProfilePhoto> existing;
-  final List<XFile> added;
-  final VoidCallback onAdd;
-  final ValueChanged<ProfilePhoto> onRemoveExisting;
-  final ValueChanged<XFile> onRemoveNew;
-
-  /// Opens the editor again on a photo that is not uploaded yet (SPEC §9.17).
-  final ValueChanged<XFile> onEditNew;
-
-  @override
-  Widget build(BuildContext context) {
-    final api = context.read<ApiClient>();
-    final theme = Theme.of(context);
-
-    Widget tile(Widget child, VoidCallback onRemove, {VoidCallback? onEdit}) => Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(width: 104, height: 104, child: child),
-            ),
-            Positioned(
-              top: -6,
-              right: -6,
-              child: IconButton(
-                tooltip: S.remove,
-                icon: const CircleAvatar(
-                  radius: 12,
-                  backgroundColor: Colors.black54,
-                  child: Icon(Icons.close_rounded, size: 15, color: Colors.white),
-                ),
-                onPressed: onRemove,
-              ),
-            ),
-            if (onEdit != null)
-              Positioned(
-                bottom: -6,
-                right: -6,
-                child: IconButton(
-                  tooltip: S.editPhoto,
-                  icon: const CircleAvatar(
-                    radius: 12,
-                    backgroundColor: Colors.black54,
-                    child: Icon(Icons.crop_rotate_rounded, size: 14, color: Colors.white),
-                  ),
-                  onPressed: onEdit,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(isEdit ? S.editProfileTitle : S.newProfileTitle),
+          leading: BackButton(onPressed: _busy ? null : _leave),
+          actions: [
+            // Editing: Save from any step.
+            if (isEdit && !last)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: TextButton(
+                  onPressed: _busy ? null : _save,
+                  child: const Text(S.save),
                 ),
               ),
           ],
-        );
-
-    return SizedBox(
-      height: 112,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: [
-          InkWell(
-            onTap: onAdd,
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              width: 104,
-              height: 104,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              // Not while the keyboard leaves almost no room (a phone held
+              // sideways): the field being typed in matters more.
+              if (MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom > 360)
+                StepHeader(
+                  labels: _stepLabels,
+                  current: _step,
+                  completed: {
+                    for (var i = 0; i < _stepCount; i++)
+                      if (i != _step && (isEdit || i < _reached)) i,
+                  },
+                  onTap: _jump,
+                  canTap: _canJump,
+                ),
+              Expanded(
+                child: IndexedStack(
+                  index: _step,
+                  children: [
+                    for (var i = 0; i < _stepCount; i++)
+                      Form(
+                        key: _formKeys[i],
+                        // Every field of a step stays built (a lazy list would
+                        // drop the ones scrolled away, and their validators).
+                        child: SingleChildScrollView(
+                          controller: _scrolls[i],
+                          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _StepTitle(step: i + 1, total: _stepCount, title: _stepTitles[i]),
+                              steps[i],
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: AppColors.rule)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(Icons.add_a_photo_outlined, color: theme.colorScheme.primary),
-                  const SizedBox(height: 6),
-                  Text(S.addPhotos, style: theme.textTheme.labelSmall),
+                  if (_error != null) ...[
+                    ErrorBanner(message: _error!),
+                    const SizedBox(height: 10),
+                  ],
+                  Row(
+                    children: [
+                      if (_step > 0) ...[
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                            onPressed: _busy ? null : _back,
+                            child: const Text(S.back, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        flex: 2,
+                        child: last
+                            ? FilledButton(
+                                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                onPressed: _busy ? null : _save,
+                                child: _busy
+                                    ? const ButtonSpinner()
+                                    : Text(
+                                        isEdit ? S.saveChanges : S.saveProfile,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                              )
+                            : FilledButton(
+                                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                onPressed: _busy ? null : _next,
+                                child: _busy
+                                    ? const ButtonSpinner()
+                                    : const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Flexible(child: Text(S.next, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                          SizedBox(width: 6),
+                                          Icon(Icons.arrow_forward_rounded, size: 18),
+                                        ],
+                                      ),
+                              ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
           ),
-          for (final photo in existing) ...[
-            const SizedBox(width: 10),
-            tile(AuthedPhoto(url: photo.absoluteUrl, api: api), () => onRemoveExisting(photo)),
-          ],
-          for (final file in added) ...[
-            const SizedBox(width: 10),
-            tile(
-              Image.file(File(file.path), fit: BoxFit.cover),
-              () => onRemoveNew(file),
-              onEdit: () => onEditNew(file),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
 }
 
-/// Feet + inches pickers → centimetres.
-class _HeightPickerDialog extends StatefulWidget {
-  const _HeightPickerDialog({required this.initialCm});
+/// "Step 2 of 4" over the step's full name, at the top of each step.
+class _StepTitle extends StatelessWidget {
+  const _StepTitle({required this.step, required this.total, required this.title});
 
-  final int? initialCm;
-
-  static Future<int?> show(BuildContext context, {int? initialCm}) => showDialog<int>(
-        context: context,
-        builder: (_) => _HeightPickerDialog(initialCm: initialCm),
-      );
-
-  @override
-  State<_HeightPickerDialog> createState() => _HeightPickerDialogState();
-}
-
-class _HeightPickerDialogState extends State<_HeightPickerDialog> {
-  late int _feet;
-  late int _inches;
-
-  @override
-  void initState() {
-    super.initState();
-    final totalInches = ((widget.initialCm ?? 165) / 2.54).round();
-    _feet = (totalInches ~/ 12).clamp(3, 7);
-    _inches = (totalInches % 12).clamp(0, 11);
-  }
-
-  int get _cm => ((_feet * 12 + _inches) * 2.54).round();
+  final int step;
+  final int total;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AlertDialog(
-      title: const Text(S.heightPickerTitle),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<int>(
-                  initialValue: _feet,
-                  decoration: const InputDecoration(labelText: S.feet),
-                  items: [for (var f = 3; f <= 7; f++) DropdownMenuItem(value: f, child: Text("$f'"))],
-                  onChanged: (v) => setState(() => _feet = v ?? _feet),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: DropdownButtonFormField<int>(
-                  initialValue: _inches,
-                  decoration: const InputDecoration(labelText: S.inches),
-                  items: [for (var i = 0; i <= 11; i++) DropdownMenuItem(value: i, child: Text('$i"'))],
-                  onChanged: (v) => setState(() => _inches = v ?? _inches),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
           Text(
-            '${Profile.feetInches(_cm)}  ·  $_cm cm',
-            style: theme.textTheme.titleMedium?.copyWith(color: AppColors.wine),
+            S.stepOf(step, total),
+            style: theme.textTheme.labelMedium?.copyWith(color: AppColors.goldDark, fontWeight: FontWeight.w700),
           ),
+          Text(title, style: theme.textTheme.titleLarge?.copyWith(color: AppColors.wine)),
         ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text(S.cancel)),
-        FilledButton(onPressed: () => Navigator.pop(context, _cm), child: const Text(S.done)),
-      ],
     );
   }
 }

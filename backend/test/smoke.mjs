@@ -1,5 +1,6 @@
 /**
- * End-to-end smoke test for the Mediator (matrimony agents) API.
+ * End-to-end smoke test for the Wedbook (matrimony agents) API — the backend of
+ * Wedbook Agent (code name Mediator) and Wedbook Matrimony (code name Gandharva).
  *
  *   node test/smoke.mjs                    # against http://localhost:3000
  *   BASE=https://your-domain node test/smoke.mjs
@@ -7,7 +8,9 @@
  * Asserts every business rule in CLAUDE.md and SPEC §3 / §9 against a running
  * API (steps 28–36 cover the Gandharva customer side: OTP, clients, browse
  * scope, interests, agent change, the registration form, the new profile
- * fields and the admin customer screens).
+ * fields and the admin customer screens; steps 42–46 cover SPEC §9.18: agent
+ * codes, customer IDs, the privacy toggles, the community audience and the
+ * four-step registration form).
  * Safe to re-run: it creates its own agents/customers/profiles with random
  * phones and tolerates rows left by earlier runs. Needs the mock OTP provider
  * (OTP_PROVIDER=mock with OTP_MOCK_ECHO on, the default) — or set OTP_CODE to
@@ -192,7 +195,7 @@ const TINY_JPEG = Buffer.from(
 );
 
 async function main() {
-  console.log(bold(`Mediator API smoke test → ${BASE}\n`));
+  console.log(bold(`Wedbook API smoke test → ${BASE}\n`));
 
   // ---------------------------------------------------------------- health
   step('0. Health');
@@ -988,7 +991,7 @@ async function main() {
   assertTrue('public page has NO siblings details', !mfHtml.includes('elder brother'));
   assertTrue('share text has NO siblings details', !(mfShare.body.whatsapp_text || '').includes('elder brother'));
   assertTrue('public page still has NO native place', !mfHtml.includes('Nalgonda'));
-  assertTrue('public page is branded Mediator', mfHtml.includes('Mediator'));
+  assertTrue('public page is branded Wedbook', mfHtml.includes('<div class="name">Wedbook</div>'));
   assertTrue('public page has an og:image for WhatsApp previews', mfHtml.includes('og:image'));
 
   const pdfRes = await fetch(`${BASE}/api/profiles/${MFID}/share`, {
@@ -1327,7 +1330,14 @@ async function main() {
   check('gender defaults to the opposite of my profile (bride)', 'bride', browse.body?.gender);
   assertTrue('every row is a bride', (browse.body?.profiles || []).every((x) => x.gender === 'bride'));
   assertTrue('every row is active', (browse.body?.profiles || []).every((x) => x.status === 'active'));
-  assertTrue('every row is in one of the agent\'s communities', (browse.body?.profiles || []).every((x) => [COMM_A, COMM_B].includes(x.community?.id)));
+  // …unless the profile's family widened its audience (SPEC §9.18 E) — rows left by
+  // steps 44 / 45 of an earlier run on the same database. The admin view tells which.
+  let inScope = true;
+  for (const x of (browse.body?.profiles || []).filter((r) => ![COMM_A, COMM_B].includes(r.community?.id))) {
+    const full = (await api('GET', `/api/profiles/${x.id}`, ADMIN)).body?.profile;
+    if (![COMM_A, COMM_B].includes(full?.community?.id) && !full?.audience_all && !full?.audience_communities?.length) inScope = false;
+  }
+  assertTrue('every row is in one of the agent\'s communities (or shown to them by its own audience)', inScope);
   const seesInBrowse = async (qs, id, token = K1) =>
     ((await api('GET', `/api/customer/profiles?${qs}`, token)).body?.profiles || []).filter((x) => x.id === id).length;
   check('sees Priya (community A, uploaded by A)', 1, await seesInBrowse('q=Priya%20Kumari&limit=100', PID));
@@ -1699,7 +1709,7 @@ async function main() {
   assertTrue('form is HTML', (formPage.headers.get('content-type') || '').includes('text/html'));
   check('form is noindex', 'noindex, nofollow', formPage.headers.get('x-robots-tag'));
   assertTrue('form names the agent', formPage.text.includes('Agent C') && formPage.text.includes('C Bureau'));
-  assertTrue('form is branded MILI', formPage.text.includes('MILI'));
+  assertTrue('form is branded Wedbook Matrimony', formPage.text.includes('Wedbook Matrimony') && !formPage.text.includes('MILI'));
   for (const field of ['phone', 'full_name', 'gender', 'community_id', 'edu_graduation', 'edu_graduation_country', 'elder_sisters', 'property_share', 'photos', 'work_country_id', 'occupation_type_id']) {
     assertTrue(`form has the ${field} field`, formPage.text.includes(`name="${field}"`));
   }
@@ -2264,7 +2274,7 @@ async function main() {
   check('delete request on an unpaid profile → 400 not_paid', 'not_paid', (await api('POST', `/api/customer/my-profiles/${unpaidNew.body?.profile?.id}/delete-request`, GB, {})).body?.error);
 
   // ---------------------------------------------------------------- v2.5
-  step('40. MILI notifications (SPEC §9.15)');
+  step('40. Customer notifications (SPEC §9.15)');
   check('agent token refused', 401, (await api('GET', '/api/customer/notifications', C)).status);
   const gNotif = await api('GET', '/api/customer/notifications', GB);
   check('customer notifications 200', 200, gNotif.status);
@@ -2345,6 +2355,476 @@ async function main() {
     check('customer removes theirs 200', 200, (await api('POST', '/api/customer/push/devices/remove', GB, { token: gTok })).status);
     check('push run is admin-only', 403, (await api('POST', '/api/admin/push/run', C)).status);
   }
+
+  // ================================================================ SPEC §9.18 — Wedbook
+  step('42. Agent codes (SPEC §9.18 B): STATE + NUMBER + LETTER, per state, chosen once, searchable');
+  const { agentCodeFor, profileCodeFor } = await import('../src/lib/codes.js');
+  check('1st agent of a state → KA1A', 'KA1A', agentCodeFor('KA', 1));
+  check('2nd → KA1B', 'KA1B', agentCodeFor('KA', 2));
+  check('26th → KA1Z', 'KA1Z', agentCodeFor('KA', 26));
+  check('27th → KA2A', 'KA2A', agentCodeFor('KA', 27));
+  check('last single-letter code → KA999Z', 'KA999Z', agentCodeFor('KA', 999 * 26));
+  check('then two letters → KA1AA', 'KA1AA', agentCodeFor('KA', 999 * 26 + 1));
+  check('… KA1AB', 'KA1AB', agentCodeFor('KA', 999 * 26 + 2));
+  check('… KA1ZZ', 'KA1ZZ', agentCodeFor('KA', 999 * 26 + 676));
+  check('… KA2AA', 'KA2AA', agentCodeFor('KA', 999 * 26 + 677));
+  check('… KA999ZZ', 'KA999ZZ', agentCodeFor('KA', 999 * 26 + 999 * 676));
+  check('then three letters → KA1AAA', 'KA1AAA', agentCodeFor('KA', 999 * 26 + 999 * 676 + 1));
+  check('every state counts on its own → AP1A', 'AP1A', agentCodeFor('AP', 1));
+  check('1st profile of an agent → GN-KA1A-A001', 'GN-KA1A-A001', profileCodeFor('KA1A', 1));
+  check('999th → A999', 'GN-KA1A-A999', profileCodeFor('KA1A', 999));
+  check('1000th → B001', 'GN-KA1A-B001', profileCodeFor('KA1A', 1000));
+  check('25974th → Z999', 'GN-KA999ZZ-Z999', profileCodeFor('KA999ZZ', 26 * 999));
+  check('then two letters → AA001', 'GN-KA1A-AA001', profileCodeFor('KA1A', 26 * 999 + 1));
+
+  const stateOf = (code) => m.states?.find((s) => s.code === code)?.id;
+  check('states master: Karnataka first', 'KA', m.states?.[0]?.code);
+  check('… the bureau’s six states lead the list', 'KA,AP,TS,TN,KL,MH', m.states?.slice(0, 6).map((s) => s.code).join(','));
+  check('… Telangana is TS', 'Telangana', m.states?.find((s) => s.code === 'TS')?.name);
+  assertTrue('… every state and union territory', (m.states?.length ?? 0) >= 36);
+  check('masters carry the 22 privacy toggles', 22, m.privacy_fields?.length);
+  check('… and what is always shown', 'Main photo,Age,Gender', m.privacy_always_visible?.join(','));
+  check('… each with a key, a label and a section', 0, m.privacy_fields?.filter((f) => !f.key || !f.label || !['personal', 'professional', 'horoscope'].includes(f.section)).length);
+
+  const SK = stateOf('SK');
+  const TN = stateOf('TN');
+  /** The sequence number a code has in its state (brute force — codes are short). */
+  const seqOf = (prefix, code) => {
+    for (let n = 1; n < 800000; n++) if (agentCodeFor(prefix, n) === code) return n;
+    return -1;
+  };
+  const w1Phone = randomPhone('9');
+  const w1 = await signupAgent({ full_name: 'Wed One', phone: w1Phone, password: 'secret123', agency_name: 'One Bureau', community_ids: [COMM_A], state_id: SK });
+  check('signup with a state 201', 201, w1.status);
+  const W1 = w1.body?.token;
+  const W1_ID = w1.body?.agent?.id;
+  const W1_CODE = w1.body?.agent?.agent_code;
+  assertTrue('a new (still pending) agent already has a code of their state', /^SK\d{1,3}[A-Z]+$/.test(W1_CODE || ''), `got ${W1_CODE}`);
+  check('… and the state on the agent object', 'Sikkim', w1.body?.agent?.state?.name);
+  const w2Phone = randomPhone('9');
+  const w2 = await signupAgent({ full_name: 'Wed Two', phone: w2Phone, password: 'secret123', agency_name: 'Two Bureau', community_ids: [COMM_A], state_id: SK });
+  const W2 = w2.body?.token;
+  const W2_ID = w2.body?.agent?.id;
+  check('the next agent of the same state gets the next code', agentCodeFor('SK', seqOf('SK', W1_CODE) + 1), w2.body?.agent?.agent_code);
+  const w3Phone = randomPhone('8');
+  const w3 = await signupAgent({ full_name: 'Wed Three', phone: w3Phone, password: 'secret123', agency_name: 'Three Bureau', community_ids: [COMM_B], state_id: TN });
+  const W3 = w3.body?.token;
+  const W3_ID = w3.body?.agent?.id;
+  assertTrue('another state numbers on its own', /^TN\d{1,3}[A-Z]+$/.test(w3.body?.agent?.agent_code || ''), `got ${w3.body?.agent?.agent_code}`);
+  const badState = await signupAgent({ full_name: 'No Such State', phone: randomPhone('9'), password: 'secret123', community_ids: [COMM_A], state_id: 999999 });
+  check('unknown state 400', 400, badState.status);
+  check('… invalid_state', 'invalid_state', badState.body?.error);
+  check('a pending agent cannot use /my/state', 403, (await api('POST', '/api/my/state', W1, { state_id: TN })).status);
+  for (const id of [W1_ID, W2_ID, W3_ID]) await api('POST', `/api/admin/agents/${id}/activate`, ADMIN);
+  check('login returns the code', W1_CODE, (await api('POST', '/api/auth/login', null, { phone: w1Phone, password: 'secret123' })).body?.agent?.agent_code);
+  check('/auth/me returns the code', W1_CODE, (await api('GET', '/api/auth/me', W1)).body?.agent?.agent_code);
+  const w1Again = await api('POST', '/api/my/state', W1, { state_id: TN });
+  check('a code can never be changed 409', 409, w1Again.status);
+  check('… state_already_set', 'state_already_set', w1Again.body?.error);
+  check('… the agent keeps code and state', `${W1_CODE}|SK`, await api('GET', '/api/auth/me', W1).then((r) => `${r.body?.agent?.agent_code}|${r.body?.agent?.state?.code}`));
+  check('/my/account keeps returning them', W1_CODE, (await api('PATCH', '/api/my/account', W1, { city: 'Gangtok' })).body?.agent?.agent_code);
+
+  // Agents registered before v2.8 (A signed up without a state) choose once.
+  const aMe = await api('GET', '/api/auth/me', A);
+  check('an agent from before v2.8 has no code', null, aMe.body?.agent?.agent_code);
+  check('… and no state', null, aMe.body?.agent?.state);
+  const aBefore = await api('GET', '/api/profiles?mine=true&sort=oldest&limit=100', A);
+  check('… nor do their profiles have IDs yet', 0, aBefore.body?.profiles?.filter((x) => x.profile_code).length);
+  check('state_id is required', 400, (await api('POST', '/api/my/state', A, {})).status);
+  check('unknown state', 'invalid_state', (await api('POST', '/api/my/state', A, { state_id: 999999 })).body?.error);
+  const aState = await api('POST', '/api/my/state', A, { state_id: stateOf('KA') });
+  check('A chooses Karnataka 200', 200, aState.status);
+  const A_CODE = aState.body?.agent?.agent_code;
+  assertTrue('… and gets a KA code', /^KA\d{1,3}[A-Z]+$/.test(A_CODE || ''), `got ${A_CODE}`);
+  check('… state Karnataka', 'Karnataka', aState.body?.agent?.state?.name);
+  check('choosing again 409', 409, (await api('POST', '/api/my/state', A, { state_id: stateOf('AP') })).status);
+  const aMine = await api('GET', '/api/profiles?mine=true&sort=oldest&limit=100', A);
+  const aTotal = aMine.body?.total;
+  const aIdPattern = new RegExp(`^GN-${A_CODE}-[A-Z]\\d{3}$`);
+  assertTrue('A has uploads to number', aTotal > 0 && aTotal <= 100, `total ${aTotal}`);
+  check('every existing upload of A got an ID', aMine.body?.profiles?.length, aMine.body?.profiles?.filter((x) => aIdPattern.test(x.profile_code || '')).length);
+  check('… oldest first, starting at A001', `GN-${A_CODE}-A001`, aMine.body?.profiles?.[0]?.profile_code);
+  check('… in upload order', aMine.body?.profiles?.map((_, i) => profileCodeFor(A_CODE, i + 1)).join(','), aMine.body?.profiles?.map((x) => x.profile_code).join(','));
+  const idOne = await apiForm('POST', '/api/profiles', A, { full_name: 'Id Bride One', gender: 'bride', dob: '1997-01-01', community_id: COMM_A });
+  check('a new upload gets the next ID', profileCodeFor(A_CODE, aTotal + 1), idOne.body?.profile?.profile_code);
+  check('delete it', 200, (await api('DELETE', `/api/profiles/${idOne.body?.profile?.id}`, A)).status);
+  const idTwo = await apiForm('POST', '/api/profiles', A, { full_name: 'Id Bride Two', gender: 'bride', dob: '1997-01-02', community_id: COMM_A });
+  check("a deleted profile's ID is never reused", profileCodeFor(A_CODE, aTotal + 2), idTwo.body?.profile?.profile_code);
+  const IDP = idTwo.body?.profile;
+  const IDP_CODE = IDP?.profile_code;
+
+  // The ID carries the agent's code → owner side only (uploader, admin).
+  check('the uploader reads the ID on the detail', IDP_CODE, (await api('GET', `/api/profiles/${IDP.id}`, A)).body?.profile?.profile_code);
+  check('an admin reads it too', IDP_CODE, (await api('GET', `/api/profiles/${IDP.id}`, ADMIN)).body?.profile?.profile_code);
+  const idAsW2 = await api('GET', `/api/profiles/${IDP.id}`, W2);
+  check('another agent can open the profile', 200, idAsW2.status);
+  check('… but never gets its ID', false, 'profile_code' in (idAsW2.body?.profile ?? {}));
+  assertTrue('… nor the agent code anywhere in the payload', !JSON.stringify(idAsW2.body).includes(A_CODE));
+  const idRowsW2 = await api('GET', '/api/profiles?limit=100&q=Id%20Bride', W2);
+  assertTrue('… the list finds it by name', idRowsW2.body?.profiles?.some((x) => x.id === IDP.id));
+  check('… without an ID on any row', 0, idRowsW2.body?.profiles?.filter((x) => 'profile_code' in x).length);
+  check('search by ID finds it for the uploader', IDP.id, (await api('GET', `/api/profiles?q=${IDP_CODE}`, A)).body?.profiles?.[0]?.id);
+  check('… typed in lower case, without the GN', IDP.id, (await api('GET', `/api/profiles?q=${IDP_CODE.slice(3).toLowerCase()}`, A)).body?.profiles?.[0]?.id);
+  check('… and for an admin', IDP.id, (await api('GET', `/api/profiles?q=${IDP_CODE}`, ADMIN)).body?.profiles?.[0]?.id);
+  check('… but not for another agent', 0, (await api('GET', `/api/profiles?q=${IDP_CODE}`, W2)).body?.total);
+  const idShare = await api('POST', `/api/profiles/${IDP.id}/share`, A, { method: 'link' });
+  assertTrue('the share text never carries the ID', idShare.status === 200 && !idShare.body?.whatsapp_text?.includes('GN-'));
+  const idPage = await raw(idShare.body?.share_url);
+  assertTrue('… nor does the public page', idPage.status === 200 && !idPage.text.includes('GN-') && !idPage.text.includes(A_CODE));
+
+  const byCode = (await api('GET', `/api/admin/agents?q=${A_CODE}`, ADMIN)).body?.agents?.find((x) => x.id === A_ID);
+  assertTrue('admin finds an agent by code', Boolean(byCode));
+  check('… the row carries the code', A_CODE, byCode?.agent_code);
+  check('… and the state', 'KA', byCode?.state?.code);
+  const stateName = `Test State ${Date.now() % 1000000}`;
+  check('a state needs a 2-letter code', 400, (await api('POST', '/api/admin/masters/states', ADMIN, { name: stateName, code: 'TOOLONG' })).status);
+  check('an existing code is refused', 409, (await api('POST', '/api/admin/masters/states', ADMIN, { name: stateName, code: 'ka' })).status);
+  const kaRow = (await api('GET', '/api/masters?include_inactive=true', ADMIN)).body?.states?.find((s) => s.code === 'KA');
+  check("a state's code cannot be edited", 400, (await api('PATCH', `/api/admin/masters/states/${kaRow?.id}`, ADMIN, { code: 'KX' })).status);
+  check('… its sort order can', 1, (await api('PATCH', `/api/admin/masters/states/${kaRow?.id}`, ADMIN, { sort_order: 1 })).body?.row?.sort_order);
+
+  // ---------------------------------------------------------------- customer IDs
+  step('43. Customer IDs (SPEC §9.18 C): from the agent, permanent, owner side only; link an agent by code');
+  const cg = await signupCustomer({ full_name: 'Code Guest', phone: randomPhone('7') });
+  const CG = cg.body?.token;
+  const CG_ID = cg.body?.customer?.id;
+  check('a guest has no ID', null, cg.body?.customer?.customer_code);
+  const dirRow = (await api('GET', `/api/customer/agents?q=${W1_CODE}`, CG)).body?.agents?.find((x) => x.id === W1_ID);
+  assertTrue('the directory finds an agent by code', Boolean(dirRow));
+  check('… and shows the code', W1_CODE, dirRow?.agent_code);
+  check('a malformed agent code 400', 400, (await api('POST', '/api/customer/agent', CG, { agent_code: 'not a code' })).status);
+  check('an unknown agent code 404', 'agent_not_found', (await api('POST', '/api/customer/agent', CG, { agent_code: 'ZZ999ZZZ' })).body?.error);
+  const linkByCode = await api('POST', '/api/customer/agent', CG, { agent_code: ` ${W1_CODE.toLowerCase()} ` });
+  check('link an agent by code (any case) 200', 200, linkByCode.status);
+  check('… pending with that agent', W1_ID, linkByCode.body?.customer?.agent?.id);
+  check('… whose card shows the code', W1_CODE, linkByCode.body?.customer?.agent?.agent_code);
+  const cgProfile = await apiForm('POST', '/api/customer/my-profiles', CG, { full_name: 'Code Groom', gender: 'groom', dob: '1994-04-04', community_id: COMM_A });
+  check('register a profile 201', 201, cgProfile.status);
+  const CG_PID = cgProfile.body?.profile?.id;
+  const CG_CODE = cgProfile.body?.profile?.profile_code;
+  check("the ID comes from the agent — W1's first", `GN-${W1_CODE}-A001`, CG_CODE);
+  const cgMe = await api('GET', '/api/customer/auth/me', CG);
+  check('me.customer_code', CG_CODE, cgMe.body?.customer?.customer_code);
+  check('me.profiles[].profile_code', CG_CODE, cgMe.body?.customer?.profiles?.[0]?.profile_code);
+  const w1Client = (await api('GET', `/api/clients?q=${CG_CODE}`, W1)).body?.clients?.find((x) => x.id === CG_ID);
+  assertTrue('the agent finds the client by ID', Boolean(w1Client));
+  check('… client row customer_code', CG_CODE, w1Client?.customer_code);
+  check('… and on the profile summary', CG_CODE, w1Client?.profile?.profile_code);
+  check('… and in profiles[]', CG_CODE, w1Client?.profiles?.[0]?.profile_code);
+  check('another agent does not find it by ID', 0, (await api('GET', `/api/clients?q=${CG_CODE}`, W2)).body?.clients?.length);
+  check('admin customers search by ID', CG_ID, (await api('GET', `/api/admin/customers?q=${CG_CODE}`, ADMIN)).body?.customers?.[0]?.id);
+  check('cash payment', 200, (await api('POST', `/api/clients/${CG_ID}/profiles/${CG_PID}/mark-paid`, W1, {})).status);
+  check('approve', 200, (await api('POST', `/api/clients/${CG_ID}/approve`, W1)).status);
+  const moved = await api('PUT', `/api/admin/customers/${CG_ID}/agent`, ADMIN, { agent_id: W2_ID });
+  check('admin moves the customer to another agent', W2_ID, moved.body?.customer?.agent_id);
+  check('… the ID does not change', CG_CODE, moved.body?.customer?.customer_code);
+  check('… the new agent reads it as the owner', CG_CODE, (await api('GET', `/api/profiles/${CG_PID}`, W2)).body?.profile?.profile_code);
+  const asOld = await api('GET', `/api/profiles/${CG_PID}`, W1);
+  check('… the old agent still sees the (live) profile', 200, asOld.status);
+  check('… but no longer its ID', false, 'profile_code' in (asOld.body?.profile ?? {}));
+  check("… and the new agent's own numbering is untouched", `GN-${w2.body?.agent?.agent_code}-A001`,
+    (await apiForm('POST', '/api/profiles', W2, { full_name: 'W2 First Upload', gender: 'groom', dob: '1993-09-09', community_id: COMM_A })).body?.profile?.profile_code);
+
+  // A profile whose agent has no code yet waits; it gets its ID when the agent chooses a state.
+  const ng = await signupCustomer({ full_name: 'No Code Yet', phone: randomPhone('7'), agent_phone: cPhone });
+  const ngProfile = await apiForm('POST', '/api/customer/my-profiles', ng.body?.token, { full_name: 'No Code Bride', gender: 'bride', dob: '1996-06-06', community_id: COMM_A });
+  check('a profile under an agent without a code 201', 201, ngProfile.status);
+  check('… has no ID yet', null, ngProfile.body?.profile?.profile_code);
+  const cState = await api('POST', '/api/my/state', C, { state_id: stateOf('TS') });
+  const C_CODE = cState.body?.agent?.agent_code;
+  assertTrue('C chooses Telangana → a TS code', /^TS\d{1,3}[A-Z]+$/.test(C_CODE || ''), `got ${C_CODE}`);
+  const ngAfter = await api('GET', `/api/customer/my-profiles/${ngProfile.body?.profile?.id}`, ng.body?.token);
+  assertTrue('… and the waiting profile gets its ID', new RegExp(`^GN-${C_CODE}-[A-Z]\\d{3}$`).test(ngAfter.body?.profile?.profile_code || ''), `got ${ngAfter.body?.profile?.profile_code}`);
+
+  /** A customer of the agent behind `agentPhone`, approved, with a paid profile → full access. */
+  const fullCustomer = async ({ name, agentPhone, agentToken, profile }) => {
+    const su = await signupCustomer({ full_name: name, phone: randomPhone('7'), agent_phone: agentPhone });
+    const token = su.body?.token;
+    const id = su.body?.customer?.id;
+    const created = await apiForm('POST', '/api/customer/my-profiles', token, profile);
+    await api('POST', `/api/clients/${id}/profiles/${created.body?.profile?.id}/mark-paid`, agentToken, {});
+    await api('POST', `/api/clients/${id}/approve`, agentToken);
+    return { token, id, profile: created.body?.profile };
+  };
+
+  // ---------------------------------------------------------------- privacy toggles
+  step('44. Privacy toggles (SPEC §9.18 D): a switched-off detail is on request — in lists, filters, shares, photos, names');
+  const HIDE = ['name', 'dob', 'community', 'education', 'income', 'star_rasi', 'photos'];
+  const secretP = await apiForm('POST', '/api/profiles', W1, {
+    full_name: 'Secret Lakshmi', gender: 'bride', dob: '1997-08-09', height_cm: 162, community_id: COMM_A,
+    subcaste_name: `HideSub${Date.now() % 100000}`, education_id: EDU, profession_id: PROF, zodiac_id: ZOD, nakshatram_id: NAK,
+    income_text: '77 LPA', about: 'Likes painting.', hidden_fields: JSON.stringify(HIDE),
+  }, [{ buffer: await samplePhoto('Main'), name: '1.jpg', type: 'image/jpeg' }, { buffer: await samplePhoto('Second'), name: '2.jpg', type: 'image/jpeg' }]);
+  check('create with hidden_fields 201', 201, secretP.status);
+  const HP = secretP.body?.profile;
+  const SECRET_ID = HP?.id;
+  const NEUTRAL = `Profile ${SECRET_ID}`;
+  check('the uploader still reads the name', 'Secret Lakshmi', HP?.full_name);
+  check('… nothing is masked for them', 0, HP?.masked_fields?.length);
+  check('… and gets the setting back (a hidden community hides the subcaste too)', [...HIDE, 'subcaste'].sort().join(','), [...(HP?.hidden_fields ?? [])].sort().join(','));
+  check('… both photos', 2, HP?.photos?.length);
+  const badKey = await api('PATCH', `/api/profiles/${SECRET_ID}`, W1, { hidden_fields: ['name', 'salary'] });
+  check('an unknown toggle is refused 400', 400, badKey.status);
+  check('… validation_failed', 'validation_failed', badKey.body?.error);
+  check('only the uploader may change the toggles', 403, (await api('PATCH', `/api/profiles/${SECRET_ID}`, W2, { hidden_fields: [] })).status);
+
+  const hv = (await api('GET', `/api/profiles/${SECRET_ID}`, W2)).body?.profile;
+  check('another agent reads a neutral name', NEUTRAL, hv?.full_name);
+  check('… masked_fields, in toggle order', 'name,dob,community,subcaste,photos,education,income,star_rasi', hv?.masked_fields?.join(','));
+  check('… gender always shown', 'bride', hv?.gender);
+  assertTrue('… age always shown', Number.isInteger(hv?.age) && hv.age >= 28);
+  check('… no date of birth', null, hv?.dob);
+  check('… no community', null, hv?.community);
+  check('… no subcaste', null, hv?.subcaste);
+  check('… no education', null, hv?.education);
+  check('… no income', null, hv?.income_text);
+  check('… no star', null, hv?.nakshatram);
+  check('… no rasi', null, hv?.zodiac);
+  check('… what was not switched off stays: height', 162, hv?.height_cm);
+  check('… profession', PROF, hv?.profession?.id);
+  check('… about', 'Likes painting.', hv?.about);
+  check('… only the main photo', 1, hv?.photos?.length);
+  check('… which is the first one', HP?.photos?.[0]?.id, hv?.photos?.[0]?.id);
+  check("… not the family's setting", false, 'hidden_fields' in (hv ?? {}));
+  check('… not the audience', false, 'audience_all' in (hv ?? {}));
+  check('the main photo is served', 200, (await raw(`${BASE}${HP.photos[0].url}`, { token: W2 })).status);
+  check('the hidden second photo is not', 404, (await raw(`${BASE}${HP.photos[1].url}`, { token: W2 })).status);
+  check('… but the uploader gets it', 200, (await raw(`${BASE}${HP.photos[1].url}`, { token: W1 })).status);
+  const rowFor = async (token) => (await api('GET', '/api/profiles?limit=100&gender=bride', token)).body?.profiles?.find((x) => x.id === SECRET_ID);
+  const hRow = await rowFor(W2);
+  check('list rows are masked the same way', NEUTRAL, hRow?.full_name);
+  check('… row community', null, hRow?.community);
+  check('… row photo count', 1, hRow?.photos?.length);
+  check('… the uploader’s own row is in full', 'Secret Lakshmi', (await rowFor(W1))?.full_name);
+
+  const finds = async (token, qs) => Boolean((await api('GET', `/api/profiles?limit=100&${qs}`, token)).body?.profiles?.some((x) => x.id === SECRET_ID));
+  check('a community filter does not match a hidden community', false, await finds(W2, `community_id=${COMM_A}`));
+  check('… nor an education filter', false, await finds(W2, `education_id=${EDU}`));
+  check('… nor a star filter', false, await finds(W2, `nakshatram_id=${NAK}`));
+  check('… nor the name search', false, await finds(W2, 'q=Secret%20Lakshmi'));
+  check('a filter on a shown detail still matches', true, await finds(W2, `profession_id=${PROF}`));
+  check('… so does height', true, await finds(W2, 'height_min=160&height_max=165'));
+  check('age and gender always match', true, await finds(W2, 'gender=bride&age_min=20&age_max=40'));
+  check('sorting by name still lists it', true, await finds(W2, 'gender=bride&sort=name&age_min=20&age_max=40'));
+  check('the uploader still finds it by community', true, await finds(W1, `community_id=${COMM_A}`));
+  check('… and by name', true, await finds(W1, 'q=Secret%20Lakshmi'));
+  check('an admin sees through every toggle', true, await finds(ADMIN, `community_id=${COMM_A}&q=Secret%20Lakshmi`));
+
+  // What leaves the app is always masked — also when the uploader shares it.
+  const hShare = await api('POST', `/api/profiles/${SECRET_ID}/share`, W1, { method: 'link' });
+  check('the uploader shares it 200', 200, hShare.status);
+  assertTrue('the WhatsApp text has the neutral name, never the real one', hShare.body?.whatsapp_text?.includes(NEUTRAL) && !hShare.body?.whatsapp_text?.includes('Lakshmi'));
+  assertTrue('… and no hidden community', !hShare.body?.summary?.includes(m.communities[0].name));
+  const hPage = await raw(hShare.body?.share_url);
+  check('public page 200', 200, hPage.status);
+  assertTrue('… without the hidden name', hPage.text.includes(NEUTRAL) && !hPage.text.includes('Lakshmi'));
+  assertTrue('… without the hidden income', !hPage.text.includes('77 LPA'));
+  assertTrue('… without the hidden community', !hPage.text.includes(m.communities[0].name));
+  assertTrue('… without the hidden date of birth', !hPage.text.includes('9 Aug 1997'));
+  assertTrue('… with the details that are shown', hPage.text.includes('Likes painting.') && hPage.text.includes(m.professions[0].name));
+  check('… and one photo only', 1, (hPage.text.match(/class="pic"/g) || []).length);
+  check('the public photo route serves the main photo', 200, (await raw(`${hShare.body?.share_url}/photo/${HP.photos[0].id}`)).status);
+  check('… and refuses the hidden one', 404, (await raw(`${hShare.body?.share_url}/photo/${HP.photos[1].id}`)).status);
+  assertTrue('the public page is branded Wedbook', hPage.text.includes('Wedbook') && !hPage.text.includes('Mediator'));
+  const hPdf = await raw(`${BASE}/api/profiles/${SECRET_ID}/share`, { method: 'POST', token: W1, json: { method: 'pdf' } });
+  check('PDF share 200', 200, hPdf.status);
+  assertTrue('… named after the neutral label', (hPdf.headers.get('content-disposition') || '').includes(`profile-${SECRET_ID}`));
+  const hCard = await raw(`${BASE}/api/profiles/${SECRET_ID}/share`, { method: 'POST', token: W2, json: { method: 'download' } });
+  check('photo card by another agent 200', 200, hCard.status);
+  assertTrue('… named after the neutral label too', (hCard.headers.get('content-disposition') || '').includes(`profile-${SECRET_ID}`));
+
+  // An approved contact request lifts the toggles; revoking puts them back.
+  const hReq = await api('POST', `/api/profiles/${SECRET_ID}/contact-request`, W2, {});
+  check('contact request 201', 201, hReq.status);
+  const HREQ = hReq.body?.contact_request?.id;
+  check('… the sent row keeps the name neutral', NEUTRAL, hReq.body?.contact_request?.profile_name);
+  check('… and says so', true, hReq.body?.contact_request?.profile_name_hidden);
+  check('… no community either', null, hReq.body?.contact_request?.profile_community);
+  const hInbox = (await api('GET', '/api/contact-requests?box=inbox', W1)).body?.contact_requests?.find((x) => x.id === HREQ);
+  check("the uploader's inbox shows the real name", 'Secret Lakshmi', hInbox?.profile_name);
+  check('… not flagged', false, hInbox?.profile_name_hidden);
+  check('shortlist it', 201, (await api('POST', `/api/profiles/${SECRET_ID}/shortlist`, W2, { client_label: 'Hidden test' })).status);
+  const hiddenSlRow = async () => (await api('GET', '/api/shortlists', W2)).body?.groups?.flatMap((g) => g.profiles)?.find((x) => x.profile_id === SECRET_ID);
+  const slHidden = await hiddenSlRow();
+  check('shortlist row: neutral name', NEUTRAL, slHidden?.full_name);
+  check('… flagged', true, slHidden?.name_hidden);
+  check('… no community', null, slHidden?.community);
+  check('hold request row: neutral name', NEUTRAL, (await api('POST', `/api/profiles/${SECRET_ID}/hold-request`, W2, {})).body?.hold_request?.profile_name);
+  check('approve the contact request', 200, (await api('POST', `/api/contact-requests/${HREQ}/approve`, W1)).status);
+  const hGranted = (await api('GET', `/api/profiles/${SECRET_ID}`, W2)).body?.profile;
+  check('an approved request reveals the name', 'Secret Lakshmi', hGranted?.full_name);
+  check('… nothing masked', 0, hGranted?.masked_fields?.length);
+  check('… the community', COMM_A, hGranted?.community?.id);
+  check('… the income', '77 LPA', hGranted?.income_text);
+  check('… both photos', 2, hGranted?.photos?.length);
+  check('… and the second photo is served', 200, (await raw(`${BASE}${HP.photos[1].url}`, { token: W2 })).status);
+  check('… still no ID for a non-owner', false, 'profile_code' in (hGranted ?? {}));
+  check('the list row is unmasked too', 'Secret Lakshmi', (await rowFor(W2))?.full_name);
+  check('the sent box shows the real name while approved', 'Secret Lakshmi', (await api('GET', '/api/contact-requests?box=sent', W2)).body?.contact_requests?.find((x) => x.id === HREQ)?.profile_name);
+  check('the shortlist row too', 'Secret Lakshmi', (await hiddenSlRow())?.full_name);
+  check('the hold row too', 'Secret Lakshmi', (await api('GET', '/api/hold-requests?box=sent', W2)).body?.hold_requests?.find((x) => x.profile_id === SECRET_ID)?.profile_name);
+  const decided = (items) => items?.filter((i) => i.type === 'contact_request_decided' && i.id === HREQ) ?? [];
+  assertTrue('the notification names it while approved', decided((await api('GET', '/api/notifications', W2)).body?.items).some((i) => i.body.includes('Secret Lakshmi')));
+  check('…but shares by that agent stay masked', true, (await api('POST', `/api/profiles/${SECRET_ID}/share`, W2, { method: 'whatsapp' })).body?.summary?.includes(NEUTRAL));
+  check('revoke', 200, (await api('POST', `/api/contact-requests/${HREQ}/revoke`, W1)).status);
+  check('revoked → the neutral name again', NEUTRAL, (await api('GET', `/api/profiles/${SECRET_ID}`, W2)).body?.profile?.full_name);
+  check('… on the row', NEUTRAL, (await rowFor(W2))?.full_name);
+  check('… the second photo is refused again', 404, (await raw(`${BASE}${HP.photos[1].url}`, { token: W2 })).status);
+  assertTrue('… and in the notification', decided((await api('GET', '/api/notifications', W2)).body?.items).every((i) => i.body.includes(NEUTRAL) && !i.body.includes('Lakshmi')));
+
+  // Customers: masked while browsing, revealed by an accepted interest.
+  const cv = await fullCustomer({ name: 'Viewer Groom', agentPhone: w2Phone, agentToken: W2, profile: { full_name: 'Viewer Groom', gender: 'groom', dob: '1993-03-03', community_id: COMM_A } });
+  check('a viewer customer with full access', 'full', (await api('GET', '/api/customer/auth/me', cv.token)).body?.customer?.access);
+  const cRowFor = async () => (await api('GET', '/api/customer/profiles?limit=100', cv.token)).body?.profiles?.find((x) => x.id === SECRET_ID);
+  const cRow = await cRowFor();
+  check('a customer browsing reads the neutral name', NEUTRAL, cRow?.full_name);
+  check('… the row says what is withheld', true, cRow?.masked_fields?.includes('community'));
+  check('… one photo', 1, cRow?.photos?.length);
+  check('… never an ID', false, 'profile_code' in (cRow ?? {}));
+  const cDet = (await api('GET', `/api/customer/profiles/${SECRET_ID}`, cv.token)).body?.profile;
+  check('the detail is masked too', `${NEUTRAL}|null|null`, `${cDet?.full_name}|${cDet?.income_text}|${cDet?.community}`);
+  check('the customer photo route refuses the hidden photo', 404, (await raw(`${BASE}/api/customer/photos/${HP.photos[1].id}`, { token: cv.token })).status);
+  check('… and serves the main one', 200, (await raw(`${BASE}/api/customer/photos/${HP.photos[0].id}`, { token: cv.token })).status);
+  check('name search does not find it', false, (await api('GET', '/api/customer/profiles?q=Secret%20Lakshmi&limit=100', cv.token)).body?.profiles?.some((x) => x.id === SECRET_ID));
+  check('a community filter does not match it', false, (await api('GET', `/api/customer/profiles?limit=100&community_id=${COMM_A}`, cv.token)).body?.profiles?.some((x) => x.id === SECRET_ID));
+  const cvInt = await api('POST', `/api/customer/profiles/${SECRET_ID}/interest`, cv.token, {});
+  check('interest 201', 201, cvInt.status);
+  const HINT = cvInt.body?.interest?.id;
+  check('… my interest row keeps the name neutral', NEUTRAL, cvInt.body?.interest?.profile?.full_name);
+  check('… and flags it', true, cvInt.body?.interest?.profile?.name_hidden);
+  check('… my own profile on it is in full, with my ID', cv.profile?.profile_code, cvInt.body?.interest?.from_profile?.profile_code);
+  check('decline', 200, (await api('POST', `/api/interests/${HINT}/decline`, W1)).status);
+  const cNotes = (await api('GET', '/api/customer/notifications', cv.token)).body?.items;
+  assertTrue('a declined interest is announced with the neutral name', cNotes?.some((i) => i.type === 'interest_declined' && i.body.includes(NEUTRAL)));
+  assertTrue('… never the real one', !JSON.stringify(cNotes ?? []).includes('Lakshmi'));
+  check('interested again', HINT, (await api('POST', `/api/customer/profiles/${SECRET_ID}/interest`, cv.token, {})).body?.interest?.id);
+  check('accept', 200, (await api('POST', `/api/interests/${HINT}/accept`, W1)).status);
+  const cOpen = (await api('GET', `/api/customer/profiles/${SECRET_ID}`, cv.token)).body?.profile;
+  check('an accepted interest reveals the name', 'Secret Lakshmi', cOpen?.full_name);
+  check('… the income', '77 LPA', cOpen?.income_text);
+  check('… both photos', 2, cOpen?.photos?.length);
+  check('… nothing masked', 0, cOpen?.masked_fields?.length);
+  check('… never the ID', false, 'profile_code' in (cOpen ?? {}));
+  check('… the second photo is served (watermarked)', 200, (await raw(`${BASE}/api/customer/photos/${HP.photos[1].id}`, { token: cv.token })).status);
+  check('the browse row is unmasked while accepted', 'Secret Lakshmi', (await cRowFor())?.full_name);
+  check('my interest row shows the name now', 'Secret Lakshmi', (await api('GET', '/api/customer/interests', cv.token)).body?.interests?.find((i) => i.id === HINT)?.profile?.full_name);
+  assertTrue('the acceptance is announced with the name', (await api('GET', '/api/customer/notifications', cv.token)).body?.items?.some((i) => i.type === 'interest_accepted' && i.body.includes('Secret Lakshmi')));
+
+  // The customer sets their own toggles; the other side's agent then reads them masked.
+  const cvPatch = await api('PATCH', `/api/customer/my-profiles/${cv.profile?.id}`, cv.token, { hidden_fields: ['name'], audience_all: true });
+  check('a customer sets their own toggles 200', 200, cvPatch.status);
+  check('… the own view lists them', 'name', cvPatch.body?.profile?.hidden_fields?.join(','));
+  check('… still shows the real name', 'Viewer Groom', cvPatch.body?.profile?.full_name);
+  check('… nothing masked for the owner', 0, cvPatch.body?.profile?.masked_fields?.length);
+  check('… audience_all', true, cvPatch.body?.profile?.audience_all);
+  check('a customer cannot use an unknown toggle', 400, (await api('PATCH', `/api/customer/my-profiles/${cv.profile?.id}`, cv.token, { hidden_fields: ['phone'] })).status);
+  const recv = (await api('GET', '/api/interests?box=received', W1)).body?.interests?.find((i) => i.id === HINT);
+  check("the uploader reads the interested customer's neutral name", `Profile ${cv.profile?.id}`, recv?.customer?.full_name);
+  check('… flagged on the profile summary', true, recv?.customer_profile?.name_hidden);
+  check('… without that profile’s ID', false, 'profile_code' in (recv?.customer_profile ?? {}));
+  check('… while reading the ID of their own upload', HP?.profile_code, recv?.profile?.profile_code);
+  check("… and the other agent's code", w2.body?.agent?.agent_code, recv?.customer_agent?.agent_code);
+  const mineInt = (await api('GET', '/api/interests?box=clients', W2)).body?.interests?.find((i) => i.id === HINT);
+  check("the customer's own agent reads the real name", 'Viewer Groom', mineInt?.customer?.full_name);
+  check("… and their client's ID", cv.profile?.profile_code, mineInt?.customer_profile?.profile_code);
+  check('… the target in full while accepted', 'Secret Lakshmi', mineInt?.profile?.full_name);
+  check('… but never its ID', false, 'profile_code' in (mineInt?.profile ?? {}));
+  check("… and the uploader's code", W1_CODE, mineInt?.target_agent?.agent_code);
+
+  // Guest cards drop what is hidden.
+  const gg = await signupCustomer({ full_name: 'Card Guest', phone: randomPhone('7') });
+  const gCard = (await api('GET', '/api/customer/profiles?limit=100&gender=bride', gg.body?.token)).body?.profiles?.find((x) => x.id === SECRET_ID);
+  assertTrue('a guest still sees the card', Boolean(gCard));
+  check('… without the hidden community', null, gCard?.community);
+  check('… without the hidden package', null, gCard?.income_text);
+  check('… with the job that was not hidden', PROF, gCard?.profession?.id);
+
+  const shownAgain = await api('PATCH', `/api/profiles/${SECRET_ID}`, W1, { hidden_fields: [] });
+  check('switch everything back on', 0, shownAgain.body?.profile?.hidden_fields?.length);
+  check('… and everyone reads the name again', 'Secret Lakshmi', (await api('GET', `/api/profiles/${SECRET_ID}`, W2)).body?.profile?.full_name);
+  check('… and finds it by community', true, await finds(W2, `community_id=${COMM_A}`));
+
+  // ---------------------------------------------------------------- community audience
+  step('45. Community audience (SPEC §9.18 E): the own community, plus the ones the family chose — or all');
+  const ap = await apiForm('POST', '/api/profiles', W1, { full_name: 'Audience Bride', gender: 'bride', dob: '1996-02-02', community_id: COMM_A });
+  const APID = ap.body?.profile?.id;
+  check('default: own community only', '0|false', `${ap.body?.profile?.audience_communities?.length}|${ap.body?.profile?.audience_all}`);
+  check('an agent of another community does not see it', 404, (await api('GET', `/api/profiles/${APID}`, W3)).status);
+  check('an agent of the same community does', 200, (await api('GET', `/api/profiles/${APID}`, W2)).status);
+  check('unknown community 400', 'invalid_reference', (await api('PATCH', `/api/profiles/${APID}`, W1, { audience_community_ids: [999999] })).body?.error);
+  const widened = await api('PATCH', `/api/profiles/${APID}`, W1, { audience_community_ids: [COMM_A, COMM_B] });
+  check('widen to community B 200', 200, widened.status);
+  check('… the own community is implicit, not stored', String(COMM_B), widened.body?.profile?.audience_communities?.map((c) => c.id).join(','));
+  const apAsW3 = await api('GET', `/api/profiles/${APID}`, W3);
+  check("now the other community's agent sees it", 200, apAsW3.status);
+  check('… without the audience setting', false, 'audience_communities' in (apAsW3.body?.profile ?? {}));
+  assertTrue('… and in their list', (await api('GET', '/api/profiles?limit=100', W3)).body?.profiles?.some((x) => x.id === APID));
+  const cb = await fullCustomer({ name: 'B Groom', agentPhone: w3Phone, agentToken: W3, profile: { full_name: 'B Groom', gender: 'groom', dob: '1992-02-02', community_id: COMM_B } });
+  check('a customer of community B sees it', 200, (await api('GET', `/api/customer/profiles/${APID}`, cb.token)).status);
+  assertTrue('… in browse', (await api('GET', '/api/customer/profiles?limit=100', cb.token)).body?.profiles?.some((x) => x.id === APID));
+  check('narrow again', 0, (await api('PATCH', `/api/profiles/${APID}`, W1, { audience_community_ids: [] })).body?.profile?.audience_communities?.length);
+  check('… the other agent loses it', 404, (await api('GET', `/api/profiles/${APID}`, W3)).status);
+  check('… and so does the customer', 404, (await api('GET', `/api/customer/profiles/${APID}`, cb.token)).status);
+  check('all communities', true, (await api('PATCH', `/api/profiles/${APID}`, W1, { audience_all: true })).body?.profile?.audience_all);
+  check('… the other agent sees it', 200, (await api('GET', `/api/profiles/${APID}`, W3)).status);
+  check('… and the customer', 200, (await api('GET', `/api/customer/profiles/${APID}`, cb.token)).status);
+  const ap2 = await apiForm('POST', '/api/profiles', W1, {
+    full_name: 'Audience Two', gender: 'bride', dob: '1996-02-03', community_id: COMM_A,
+    audience_community_ids: JSON.stringify([COMM_B]), audience_all: 'false',
+  });
+  check('audience on create (a JSON string in multipart)', String(COMM_B), ap2.body?.profile?.audience_communities?.map((c) => c.id).join(','));
+  check('… visible to the other community', 200, (await api('GET', `/api/profiles/${ap2.body?.profile?.id}`, W3)).status);
+  check('"no caste preference": hide the community, show to all', 200, (await api('PATCH', `/api/profiles/${ap2.body?.profile?.id}`, W1, { hidden_fields: ['community'], audience_all: true, audience_community_ids: [] })).status);
+  const ncp = (await api('GET', `/api/profiles/${ap2.body?.profile?.id}`, W3)).body?.profile;
+  check('… shown to everyone, community withheld', 'Audience Two|null', `${ncp?.full_name}|${ncp?.community}`);
+  check("the customer who chose All communities (step 44) is seen by the other community's agent", 200, (await api('GET', `/api/profiles/${cv.profile?.id}`, W3)).status);
+  check('moving a profile into a community in its audience keeps the list clean', '', await api('PATCH', `/api/profiles/${APID}`, ADMIN, { audience_all: false, audience_community_ids: [COMM_B] })
+    .then(() => api('PATCH', `/api/profiles/${APID}`, ADMIN, { community_id: COMM_B }))
+    .then((r) => r.body?.profile?.audience_communities?.map((c) => c.id).join(',')));
+  const COMM_C = m.communities[2]?.id;
+  if (COMM_C) {
+    // The audience is matched against the customer's OWN community, not their agent's.
+    const third = await apiForm('POST', '/api/profiles', ADMIN, { full_name: 'Third Community Bride', gender: 'bride', dob: '1995-05-05', community_id: COMM_C, audience_community_ids: String(COMM_B) });
+    check('a profile of a third community shown to B', 201, third.status);
+    const ownB = await fullCustomer({ name: 'Own B Groom', agentPhone: w2Phone, agentToken: W2, profile: { full_name: 'Own B Groom', gender: 'groom', dob: '1991-01-01', community_id: COMM_B } });
+    check("a customer whose own community is in the audience sees it (their agent's communities are not)", 200, (await api('GET', `/api/customer/profiles/${third.body?.profile?.id}`, ownB.token)).status);
+    check('… a customer of another community under the same agent does not', 404, (await api('GET', `/api/customer/profiles/${third.body?.profile?.id}`, cv.token)).status);
+  }
+
+  // ---------------------------------------------------------------- four-step form + names
+  step('46. The four-step registration form and the Wedbook names (SPEC §9.18 A / F)');
+  const regLink = await api('GET', '/api/clients/registration-link', W1);
+  assertTrue('the WhatsApp text names the customers’ app', regLink.body?.whatsapp_text?.includes('Wedbook Matrimony') && !regLink.body?.whatsapp_text?.includes('MILI'));
+  const wf = await raw(regLink.body?.url);
+  check('form 200', 200, wf.status);
+  assertTrue('branded Wedbook Matrimony', wf.text.includes('Wedbook Matrimony') && !wf.text.includes('MILI') && !wf.text.includes('Mediator'));
+  check('four steps', 4, (wf.text.match(/<section class="step">/g) || []).length);
+  for (const [i, title] of ['Personal details', 'Professional details', 'Horoscope', 'Family &amp; contact'].entries()) {
+    assertTrue(`step ${i + 1} is "${title.replace('&amp;', '&')}"`, wf.text.includes(`Step ${i + 1} of 4</small>${title}`));
+  }
+  const at = (name) => wf.text.indexOf(`name="${name}"`);
+  assertTrue('fields sit in their step: personal → professional → horoscope → family',
+    at('phone') > 0 && at('phone') < at('full_name') && at('full_name') < at('photos') && at('photos') < at('edu_10th') &&
+    at('edu_10th') < at('work_place') && at('work_place') < at('nakshatram_id') && at('nakshatram_id') < at('birth_place') &&
+    at('birth_place') < at('father_name') && at('father_name') < at('contact_phone'));
+  for (const field of ['nakshatram_id', 'zodiac_id', 'gothram', 'birth_time']) assertTrue(`the Horoscope step has ${field}`, at(field) > at('work_place') && at(field) < at('father_name'));
+  assertTrue('one submit button, Back / Next for the stepper', wf.text.includes('Submit registration') && wf.text.includes('class="btn next"') && wf.text.includes('class="btn ghost back"'));
+  const wfPhone = randomPhone('7');
+  const wfPost = await raw(regLink.body?.url, { method: 'POST', form: buildForm({ phone: wfPhone, full_name: 'Step Bride', gender: 'bride', dob: '1997-07-17', community_id: COMM_A, nakshatram_id: NAK, zodiac_id: ZOD, father_name: 'Step Father' }, 0) });
+  check('submit 200', 200, wfPost.status);
+  assertTrue('the thank-you page names the app', wfPost.text.includes('Wedbook Matrimony') && !wfPost.text.includes('MILI'));
+  const wfClient = (await api('GET', `/api/clients?q=${wfPhone}`, W1)).body?.clients?.[0];
+  assertTrue("a form registration gets its ID from the agent", new RegExp(`^GN-${W1_CODE}-[A-Z]\\d{3}$`).test(wfClient?.customer_code || ''), `got ${wfClient?.customer_code}`);
+  const wfProfile = (await api('GET', `/api/profiles/${wfClient?.profile?.id}`, W1)).body?.profile;
+  check('the star from the Horoscope step is saved', NAK, wfProfile?.nakshatram?.id);
+  check('… and the rasi', ZOD, wfProfile?.zodiac?.id);
+  check('… and the family step', 'Step Father', wfProfile?.father_name);
+  check('everything is shown until someone switches it off', 0, wfProfile?.hidden_fields?.length);
+  const shortNameForm = await raw(regLink.body?.url, { method: 'POST', form: buildForm({ phone: randomPhone('7'), full_name: 'X', gender: 'bride', dob: '1997-07-17', community_id: COMM_A }, 0) });
+  check('a bad submission re-renders the form 400', 400, shortNameForm.status);
+  assertTrue('… still as four steps, with the error on top', shortNameForm.text.includes('Please check these details') && (shortNameForm.text.match(/<section class="step">/g) || []).length === 4);
+  const newClientNote = (await api('GET', '/api/notifications', W1)).body?.items?.find((i) => i.type === 'client_pending' && i.customer_id === CG_ID);
+  assertTrue('notifications name the Wedbook Matrimony app', (await api('GET', '/api/notifications', W2)).body?.items?.concat(newClientNote ?? []).every((i) => !/MILI|Mediator|Gandharva/.test(`${i.title} ${i.body}`)));
 
   // ---------------------------------------------------------------- summary
   const total = pass + failures.length;

@@ -191,13 +191,34 @@ class _MyUploadsScreenState extends State<MyUploadsScreen> {
             title: Text(p.fullName, style: const TextStyle(fontWeight: FontWeight.w600)),
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                [
-                  p.genderLabel,
-                  if (p.ageDobLine != null) p.ageDobLine!,
-                  p.community?.name,
-                  if (p.photos.isEmpty) 'No photo',
-                ].whereType<String>().join(' · '),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    [
+                      p.genderLabel,
+                      if (p.ageDobLine != null) p.ageDobLine!,
+                      p.community?.name,
+                      if (p.photos.isEmpty) 'No photo',
+                    ].whereType<String>().join(' · '),
+                  ),
+                  // The profile's permanent ID (SPEC §9.18 C).
+                  if (p.hasProfileCode)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        S.idLabel(p.profileCode!),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: AppColors.goldDark,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             trailing: ActionChip(

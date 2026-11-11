@@ -25,9 +25,8 @@ class MyProfilesScreen extends StatelessWidget {
 
   Future<void> _add(BuildContext context) async {
     context.read<MastersState>().load();
-    final saved = await Navigator.of(context).push<Profile>(
-      MaterialPageRoute(builder: (_) => const ProfileFormScreen(prefillName: true)),
-    );
+    // The four-step form, then the privacy settings once (SPEC §9.18 G).
+    final saved = await ProfileFormScreen.create(context, prefillName: true);
     if (saved == null || !context.mounted) return;
     showSnack(context, S.profileSaved);
     await context.read<AuthState>().refresh();

@@ -9,9 +9,11 @@ import '../../state/auth_state.dart';
 import '../../state/masters_state.dart';
 import '../strings.dart';
 import '../theme.dart';
+import '../widgets/agent_code_card.dart';
 import '../widgets/common.dart';
 
-/// My communities, requests to join more, change password (SPEC §5 screen 10).
+/// My communities, requests to join more, my agent code, change password
+/// (SPEC §5 screen 10, §9.18 G).
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -265,7 +267,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
             ],
             const SizedBox(height: 32),
-            // Directory details Gandharva customers see when choosing an agent.
+            // Directory details Wedbook Matrimony customers see when choosing an agent.
             const SectionHeader(S.agentDirectory),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -302,6 +304,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 32),
             const SectionHeader('Account'),
+            // The permanent agent code (SPEC §9.18 B) — tap to copy.
+            if (agent != null && agent.hasAgentCode) ...[
+              AgentCodeCard(code: agent.agentCode!, stateName: agent.state?.name),
+              const SizedBox(height: 8),
+            ],
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.person_rounded),

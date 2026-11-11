@@ -115,9 +115,12 @@ void main() {
   });
   final active = Customer.fromJson(activeMeJson());
 
-  testWidgets('Get started — guest: step 1 open with the phone field', (tester) async {
+  testWidgets('Get started — guest: step 1 open with the number-or-code field (SPEC §9.18)', (tester) async {
     await _render(tester, guest, const GetStartedScreen());
     expect(find.text(S.step1Title), findsOneWidget);
+    expect(find.text(S.agentPhoneOrCode), findsOneWidget);
+    expect(find.text(S.step1Body), findsOneWidget);
+    expect(S.step1Body, contains('agent code'));
     expect(find.text(S.agentPhoneLink), findsOneWidget);
     expect(find.text(S.pickFromDirectory), findsOneWidget);
     expect(find.text(S.needAgentFirst), findsOneWidget);
@@ -183,11 +186,12 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Checkout with another provider never offers to pay', (tester) async {
-    final razor = Customer.fromJson({...guestMeJson(), 'payment_provider': 'razorpay'});
-    await _render(tester, razor, const CheckoutScreen(profileId: 80, profileName: 'Sita'));
+  testWidgets('Checkout with an unknown provider never offers to pay', (tester) async {
+    final other = Customer.fromJson({...guestMeJson(), 'payment_provider': 'cashfree'});
+    await _render(tester, other, const CheckoutScreen(profileId: 80, profileName: 'Sita'));
     expect(find.text(S.paymentComingSoon), findsOneWidget);
     expect(find.text(S.simulateFailure), findsNothing);
+    expect(find.text(S.razorpaySecure), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

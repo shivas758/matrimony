@@ -5,16 +5,20 @@ import '../../../models/payment.dart';
 import '../../../models/profile.dart';
 import '../../../services/api_client.dart';
 import '../../../services/payment_service.dart';
+import '../../../services/razorpay_gateway.dart';
 import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 
-/// The registration-fee checkout for one profile (SPEC §9.12). This app
-/// version completes only the server's `mock` provider: amount, what it is
-/// for, "Test mode — no money is charged", *Pay* and *Simulate failure*.
-/// Any other provider shows "Online payment is coming soon" and never starts
-/// an order. Pops `true` once the profile is paid.
+/// The registration-fee checkout for one profile (SPEC §9.12, §9.19 B).
+/// - `mock`: amount, what it is for, "Test mode — no money is charged",
+///   *Pay* and *Simulate failure*.
+/// - `razorpay`: amount, "Secure payment by Razorpay", *Pay* → Razorpay
+///   Checkout → the server confirms it. Cancel / failure show a note and
+///   *Try again* starts a new order.
+/// - any other provider: "Online payment is coming soon", never an order.
+/// Pops `true` once the profile is paid.
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key, required this.profileId, required this.profileName});
 
@@ -33,6 +37,8 @@ class CheckoutScreen extends StatefulWidget {
   State<CheckoutScreen> createState() => _CheckoutScreenState();
 }
 
+enum _CheckoutNote { none, cancelled, failed }
+
 class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _busy = false;
   PaymentResult? _result;
@@ -40,6 +46,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   /// The amount from the last order, once one exists (else the account's fee).
   num? _amount;
+
+  /// Razorpay: how the last Checkout ended when it did not pay.
+  _CheckoutNote _note = _CheckoutNote.none;
+
+  /// Razorpay: paid in Checkout, but the server could not be reached to
+  /// confirm it — the next tap retries the confirm instead of a new order.
+  (Payment, RazorpaySuccess)? _unconfirmed;
 
   Future<void> _pay({bool simulateFailure = false}) async {
     if (_busy) return;
@@ -52,28 +65,92 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           .read<PaymentService>()
           .payMock(widget.profileId, simulateFailure: simulateFailure);
       if (!mounted) return;
-      setState(() {
-        _result = result;
-        _amount = result.payment.amountInr;
-      });
-      final customer = result.customer;
-      if (customer != null) {
-        context.read<AuthState>().setCustomer(customer);
-      } else {
-        await context.read<AuthState>().refresh();
-      }
+      await _apply(result);
     } on ApiException catch (e) {
-      if (!mounted) return;
-      if (e.code == 'already_paid') {
-        // Paid meanwhile (another device, a retry) — treat it as done.
-        await context.read<AuthState>().refresh();
-        if (mounted) Navigator.of(context).pop(true);
-        return;
-      }
-      setState(() => _error = friendlyMessage(e));
+      await _onError(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Razorpay (SPEC §9.19 B): a fresh order → Checkout → confirm.
+  Future<void> _payRazorpay() async {
+    if (_busy) return;
+    final service = context.read<PaymentService>();
+    final gateway = context.read<RazorpayGateway>();
+    final phone = context.read<AuthState>().customer?.phone;
+    final color = PaymentService.hexColor(Theme.of(context).colorScheme.primary);
+    setState(() {
+      _busy = true;
+      _error = null;
+      _note = _CheckoutNote.none;
+    });
+    try {
+      var pending = _unconfirmed;
+      if (pending == null) {
+        final attempt = await service.openRazorpay(widget.profileId, gateway, phone: phone, themeColor: color);
+        if (!mounted) return;
+        _amount = attempt.order.amountInr;
+        switch (attempt.outcome) {
+          case RazorpayCancelled():
+            setState(() => _note = _CheckoutNote.cancelled);
+            return;
+          case RazorpayFailed(:final message):
+            debugPrint('[checkout] Razorpay did not complete: $message');
+            setState(() => _note = _CheckoutNote.failed);
+            return;
+          case final RazorpaySuccess success:
+            pending = (attempt.order, success);
+        }
+      }
+      _unconfirmed = pending;
+      final result = await service.confirmRazorpay(pending.$1, pending.$2);
+      _unconfirmed = null;
+      if (!mounted) return;
+      if (!result.payment.isPaid) {
+        setState(() => _note = _CheckoutNote.failed);
+        return;
+      }
+      await _apply(result);
+    } on ApiException catch (e) {
+      // Keep a paid-but-unconfirmed payment only for a network / server hiccup.
+      if (!_isTransient(e)) _unconfirmed = null;
+      await _onError(e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  static bool _isTransient(ApiException e) =>
+      e.code == 'network_error' || e.code == 'server_error' || (e.status ?? 0) >= 500;
+
+  Future<void> _apply(PaymentResult result) async {
+    setState(() {
+      _result = result;
+      _amount = result.payment.amountInr;
+    });
+    final customer = result.customer;
+    if (customer != null) {
+      context.read<AuthState>().setCustomer(customer);
+    } else {
+      await context.read<AuthState>().refresh();
+    }
+  }
+
+  Future<void> _onError(ApiException e) async {
+    if (!mounted) return;
+    if (e.code == 'already_paid') {
+      // Paid meanwhile (another device, a retry, Razorpay's webhook) — treat it as done.
+      await context.read<AuthState>().refresh();
+      if (mounted) Navigator.of(context).pop(true);
+      return;
+    }
+    if (e.code == 'payment_provider_changed') {
+      // The server switched provider: re-read the account so this page follows.
+      await context.read<AuthState>().refresh();
+      if (!mounted) return;
+    }
+    setState(() => _error = friendlyMessage(e));
   }
 
   @override
@@ -114,7 +191,45 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     title: S.paymentComingSoon,
                     tint: AppColors.warning,
                   )
-                else ...[
+                else if (provider == 'razorpay') ...[
+                  const NoticeCard(
+                    icon: Icons.verified_user_outlined,
+                    title: S.razorpaySecure,
+                    tint: AppColors.success,
+                  ),
+                  if (_note == _CheckoutNote.cancelled) ...[
+                    const SizedBox(height: 16),
+                    const NoticeCard(
+                      icon: Icons.info_outline_rounded,
+                      title: S.paymentCancelled,
+                      body: S.paymentCancelledBody,
+                      tint: AppColors.muted,
+                    ),
+                  ],
+                  if (_note == _CheckoutNote.failed) ...[
+                    const SizedBox(height: 16),
+                    NoticeCard(
+                      icon: Icons.error_outline_rounded,
+                      title: S.razorpayFailedTitle,
+                      body: S.razorpayFailedBody,
+                      tint: Theme.of(context).colorScheme.error,
+                    ),
+                  ],
+                  if (_error != null) ...[
+                    const SizedBox(height: 16),
+                    ErrorBanner(message: _error!),
+                  ],
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _payRazorpay,
+                    icon: _busy ? const ButtonSpinner() : const Icon(Icons.lock_rounded),
+                    label: Text(
+                      _note == _CheckoutNote.failed || _unconfirmed != null || _error != null
+                          ? S.tryAgain
+                          : S.payFee(fee),
+                    ),
+                  ),
+                ] else ...[
                   const NoticeCard(
                     icon: Icons.science_outlined,
                     title: S.testModeNoCharge,

@@ -20,14 +20,27 @@ class ProfileSummary {
     this.paidAt,
     this.visibility,
     this.deleteRequestId,
+    this.profileCode,
+    this.nameHidden = false,
   });
 
   final int id;
+
+  /// The name, or the neutral "Profile 1042" when [nameHidden].
   final String fullName;
   final String? gender;
   final int? age;
+
+  /// Null when not recorded — or hidden by the family (SPEC §9.18 D).
   final String? community;
   final String? subcaste;
+
+  /// The permanent ID "GN-KA1A-A001" (SPEC §9.18 C) — present only on the
+  /// owner side (my client's profile, my upload; admins: always).
+  final String? profileCode;
+
+  /// The family hides the name and I have no access: [fullName] is a label.
+  final bool nameHidden;
 
   /// active | hidden | on_hold | engaged | married — `hidden` while the
   /// customer is still pending (SPEC §9.2).
@@ -67,22 +80,34 @@ class ProfileSummary {
   static ProfileSummary? fromJsonOrNull(Object? j) =>
       j is Map<String, dynamic> ? ProfileSummary.fromJson(j) : null;
 
+  /// "ID GN-KA1A-A001"; null when the server did not send the ID.
+  String? get idLabel => (profileCode ?? '').isEmpty ? null : 'ID $profileCode';
+
+  /// A `{id, name}` object's name; a bare string is taken as it is.
+  static String? _nameOf(Object? v) {
+    if (v is Map) return v['name'] as String?;
+    return v is String && v.isNotEmpty ? v : null;
+  }
+
   factory ProfileSummary.fromJson(Map<String, dynamic> j) {
-    final community = j['community'] as Map<String, dynamic>?;
-    final subcaste = j['subcaste'] as Map<String, dynamic>?;
+    final id = (j['id'] as num).toInt();
+    final name = j['full_name'];
+    final code = j['profile_code'];
     return ProfileSummary(
-      id: (j['id'] as num).toInt(),
-      fullName: '${j['full_name'] ?? ''}',
+      id: id,
+      fullName: name is String && name.trim().isNotEmpty ? name : 'Profile $id',
       gender: j['gender'] as String?,
       age: (j['age'] as num?)?.toInt(),
-      community: community?['name'] as String?,
-      subcaste: subcaste?['name'] as String?,
+      community: _nameOf(j['community']),
+      subcaste: _nameOf(j['subcaste']),
       status: j['status'] as String?,
       photoUrl: j['photo_url'] as String?,
       paid: j['paid'] as bool?,
       paidAt: DateTime.tryParse('${j['paid_at']}')?.toLocal(),
       visibility: j['visibility'] as String?,
       deleteRequestId: (j['delete_request_id'] as num?)?.toInt(),
+      profileCode: code is String && code.trim().isNotEmpty ? code.trim() : null,
+      nameHidden: j['name_hidden'] == true,
     );
   }
 }
@@ -97,6 +122,7 @@ class AgentCard {
     this.agencyName,
     this.phone,
     this.city,
+    this.agentCode,
   });
 
   final int id;
@@ -104,6 +130,12 @@ class AgentCard {
   final String? agencyName;
   final String? phone;
   final String? city;
+
+  /// The agent's permanent code, e.g. "KA1A" (SPEC §9.18 B) — sent with the
+  /// other agent's card on interest and agent-change rows.
+  final String? agentCode;
+
+  bool get hasAgentCode => (agentCode ?? '').isNotEmpty;
 
   /// Placeholder when the server left the card out.
   static const unknown = AgentCard(id: 0, fullName: 'Unknown agent');
@@ -116,16 +148,31 @@ class AgentCard {
   String get labelComma =>
       [fullName, agencyName].whereType<String>().where((s) => s.isNotEmpty).join(', ');
 
+  /// "Ravi Kumar (KA1A)" — the name with the code beside it, when known.
+  String get nameWithCode => hasAgentCode ? '$fullName ($agentCode)' : fullName;
+
+  /// "Ravi Kumar (KA1A) · Sri Lakshmi Marriage Bureau"
+  String get labelWithCode =>
+      [nameWithCode, agencyName].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
+
+  /// "Ravi Kumar (KA1A), Sri Lakshmi Marriage Bureau" — for sentences.
+  String get labelCommaWithCode =>
+      [nameWithCode, agencyName].whereType<String>().where((s) => s.isNotEmpty).join(', ');
+
   static AgentCard? fromJsonOrNull(Object? j) =>
       j is Map<String, dynamic> ? AgentCard.fromJson(j) : null;
 
-  factory AgentCard.fromJson(Map<String, dynamic> j) => AgentCard(
-        id: (j['id'] as num?)?.toInt() ?? 0,
-        fullName: '${j['full_name'] ?? ''}',
-        agencyName: j['agency_name'] as String?,
-        phone: j['phone'] as String?,
-        city: j['city'] as String?,
-      );
+  factory AgentCard.fromJson(Map<String, dynamic> j) {
+    final code = j['agent_code'];
+    return AgentCard(
+      id: (j['id'] as num?)?.toInt() ?? 0,
+      fullName: '${j['full_name'] ?? ''}',
+      agencyName: j['agency_name'] as String?,
+      phone: j['phone'] as String?,
+      city: j['city'] as String?,
+      agentCode: code is String && code.trim().isNotEmpty ? code.trim() : null,
+    );
+  }
 }
 
 /// The latest pending agent-change request embedded in a client row
@@ -154,7 +201,7 @@ class PendingAgentChange {
   }
 }
 
-/// A Gandharva customer as their agent (or an admin) sees them — one row of
+/// A Wedbook Matrimony customer as their agent (or an admin) sees them — one row of
 /// GET /clients (SPEC §9.5). `interests` and `agentChangeRequests` are filled
 /// only by GET /clients/:id; list rows leave them empty.
 class Customer {
@@ -178,17 +225,22 @@ class Customer {
     this.interests = const [],
     this.agentChangeRequests = const [],
     this.deleteRequests = const [],
+    this.customerCode,
   });
 
   final int id;
   final String fullName;
   final String phone;
 
+  /// The customer's permanent ID — their profile's "GN-KA1A-A001"
+  /// (SPEC §9.18 C); null until a profile with an ID exists.
+  final String? customerCode;
+
   /// 'guest' | 'pending' | 'active' | 'rejected' | 'suspended' (SPEC §9.2 /
   /// §9.12 lifecycle). Guests have no agent yet — only admins see them.
   final String status;
 
-  /// 'app' (signed up in Gandharva) | 'form' (the agent's registration form).
+  /// 'app' (signed up in Wedbook Matrimony) | 'form' (the agent's registration form).
   final String source;
   final int? agentId;
 
@@ -249,7 +301,23 @@ class Customer {
 
   String get sourceLabel => isFromForm ? 'Form' : 'App';
 
+  /// The ID to show for this client: `customer_code`, else the first
+  /// profile's `profile_code`; null when neither was sent.
+  String? get code {
+    if ((customerCode ?? '').isNotEmpty) return customerCode;
+    for (final p in allProfiles) {
+      if ((p.profileCode ?? '').isNotEmpty) return p.profileCode;
+    }
+    return null;
+  }
+
+  /// "ID GN-KA1A-A001"; null when there is no ID yet.
+  String? get idLabel => code == null ? null : 'ID $code';
+
+  static String? _code(Object? v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
+
   factory Customer.fromJson(Map<String, dynamic> j) => Customer(
+        customerCode: _code(j['customer_code']),
         id: (j['id'] as num).toInt(),
         fullName: '${j['full_name'] ?? ''}',
         phone: '${j['phone'] ?? ''}',

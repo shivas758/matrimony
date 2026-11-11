@@ -169,7 +169,8 @@ class _InterestTile extends StatelessWidget {
     final theme = Theme.of(context);
     final api = context.read<ApiClient>();
     final s = interest.profile;
-    final name = s?.fullName ?? '—';
+    // A hidden name arrives as the neutral label "Profile 1042" (SPEC §9.18 D).
+    final name = s?.displayName ?? '—';
     final line = [
       if (s?.age != null) '${s!.age} ${S.yearsShort}',
       if (s?.communityLine != null) s!.communityLine!,
@@ -193,7 +194,7 @@ class _InterestTile extends StatelessWidget {
                       api: api,
                       width: 72,
                       height: 88,
-                      placeholderInitials: initialsOf(name),
+                      placeholderInitials: initialsOf(s?.initialsSource ?? ''),
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -218,6 +219,8 @@ class _InterestTile extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             S.forProfile(interest.fromProfile!.fullName),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: AppColors.goldDark,
                               fontWeight: FontWeight.w600,

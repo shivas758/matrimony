@@ -7,6 +7,7 @@ import { config } from './config.js';
 import { conflict, forbidden, notFound } from './errors.js';
 import { agentDirectory, customerPublic } from './serialize.js';
 import { LIVE_INTEREST, profileSummary } from './profiles.js';
+import { issueMissingProfileCodes } from './codes.js';
 
 export const CUSTOMER_COLUMNS = `id, full_name, phone, agent_id, status, source, phone_verified_at,
   approved_by, approved_at, last_login_at, created_at, updated_at`;
@@ -40,6 +41,7 @@ export async function customerAccessLevel(customer) {
 export async function ownProfilesSummary(customer) {
   const rows = await many(
     `SELECT p.id, p.full_name, p.gender, date_part('year', age(p.dob))::int AS age, p.status, p.paid_at,
+            p.profile_code, p.hidden_fields,
             c.id AS community_id, c.name AS community_name, sc.id AS subcaste_id, sc.name AS subcaste_name,
             (SELECT ph.id FROM profile_photos ph WHERE ph.profile_id = p.id
               ORDER BY ph.is_primary DESC, ph.sort_order, ph.id LIMIT 1) AS photo_id,
@@ -53,7 +55,8 @@ export async function ownProfilesSummary(customer) {
     [customer.id],
   );
   return rows.map((r) => ({
-    ...profileSummary(r, { photoId: r.photo_id, photoUrlBase: CUSTOMER_PHOTO_BASE }),
+    // My own profile: everything, and my ID (SPEC §9.18 C / D).
+    ...profileSummary(r, { photoId: r.photo_id, photoUrlBase: CUSTOMER_PHOTO_BASE, reveal: true, code: true }),
     paid: r.paid_at != null,
     paid_at: r.paid_at ?? null,
     visibility: profileVisibility(r, customer.status),
@@ -77,7 +80,9 @@ export async function loadCustomerMe(customerId) {
 
   const [agent, communities, profiles, change] = await Promise.all([
     customer.agent_id
-      ? one('SELECT id, full_name, agency_name, phone, city, status FROM agents WHERE id = $1', [customer.agent_id])
+      ? one('SELECT id, full_name, agency_name, phone, city, status, agent_code FROM agents WHERE id = $1', [
+          customer.agent_id,
+        ])
       : null,
     customer.agent_id
       ? many(
@@ -90,7 +95,7 @@ export async function loadCustomerMe(customerId) {
       : [],
     ownProfilesSummary(customer),
     one(
-      `SELECT r.id, r.created_at, a.id AS to_agent_id, a.full_name, a.agency_name, a.city
+      `SELECT r.id, r.created_at, a.id AS to_agent_id, a.full_name, a.agency_name, a.city, a.agent_code
          FROM agent_change_requests r JOIN agents a ON a.id = r.to_agent_id
         WHERE r.customer_id = $1 AND r.status = 'pending'
         ORDER BY r.created_at DESC, r.id DESC
@@ -113,6 +118,7 @@ export async function loadCustomerMe(customerId) {
             full_name: change.full_name,
             agency_name: change.agency_name,
             city: change.city ?? null,
+            agent_code: change.agent_code ?? null,
           },
           created_at: change.created_at,
         }
@@ -120,6 +126,9 @@ export async function loadCustomerMe(customerId) {
   });
   // SPEC §9.12: guest mode until linked + registered + paid + approved.
   out.access = approved && paid ? 'full' : 'guest';
+  // The customer's ID = the ID of their (one) profile (SPEC §9.18 C); null
+  // until they have a profile whose agent has a code.
+  out.customer_code = profiles[0]?.profile_code ?? null;
   out.profiles = profiles;
   out.max_profiles = config.payments.maxCustomerProfiles;
   out.profile_fee_inr = config.payments.profileFeeInr;
@@ -143,10 +152,13 @@ const PRIMARY_PHOTO = (alias) =>
  * The columns profileSummary() needs for the profile aliased `alias`, each
  * prefixed `${prefix}_` so several summaries fit in one row. Pair with
  * summaryJoins(alias, …) and read back with summaryFrom(row, prefix).
- * Public fields only — never a protected column (SPEC §9.8).
+ * Public fields only — never a protected column (SPEC §9.8). The privacy
+ * setting and the profile ID ride along so summaryFrom() can mask / add them
+ * per viewer (SPEC §9.18 C / D).
  */
 const summaryColumns = (alias, prefix) => `
          ${alias}.id AS ${prefix}_id, ${alias}.full_name AS ${prefix}_name, ${alias}.gender AS ${prefix}_gender,
+         ${alias}.hidden_fields AS ${prefix}_hidden, ${alias}.profile_code AS ${prefix}_code,
          date_part('year', age(${alias}.dob))::int AS ${prefix}_age, ${alias}.status AS ${prefix}_status,
          ${alias}c.id AS ${prefix}_community_id, ${alias}c.name AS ${prefix}_community_name,
          ${alias}sc.id AS ${prefix}_subcaste_id, ${alias}sc.name AS ${prefix}_subcaste_name,
@@ -157,8 +169,15 @@ const summaryJoins = (alias, on) => `
     LEFT JOIN communities ${alias}c ON ${alias}c.id = ${alias}.community_id
     LEFT JOIN subcastes ${alias}sc ON ${alias}sc.id = ${alias}.subcaste_id`;
 
-/** profileSummary() from prefixed columns; null when the profile is absent. */
-export function summaryFrom(row, prefix, photoUrlBase = '/api/photos') {
+/**
+ * profileSummary() from prefixed columns; null when the profile is absent.
+ * `owner: true` = the viewer is on that profile's owner side (its agent, an
+ * admin, the owning customer): full summary plus the profile ID. Otherwise
+ * `reveal` says whether the viewer currently has access to it (a live
+ * approval); without either the family's privacy toggles apply
+ * (SPEC §9.18 C / D). The default is the masked, ID-less one.
+ */
+export function summaryFrom(row, prefix, photoUrlBase = '/api/photos', { owner = false, reveal = false } = {}) {
   if (row[`${prefix}_id`] == null) return null;
   return profileSummary(
     {
@@ -166,22 +185,25 @@ export function summaryFrom(row, prefix, photoUrlBase = '/api/photos') {
       full_name: row[`${prefix}_name`],
       gender: row[`${prefix}_gender`],
       age: row[`${prefix}_age`],
+      hidden_fields: row[`${prefix}_hidden`],
+      profile_code: row[`${prefix}_code`],
       community_id: row[`${prefix}_community_id`],
       community_name: row[`${prefix}_community_name`],
       subcaste_id: row[`${prefix}_subcaste_id`],
       subcaste_name: row[`${prefix}_subcaste_name`],
       status: row[`${prefix}_status`],
     },
-    { photoId: row[`${prefix}_photo_id`], photoUrlBase },
+    { photoId: row[`${prefix}_photo_id`], photoUrlBase, reveal: owner || reveal, code: owner },
   );
 }
 
-/** Contact card of an agent for the other party's agent (SPEC §9.4). */
+/** Contact card of an agent for the other party's agent (SPEC §9.4; the code: §9.18 B). */
 const agentCard = (row, prefix) => ({
   id: row[`${prefix}_id`],
   full_name: row[`${prefix}_name`],
   agency_name: row[`${prefix}_agency`],
   phone: row[`${prefix}_phone`],
+  agent_code: row[`${prefix}_code`] ?? null,
 });
 
 // ---------------------------------------------------------------- clients (SPEC §9.5)
@@ -194,6 +216,7 @@ const OLDEST_PROFILE = (cu) =>
 const PROFILES_JSON = (cu) => `COALESCE((
     SELECT json_agg(json_build_object(
              'id', x.id, 'full_name', x.full_name, 'gender', x.gender,
+             'profile_code', x.profile_code, 'hidden_fields', x.hidden_fields,
              'age', date_part('year', age(x.dob))::int, 'status', x.status, 'paid_at', x.paid_at,
              'community_id', xc.id, 'community_name', xc.name,
              'subcaste_id', xs.id, 'subcaste_name', xs.name,
@@ -214,7 +237,7 @@ const PROFILES_JSON = (cu) => `COALESCE((
 export const CLIENT_SELECT = `
   SELECT cu.id, cu.full_name, cu.phone, cu.agent_id, cu.status, cu.source, cu.phone_verified_at,
          cu.approved_by, cu.approved_at, cu.last_login_at, cu.created_at, cu.updated_at,
-         a.full_name AS agent_name, a.agency_name AS agent_agency,
+         a.full_name AS agent_name, a.agency_name AS agent_agency, a.agent_code AS agent_code,
          ${summaryColumns('p', 'profile')},
          ${PROFILES_JSON('cu')} AS profiles_json,
          -- Interests still in play (pending, or accepted and unexpired — same
@@ -223,7 +246,8 @@ export const CLIENT_SELECT = `
            WHERE ci.customer_id = cu.id AND ${LIVE_INTEREST}) AS interests_count,
          r.id AS change_id, r.note AS change_note, r.created_at AS change_created_at,
          ta.id AS change_to_agent_id, ta.full_name AS change_to_agent_name,
-         ta.agency_name AS change_to_agent_agency, ta.city AS change_to_agent_city
+         ta.agency_name AS change_to_agent_agency, ta.city AS change_to_agent_city,
+         ta.agent_code AS change_to_agent_code
     FROM customers cu
     LEFT JOIN agents a ON a.id = cu.agent_id
     ${summaryJoins('p', OLDEST_PROFILE('cu'))}
@@ -235,13 +259,24 @@ export const CLIENT_SELECT = `
 
 /**
  * Client row (SPEC §9.5). `admin` adds the owning agent — an agent only ever
- * lists their own clients, so they do not need it.
+ * lists their own clients, so they do not need it. The viewer is always the
+ * customer's own agent or an admin — the owner side — so the profile
+ * summaries come in full, with the customer's ID (SPEC §9.18 C / D).
  */
 export function clientRow(row, { admin = false } = {}) {
   return {
     ...customerPublic(row, {
       ...(admin
-        ? { agent: row.agent_id ? { id: row.agent_id, full_name: row.agent_name, agency_name: row.agent_agency } : null }
+        ? {
+            agent: row.agent_id
+              ? {
+                  id: row.agent_id,
+                  full_name: row.agent_name,
+                  agency_name: row.agent_agency,
+                  agent_code: row.agent_code ?? null,
+                }
+              : null,
+          }
         : {}),
       profileId: row.profile_id ?? null,
       pendingAgentChange: row.change_id
@@ -252,6 +287,7 @@ export function clientRow(row, { admin = false } = {}) {
               full_name: row.change_to_agent_name,
               agency_name: row.change_to_agent_agency,
               city: row.change_to_agent_city ?? null,
+              agent_code: row.change_to_agent_code ?? null,
             },
             note: row.change_note,
             created_at: row.change_created_at,
@@ -260,9 +296,11 @@ export function clientRow(row, { admin = false } = {}) {
     }),
     agent_id: row.agent_id,
     last_login_at: row.last_login_at ?? null,
-    profile: summaryFrom(row, 'profile'),
+    // The customer's ID = their profile's ID (SPEC §9.18 C).
+    customer_code: row.profile_code ?? null,
+    profile: summaryFrom(row, 'profile', undefined, { owner: true }),
     profiles: (Array.isArray(row.profiles_json) ? row.profiles_json : []).map((x) => ({
-      ...profileSummary(x, { photoId: x.photo_id }),
+      ...profileSummary(x, { photoId: x.photo_id, reveal: true, code: true }),
       paid: x.paid_at != null,
       paid_at: x.paid_at ?? null,
       visibility: profileVisibility(x, row.status),
@@ -349,6 +387,10 @@ export async function reassignCustomer(client, { customerId, toAgentId, actorId,
     customerId,
     toAgentId,
   ]);
+  // A profile without an ID gets one from the new agent; an existing ID never
+  // changes — it keeps naming the agent who first registered the customer
+  // (SPEC §9.18 C).
+  await issueMissingProfileCodes(client, { customerId });
   await client.query(
     `UPDATE agent_change_requests SET status = 'cancelled', decided_by = $2, decided_at = now()
       WHERE customer_id = $1 AND status = 'pending' AND ($3::int IS NULL OR id <> $3)`,
@@ -373,9 +415,9 @@ export const INTEREST_SELECT = `
          (ci.status = 'accepted' AND ci.access_expires_at <= now()) AS is_expired,
          cu.full_name AS customer_name, cu.phone AS customer_phone, cu.agent_id AS customer_agent_id,
          ca.full_name AS customer_agent_name, ca.agency_name AS customer_agent_agency,
-         ca.phone AS customer_agent_phone, ca.role AS customer_agent_role,
+         ca.phone AS customer_agent_phone, ca.role AS customer_agent_role, ca.agent_code AS customer_agent_code,
          p.uploaded_by AS target_agent_id, ua.full_name AS target_agent_name,
-         ua.agency_name AS target_agent_agency, ua.phone AS target_agent_phone,
+         ua.agency_name AS target_agent_agency, ua.phone AS target_agent_phone, ua.agent_code AS target_agent_code,
          ${summaryColumns('p', 'profile')},
          ${summaryColumns('cp', 'cprofile')}
     FROM customer_interests ci
@@ -412,25 +454,33 @@ export function interestRow(row, { agent, customer } = {}) {
     return {
       ...base,
       access_expires_at: live ? row.access_expires_at : null,
-      profile: summaryFrom(row, 'profile', CUSTOMER_PHOTO_BASE),
-      // Which of my profiles is interested (SPEC §9.12).
-      from_profile: summaryFrom(row, 'cprofile', CUSTOMER_PHOTO_BASE),
+      // The other family's profile: in full only while they accept my
+      // interest (SPEC §9.18 D); never its ID.
+      profile: summaryFrom(row, 'profile', CUSTOMER_PHOTO_BASE, { reveal: live }),
+      // Which of my profiles is interested (SPEC §9.12) — mine, so in full.
+      from_profile: summaryFrom(row, 'cprofile', CUSTOMER_PHOTO_BASE, { owner: true }),
     };
   }
 
   const isCustomerAgent = agent.is_admin || row.customer_agent_id === agent.id;
   const isUploader = agent.is_admin || row.target_agent_id === agent.id;
+  // Each agent is on the owner side of their own client's profile only. The
+  // customer's agent reads the target in full while the interest is accepted
+  // (they hold the contact grant, SPEC §9.4); the target's uploader reads the
+  // interested customer's profile — and their account name — through that
+  // family's privacy toggles (SPEC §9.18 D).
+  const customerProfile = summaryFrom(row, 'cprofile', undefined, { owner: isCustomerAgent });
   return {
     ...base,
     access_expires_at: row.access_expires_at,
     customer: {
       id: row.customer_id,
-      full_name: row.customer_name,
+      full_name: customerProfile?.name_hidden ? customerProfile.full_name : row.customer_name,
       ...(isCustomerAgent ? { phone: row.customer_phone } : {}),
       agent_id: row.customer_agent_id,
     },
-    customer_profile: summaryFrom(row, 'cprofile'),
-    profile: summaryFrom(row, 'profile'),
+    customer_profile: customerProfile,
+    profile: summaryFrom(row, 'profile', undefined, { owner: isUploader, reveal: isCustomerAgent && live }),
     // The one place uploader identity crosses agents: only between the two
     // agents whose clients are involved (SPEC §9.4).
     ...(isUploader ? { customer_agent: agentCard(row, 'customer_agent') } : {}),
@@ -453,9 +503,9 @@ export const AGENT_CHANGE_SELECT = `
          cu.full_name AS customer_name, cu.phone AS customer_phone, cu.agent_id AS customer_agent_id,
          cu.status AS customer_status,
          fa.full_name AS from_agent_name, fa.agency_name AS from_agent_agency,
-         fa.city AS from_agent_city, fa.phone AS from_agent_phone,
+         fa.city AS from_agent_city, fa.phone AS from_agent_phone, fa.agent_code AS from_agent_code,
          ta.full_name AS to_agent_name, ta.agency_name AS to_agent_agency,
-         ta.city AS to_agent_city, ta.phone AS to_agent_phone,
+         ta.city AS to_agent_city, ta.phone AS to_agent_phone, ta.agent_code AS to_agent_code,
          ${summaryColumns('p', 'profile')}
     FROM agent_change_requests r
     JOIN customers cu ON cu.id = r.customer_id
@@ -482,6 +532,7 @@ export function agentChangeRow(row, { agent, customer } = {}) {
       agency_name: row.from_agent_agency,
       city: row.from_agent_city,
       phone: row.from_agent_phone,
+      agent_code: row.from_agent_code,
     }),
     to_agent: agentDirectory({
       id: row.to_agent_id,
@@ -489,6 +540,7 @@ export function agentChangeRow(row, { agent, customer } = {}) {
       agency_name: row.to_agent_agency,
       city: row.to_agent_city,
       phone: row.to_agent_phone,
+      agent_code: row.to_agent_code,
     }),
   };
   if (customer) return base;
@@ -504,7 +556,9 @@ export function agentChangeRow(row, { agent, customer } = {}) {
       status: row.customer_status,
       agent_id: row.customer_agent_id,
     },
-    customer_profile: summaryFrom(row, 'profile'),
+    // Both agents of a transfer are (or are about to be) this customer's agent
+    // and already see each other in the row — the summary comes in full.
+    customer_profile: summaryFrom(row, 'profile', undefined, { owner: true }),
     can_decide: row.status === 'pending' && (agent.is_admin || row.from_agent_id === agent.id),
   };
 }
@@ -541,7 +595,8 @@ export function deleteRequestRow(row, { agent, customer } = {}) {
   if (customer) return base;
   return {
     ...base,
-    profile: summaryFrom(row, 'profile'),
+    // Only the customer's own agent (or an admin) lists these — the owner side.
+    profile: summaryFrom(row, 'profile', undefined, { owner: true }),
     customer: { id: row.customer_id, full_name: row.customer_name, phone: row.customer_phone, agent_id: row.customer_agent_id },
     can_decide: row.status === 'pending' && (agent.is_admin || row.customer_agent_id === agent.id),
   };

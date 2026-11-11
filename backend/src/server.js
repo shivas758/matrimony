@@ -30,11 +30,24 @@ import { agentPushRouter, customerPushRouter, pushConfigRouter } from './routes/
 import { startPushWorker } from './lib/pushWorker.js';
 import { agentChangeRouter, clientsRouter, interestsRouter } from './routes/clients.js';
 import { registrationRouter } from './routes/registration.js';
+import { siteRouter } from './routes/site.js';
+import { handleRazorpayWebhook } from './lib/payments.js';
+import { asyncHandler } from './lib/errors.js';
 
 const app = express();
 app.set('trust proxy', 1); // behind Caddy on the Oracle VM
 
 app.use(cors());
+// Razorpay webhook (SPEC §9.19 B) — before express.json: the signature covers
+// the exact raw bytes. Public; the HMAC is the authentication.
+app.post(
+  '/api/payments/razorpay/webhook',
+  express.raw({ type: () => true, limit: '1mb' }),
+  asyncHandler(async (req, res) => {
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    res.json(await handleRazorpayWebhook(raw, req.get('x-razorpay-signature')));
+  }),
+);
 app.use(express.json({ limit: '2mb' }));
 // The public registration form posts as a classic HTML form when it has no photos.
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
@@ -111,6 +124,9 @@ app.use('/api/agent-change-requests', ...active, agentChangeRouter);
 // ---- admin only ------------------------------------------------------------
 app.use('/api/admin', requireAuth, requireActive, requireAdmin, adminRouter);
 
+// ---- public website at the root (SPEC §9.19 E): policies + app downloads ----
+app.use(siteRouter);
+
 app.use(notFoundHandler);
 app.use(errorHandler);
 
@@ -122,7 +138,10 @@ setInterval(() => {
 }, DAY_MS).unref();
 
 app.listen(config.port, () => {
-  console.log(`API listening on :${config.port} (public base ${config.publicBaseUrl}, OTP provider ${config.otp.provider})`);
+  console.log(
+    `API listening on :${config.port} (public base ${config.publicBaseUrl}, OTP provider ${config.otp.provider}, ` +
+      `payments ${config.payments.provider})`,
+  );
   expireStaleApprovals().catch(() => {});
   startPushWorker();
   console.log(`Push provider ${config.push.provider}`);

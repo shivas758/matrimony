@@ -1,6 +1,7 @@
 /// Master-table rows. Never hardcoded in the app — always fetched from
-/// GET /api/masters (CLAUDE.md working style). Same payload as Mediator plus
-/// `occupation_types` (SPEC §9.7); `countries` starts with India.
+/// GET /api/masters (CLAUDE.md working style). Same payload as the agents' app
+/// (Wedbook Agent) plus `occupation_types` (SPEC §9.7); `countries` starts
+/// with India. Since v2.8 it also lists the privacy toggles (SPEC §9.18 D).
 class MasterItem {
   const MasterItem({required this.id, required this.name});
 
@@ -62,6 +63,47 @@ class Subcaste {
   int get hashCode => id;
 }
 
+/// One privacy toggle (SPEC §9.18 D) — `privacy_fields[]` of GET /masters:
+/// a detail of the "before approval" sheet the customer may keep back until
+/// they approve someone. The list (keys, labels, grouping) is the server's.
+class PrivacyField {
+  const PrivacyField({required this.key, required this.label, required this.section, this.hint});
+
+  /// The key sent in `hidden_fields` (e.g. `community`, `income`).
+  final String key;
+
+  /// What the customer reads next to the switch.
+  final String label;
+
+  /// 'personal' | 'professional' | 'horoscope' (anything else is listed last).
+  final String section;
+
+  /// A short note under the label, when the server has one.
+  final String? hint;
+
+  static const sectionPersonal = 'personal';
+  static const sectionProfessional = 'professional';
+  static const sectionHoroscope = 'horoscope';
+
+  /// The sections in the order the Privacy screen shows them.
+  static const sections = [sectionPersonal, sectionProfessional, sectionHoroscope];
+
+  /// Null for a row without a usable key (never trust the shape blindly).
+  static PrivacyField? tryParse(dynamic j) {
+    if (j is! Map) return null;
+    final key = j['key'];
+    if (key is! String || key.isEmpty) return null;
+    final label = j['label'];
+    final hint = j['hint'];
+    return PrivacyField(
+      key: key,
+      label: label is String && label.isNotEmpty ? label : key,
+      section: j['section'] is String ? j['section'] as String : sectionPersonal,
+      hint: hint is String && hint.trim().isNotEmpty ? hint.trim() : null,
+    );
+  }
+}
+
 class MasterData {
   const MasterData({
     required this.communities,
@@ -77,6 +119,8 @@ class MasterData {
     this.occupationTypes = const [],
     required this.zodiacSigns,
     required this.nakshatrams,
+    this.privacyFields = const [],
+    this.privacyAlwaysVisible = const [],
   });
 
   final List<MasterItem> communities;
@@ -106,6 +150,25 @@ class MasterData {
   final List<ZodiacSign> zodiacSigns;
   final List<MasterItem> nakshatrams;
 
+  /// The details a customer can switch off (SPEC §9.18 D), in the server's
+  /// order. Empty on a server older than v2.8 — the Privacy screen is then
+  /// not offered at all.
+  final List<PrivacyField> privacyFields;
+
+  /// What can never be hidden — "Main photo", "Age", "Gender".
+  final List<String> privacyAlwaysVisible;
+
+  /// The server knows the privacy toggles (v2.8+).
+  bool get hasPrivacy => privacyFields.isNotEmpty;
+
+  /// The toggles of one section, in the server's order.
+  List<PrivacyField> privacyFieldsIn(String section) =>
+      privacyFields.where((f) => f.section == section).toList();
+
+  /// Toggles whose section this app does not know — still shown (last).
+  List<PrivacyField> get privacyFieldsElsewhere =>
+      privacyFields.where((f) => !PrivacyField.sections.contains(f.section)).toList();
+
   static List<MasterItem> _items(dynamic list) =>
       (list as List? ?? []).map((e) => MasterItem.fromJson(e as Map<String, dynamic>)).toList();
 
@@ -127,6 +190,14 @@ class MasterData {
             .map((e) => ZodiacSign.fromJson(e as Map<String, dynamic>))
             .toList(),
         nakshatrams: _items(j['nakshatrams']),
+        privacyFields: (j['privacy_fields'] is List ? j['privacy_fields'] as List : const [])
+            .map(PrivacyField.tryParse)
+            .whereType<PrivacyField>()
+            .toList(),
+        privacyAlwaysVisible: (j['privacy_always_visible'] is List ? j['privacy_always_visible'] as List : const [])
+            .whereType<String>()
+            .where((s) => s.trim().isNotEmpty)
+            .toList(),
       );
 
   static const empty = MasterData(

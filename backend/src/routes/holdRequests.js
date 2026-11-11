@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { many, one, tx } from '../lib/db.js';
 import { asyncHandler, conflict, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { displayName, hiddenSet } from '../lib/privacy.js';
 import { loadRow } from './profiles.js';
 
 // The HOLD workflow (SPEC §2 hold_requests, §4).
@@ -27,7 +28,11 @@ const LIST_SELECT = `
   SELECT h.id, h.profile_id, h.requester_id, h.status, h.note,
          h.requested_at, h.decided_by, h.decided_at, h.released_by, h.released_at,
          p.full_name AS profile_name, p.gender AS profile_gender, p.status AS profile_status,
-         p.uploaded_by, c.name AS profile_community,
+         p.uploaded_by, p.hidden_fields, c.name AS profile_community,
+         -- The requester's own live contact approval lifts the privacy toggles (SPEC §9.18 D).
+         EXISTS (SELECT 1 FROM contact_requests cr
+                  WHERE cr.profile_id = p.id AND cr.requester_id = h.requester_id
+                    AND cr.status = 'approved' AND cr.expires_at > now()) AS requester_has_access,
          r.full_name AS requester_name, r.agency_name AS requester_agency, r.phone AS requester_phone,
          (SELECT ph.id FROM profile_photos ph
            WHERE ph.profile_id = p.id ORDER BY ph.is_primary DESC, ph.sort_order, ph.id LIMIT 1) AS photo_id
@@ -40,13 +45,25 @@ const LIST_SELECT = `
  * API shape. `requester` only for the inbox (the approver must know who is
  * asking); the sent box never exposes the uploader's identity (CLAUDE.md rule 3).
  */
-function shape(row, { includeRequester = false, viewerId = null } = {}) {
+function shape(row, { includeRequester = false, viewerId = null, viewerIsAdmin = false } = {}) {
+  // A name / community the family switched off (SPEC §9.18 D) is shown to the
+  // uploader, an admin, and a requester who holds contact access — otherwise
+  // the neutral label, flagged by `profile_name_hidden`.
+  const reveal =
+    viewerIsAdmin ||
+    (viewerId !== null &&
+      (row.uploaded_by === viewerId || (row.requester_id === viewerId && Boolean(row.requester_has_access))));
+  const hidden = reveal ? new Set() : hiddenSet(row.hidden_fields);
   return {
     id: row.id,
     profile_id: row.profile_id,
-    profile_name: row.profile_name,
+    profile_name: displayName(
+      { id: row.profile_id, full_name: row.profile_name, hidden_fields: row.hidden_fields },
+      reveal,
+    ),
+    profile_name_hidden: hidden.has('name'),
     profile_gender: row.profile_gender,
-    profile_community: row.profile_community,
+    profile_community: hidden.has('community') ? null : row.profile_community,
     profile_status: row.profile_status,
     profile_photo_url: row.photo_id ? `/api/photos/${row.photo_id}` : null,
     status: row.status,
@@ -73,6 +90,7 @@ async function reload(id, agent) {
   return shape(row, {
     includeRequester: agent.is_admin || row.uploaded_by === agent.id,
     viewerId: agent.id,
+    viewerIsAdmin: agent.is_admin,
   });
 }
 
@@ -158,7 +176,7 @@ holdRequestsRouter.get(
     res.json({
       box: f.box,
       hold_requests: rows.map((r) =>
-        shape(r, { includeRequester: f.box === 'inbox', viewerId: req.agent.id }),
+        shape(r, { includeRequester: f.box === 'inbox', viewerId: req.agent.id, viewerIsAdmin: req.agent.is_admin }),
       ),
     });
   }),

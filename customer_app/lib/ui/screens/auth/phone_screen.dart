@@ -3,16 +3,19 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../services/api_client.dart';
+import '../../../services/phone_auth_gateway.dart';
 import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/common.dart';
+import 'otp_flow.dart';
 import 'otp_screen.dart';
 
 /// Step 1 of login/signup: the mobile number (SPEC §9.11 Gandharva 1).
 /// Both known and new numbers go through the same button — the OTP screen
-/// finds out which it is.
+/// finds out which it is. With Firebase phone auth (SPEC §9.19 A) Android
+/// may verify the number by itself; then the OTP screen is skipped.
 class PhoneScreen extends StatefulWidget {
   const PhoneScreen({super.key});
 
@@ -40,14 +43,24 @@ class _PhoneScreenState extends State<PhoneScreen> {
       _error = null;
     });
     final phone = _phone.text.trim();
+    final auth = context.read<AuthState>();
+    final gateway = context.read<PhoneAuthGateway>();
+    final nav = Navigator.of(context);
     try {
-      final sent = await context.read<AuthState>().sendOtp(phone);
+      final request = await requestOtp(auth, gateway, phone);
       if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => OtpScreen(phone: phone, initial: sent)),
-      );
+      switch (request) {
+        case OtpCodeNeeded(:final sent, :final session):
+          await nav.push(
+            MaterialPageRoute(builder: (_) => OtpScreen(phone: phone, initial: sent, firebase: session)),
+          );
+        case OtpAutoVerified(:final result):
+          continueAfterVerify(nav, phone, result);
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = friendlyMessage(e));
+    } on PhoneAuthFailure catch (e) {
+      if (mounted) setState(() => _error = phoneAuthMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -75,7 +88,8 @@ class _PhoneScreenState extends State<PhoneScreen> {
                 ),
                 child: Column(
                   children: [
-                    const AppLogo(size: 136),
+                    // The tile is wine too: a gold rim sets it off the header.
+                    const AppLogo(size: 136, onDark: true),
                     const SizedBox(height: 18),
                     Text(
                       S.appIntro,

@@ -17,8 +17,8 @@ import { watermarkedBuffer } from './photos.js';
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'fonts');
 
 // Brand palette — mirrors app/lib/ui/theme.dart.
-const NAVY = '#0F2F52';
-const NAVY_DEEP = '#081C33';
+const NAVY = '#043270';
+const NAVY_DEEP = '#021E4A';
 const GOLD = '#C9962E';
 const GOLD_LIGHT = '#E8C25F';
 const INK = '#1C2430';
@@ -38,11 +38,11 @@ const FOOTER_H = 58;
  * @param photoPaths stored file_paths, primary first (max 4 are used)
  */
 export async function renderProfilePdf(profile, { agencyLabel, photoPaths = [] } = {}) {
-  const label = agencyLabel || 'Mediator';
+  const label = agencyLabel || 'Wedbook';
   const doc = new PDFDocument({
     size: 'A4',
     margin: 0,
-    info: { Title: `${profile.full_name} — Profile`, Author: label, Creator: 'Mediator' },
+    info: { Title: `${profile.full_name} — Profile`, Author: label, Creator: 'Wedbook' },
   });
   const chunks = [];
   doc.on('data', (c) => chunks.push(c));
@@ -184,9 +184,9 @@ function drawHeader(doc, label) {
   doc.save();
   doc.rect(0, 0, PAGE_W, HEADER_H).fill(NAVY);
   doc.rect(0, HEADER_H - 3, PAGE_W, 3).fill(GOLD);
-  doc.font('Display').fontSize(22).fillColor(GOLD_LIGHT).text('Mediator', MARGIN, 24);
+  doc.font('Display').fontSize(22).fillColor(GOLD_LIGHT).text('Wedbook', MARGIN, 24);
   doc.font('Body').fontSize(7.5).fillColor('#FFFFFF').opacity(0.75)
-    .text('MATRIMONY PARTNERS', MARGIN, 52, { characterSpacing: 2 });
+    .text('MATRIMONY', MARGIN, 52, { characterSpacing: 2 });
   doc.opacity(1);
   doc.font('Semi').fontSize(10).fillColor('#FFFFFF').text(label, PAGE_W / 2, 30, {
     width: PAGE_W / 2 - MARGIN,

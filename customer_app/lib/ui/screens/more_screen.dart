@@ -12,9 +12,10 @@ import '../widgets/notification_bell.dart';
 import 'agent/change_agent_screen.dart';
 import 'get_started/get_started_screen.dart';
 
-/// More: who I am, my agent (with Call) — or *Choose your agent* → Get
-/// started while I have none —, Change agent (active accounts only), Logout,
-/// version (SPEC §9.11 Gandharva 6 / §9.12).
+/// More: who I am (with my ID once I have one, tap to copy), my agent (with
+/// their agent code and Call) — or *Choose your agent* → Get started while I
+/// have none —, Change agent (active accounts only), Logout, version (SPEC
+/// §9.11 Gandharva 6 / §9.12 / §9.18).
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
@@ -142,7 +143,8 @@ class MoreScreen extends StatelessWidget {
   }
 }
 
-/// Initials, name and phone on the brand gradient.
+/// Initials, name and phone on the brand gradient; underneath, the account
+/// status and — once the profile has one — my ID (tap to copy, SPEC §9.18 C).
 class _CustomerHeader extends StatelessWidget {
   const _CustomerHeader({required this.customer});
 
@@ -151,73 +153,135 @@ class _CustomerHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final c = customer;
+    final code = c?.customerCode;
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
       decoration: BoxDecoration(
         gradient: AppColors.brandGradient,
         borderRadius: BorderRadius.circular(22),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: AppColors.goldLight,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              initialsOf(customer?.fullName ?? ''),
-              style: const TextStyle(
-                fontFamily: AppTheme.displayFont,
-                fontSize: 22,
-                fontWeight: FontWeight.w600,
-                fontVariations: [FontVariation('wght', 600)],
-                color: AppColors.wineDeep,
+          Row(
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: AppColors.goldLight,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  initialsOf(c?.fullName ?? ''),
+                  style: const TextStyle(
+                    fontFamily: AppTheme.displayFont,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    fontVariations: [FontVariation('wght', 600)],
+                    color: AppColors.wineDeep,
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      c?.fullName ?? '',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '+91 ${c?.phone ?? ''}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.72),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (c != null) ...[
+            const SizedBox(height: 14),
+            // Wraps on a narrow phone instead of squeezing the name.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(
-                  customer?.fullName ?? '',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
+                StatusChip(
+                  label: switch (c.status) {
+                    CustomerStatus.guest => S.statusGuest,
+                    CustomerStatus.active => S.statusActive,
+                    CustomerStatus.pending => S.statusPending,
+                    CustomerStatus.rejected => S.statusRejected,
+                    CustomerStatus.suspended => S.statusSuspended,
+                  },
+                  color: c.isActive ? AppColors.gold : AppColors.warning,
+                  solid: true,
                 ),
-                Text(
-                  '+91 ${customer?.phone ?? ''}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.72),
-                  ),
-                ),
+                if (code != null) _IdPill(code: code),
               ],
             ),
-          ),
-          if (customer != null)
-            StatusChip(
-              label: switch (customer!.status) {
-                CustomerStatus.guest => S.statusGuest,
-                CustomerStatus.active => S.statusActive,
-                CustomerStatus.pending => S.statusPending,
-                CustomerStatus.rejected => S.statusRejected,
-                CustomerStatus.suspended => S.statusSuspended,
-              },
-              color: customer!.isActive ? AppColors.gold : AppColors.warning,
-              solid: true,
-            ),
+          ],
         ],
       ),
     );
   }
 }
 
-/// "My agent": name, agency, city, community chips, phone + Call.
+/// "ID GN-KA1A-A001" on the wine header — tap to copy.
+class _IdPill extends StatelessWidget {
+  const _IdPill({required this.code});
+
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(8);
+    return Material(
+      color: Colors.white.withValues(alpha: 0.14),
+      borderRadius: radius,
+      child: InkWell(
+        borderRadius: radius,
+        onTap: () => copyText(context, code, S.idCopied),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  S.idLine(code),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.copy_rounded, size: 14, color: AppColors.gold),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "My agent": name, agency, city, agent code (tap to copy), community
+/// chips, phone + Call.
 class _MyAgentCard extends StatelessWidget {
   const _MyAgentCard({required this.agent});
 
@@ -227,6 +291,7 @@ class _MyAgentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final phone = agent.phone;
+    final code = agent.agentCode;
     return SurfaceCard(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Column(
@@ -278,6 +343,16 @@ class _MyAgentCard extends StatelessWidget {
               ),
             ],
           ),
+          // The code other customers can find this agent with (SPEC §9.18 B).
+          if (code != null) ...[
+            const SizedBox(height: 12),
+            CodeTile(
+              label: S.agentCode,
+              code: code,
+              copiedMessage: S.agentCodeCopied,
+              icon: Icons.support_agent_rounded,
+            ),
+          ],
           if (agent.communities.isNotEmpty) ...[
             const SizedBox(height: 12),
             Wrap(

@@ -1,8 +1,8 @@
 name: gandharva
-description: "MILI Matrimony (formerly Gandharva) — the customer app of the Mediator matrimony network."
+description: "Wedbook Matrimony (formerly MILI; internal code name Gandharva) — the customers' app of the Wedbook matrimony network."
 publish_to: 'none'
 
-version: 2.0.0+6
+version: 3.1.0+8
 
 environment:
   sdk: ^3.11.3
@@ -24,6 +24,8 @@ dependencies:
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
   image_cropper: ^12.2.1
+  firebase_auth: ^6.7.1
+  razorpay_flutter: ^1.4.7
 
 dev_dependencies:
   flutter_test:

@@ -20,7 +20,10 @@ import '../get_started/get_started_screen.dart';
 /// interested" → pending banner → shared details with the days-left count,
 /// or the declined / withdrawn / ended states with a way to ask again.
 /// Nothing about who uploaded the profile is ever shown (the API does not
-/// send it).
+/// send it). Details the family switched off (SPEC §9.18 D) arrive empty —
+/// a hidden name as "Profile 1042", a single photo — and the page says so
+/// with a lock note; they come with the on-request block once the interest
+/// is accepted.
 class ProfileDetailScreen extends StatefulWidget {
   const ProfileDetailScreen({super.key, required this.profileId});
 
@@ -135,7 +138,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        [p.fullName, if (p.age != null) '${p.age} ${S.yearsShort}'].join(' · '),
+                        [p.displayName, if (p.age != null) '${p.age} ${S.yearsShort}'].join(' · '),
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -248,7 +251,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 titlePadding: const EdgeInsetsDirectional.only(start: 56, end: 24, bottom: 14),
                 expandedTitleScale: 1.5,
                 title: Text(
-                  p.fullName,
+                  p.displayName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -274,6 +277,11 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     ProfileChipRow(profile: p),
+                    // Some details are kept back until the family approves.
+                    if (p.hasMaskedFields) ...[
+                      const SizedBox(height: 12),
+                      const LockNote(text: S.someDetailsHidden),
+                    ],
                     const SizedBox(height: 16),
                     ProfileFactGrid(profile: p),
                     const SizedBox(height: 20),
@@ -417,7 +425,7 @@ class _PhotoCarousel extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         if (photos.isEmpty)
-          AuthedPhoto(url: null, api: api, placeholderInitials: initialsOf(profile.fullName))
+          AuthedPhoto(url: null, api: api, placeholderInitials: initialsOf(profile.initialsSource ?? ''))
         else
           PageView.builder(
             onPageChanged: onIndexChanged,
@@ -441,7 +449,7 @@ class _PhotoCarousel extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment(0, 0.1),
                 end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Color(0xD93F0E1A)],
+                colors: [Colors.transparent, Color(0xD93A0419)],
               ),
             ),
           ),
@@ -452,7 +460,7 @@ class _PhotoCarousel extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment(0, -0.4),
-                colors: [Color(0x803F0E1A), Colors.transparent],
+                colors: [Color(0x803A0419), Colors.transparent],
               ),
             ),
           ),

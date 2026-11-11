@@ -126,7 +126,12 @@ class ProfileSummaryTile extends StatelessWidget {
                     profile.fullName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                    // A name the family hides arrives as "Profile 1042"
+                    // (SPEC §9.18 D) — set in italics so it reads as a label.
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontStyle: profile.nameHidden ? FontStyle.italic : null,
+                    ),
                   ),
                   if (profile.subtitle.isNotEmpty)
                     Text(
@@ -134,6 +139,18 @@ class ProfileSummaryTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+                    ),
+                  // The permanent ID — owner side only (SPEC §9.18 C).
+                  if (profile.idLabel != null)
+                    Text(
+                      profile.idLabel!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: AppColors.goldDark,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                      ),
                     ),
                 ],
               ),
@@ -156,12 +173,16 @@ class ContactLine extends StatelessWidget {
     this.caption,
     this.subtitle,
     this.phone,
+    this.code,
     this.icon = Icons.support_agent_rounded,
   });
 
   /// Small uppercase caption above the name ("Their agent").
   final String? caption;
   final String name;
+
+  /// The agent's code ("KA1A", SPEC §9.18 B), shown as a pill beside the name.
+  final String? code;
   final String? subtitle;
   final String? phone;
   final IconData icon;
@@ -203,11 +224,21 @@ class ContactLine extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                // The code sits beside the name where there is room and drops
+                // under it on a narrow phone — the name is never squeezed out.
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 3,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    if (code != null && code!.isNotEmpty) AgentCodeChip(code: code!),
+                  ],
                 ),
                 if (subtitle != null && subtitle!.isNotEmpty)
                   Text(

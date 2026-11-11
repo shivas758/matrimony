@@ -11,6 +11,7 @@ import 'services/auth_service.dart';
 import 'services/clients_service.dart';
 import 'services/contact_service.dart';
 import 'services/hold_service.dart';
+import 'services/phone_auth_gateway.dart';
 import 'services/profile_service.dart';
 import 'services/push_service.dart';
 import 'services/share_service.dart';
@@ -19,6 +20,7 @@ import 'state/home_nav.dart';
 import 'state/masters_state.dart';
 import 'state/notification_routes.dart';
 import 'state/profiles_state.dart';
+import 'ui/screens/auth/choose_state_screen.dart';
 import 'ui/screens/auth/force_password_screen.dart';
 import 'ui/screens/auth/login_screen.dart';
 import 'ui/screens/auth/pending_screen.dart';
@@ -89,7 +91,7 @@ class _MediatorAppState extends State<MediatorApp> {
       SnackBar(
         behavior: SnackBarBehavior.floating,
         content: Text(text.isEmpty ? S.newNotification : text),
-        action: auth != null && auth.isActive
+        action: auth != null && auth.canUseApp
             ? SnackBarAction(label: S.view, onPressed: () => _onOpened(m))
             : null,
       ),
@@ -100,7 +102,8 @@ class _MediatorAppState extends State<MediatorApp> {
   void _onOpened(PushMessage m) {
     final auth = _auth;
     final nav = _navigatorKey.currentState;
-    if (auth == null || nav == null || !auth.isActive || auth.mustChangePassword) return;
+    // Nothing opens over the set-password and choose-state screens.
+    if (auth == null || nav == null || !auth.canUseApp) return;
     auth.refreshNotifications();
     openNotificationTarget(nav, homeNav, notificationTarget(m.toItem(), isAdmin: auth.isAdmin));
   }
@@ -115,6 +118,8 @@ class _MediatorAppState extends State<MediatorApp> {
         ChangeNotifierProvider<HomeNav>.value(value: homeNav),
         Provider<ProfileService>.value(value: profileService),
         Provider<AuthService>(create: (_) => AuthService(api)),
+        // Signup OTP through Firebase phone auth when the server says so (SPEC §9.19 A).
+        Provider<PhoneAuthGateway>(create: (_) => FirebasePhoneAuthGateway()),
         Provider<ContactService>(create: (_) => ContactService(api)),
         Provider<ClientsService>(create: (_) => ClientsService(api)),
         Provider<HoldService>(create: (_) => HoldService(api)),
@@ -146,7 +151,8 @@ class _MediatorAppState extends State<MediatorApp> {
 }
 
 /// Decides which screen to show:
-/// splash → login → set-new-password (temporary password) → pending/suspended → home.
+/// splash → login → set-new-password (temporary password) → pending/suspended
+/// → choose-your-state (active agents without an agent code, SPEC §9.18 B) → home.
 class _Root extends StatelessWidget {
   const _Root();
 
@@ -159,9 +165,11 @@ class _Root extends StatelessWidget {
       AuthPhase.loggedOut => const LoginScreen(),
       AuthPhase.loggedIn => auth.mustChangePassword
           ? const ForcePasswordScreen()
-          : auth.isActive
-              ? const HomeShell()
-              : const PendingScreen(),
+          : !auth.isActive
+              ? const PendingScreen()
+              : auth.needsState
+                  ? const ChooseStateScreen()
+                  : const HomeShell(),
     };
   }
 }
@@ -178,8 +186,8 @@ class _Splash extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const AppLogoMark(size: 132),
-              const SizedBox(height: 12),
+              const AppLogoMark(width: 196),
+              const SizedBox(height: 14),
               const AppWordmark(onDark: true, size: 40),
               const SizedBox(height: 40),
               SizedBox(

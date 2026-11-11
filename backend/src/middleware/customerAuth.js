@@ -6,9 +6,9 @@ import { bearerToken } from './auth.js';
 
 /**
  * Resolves a Gandharva bearer token (SPEC §9.2, `typ: 'customer'`) to
- * req.customer = { ...customer row, agent, community_ids }. `community_ids`
- * are the customer's AGENT's communities — the customer browses those
- * (customerVisibilityClause in lib/profiles.js). Agent tokens are refused
+ * req.customer = { ...customer row, agent, community_ids, own_community_ids }.
+ * `community_ids` are the customer's AGENT's communities — the customer
+ * browses those (customerVisibilityClause in lib/profiles.js). Agent tokens are refused
  * here, exactly as requireAuth refuses customer tokens.
  */
 export async function requireCustomer(req, _res, next) {
@@ -22,7 +22,7 @@ export async function requireCustomer(req, _res, next) {
     } catch {
       throw unauthorized('invalid_token', 'Session expired, please sign in again');
     }
-    if (payload.typ !== 'customer') throw unauthorized('invalid_token', 'Sign in with a Gandharva account');
+    if (payload.typ !== 'customer') throw unauthorized('invalid_token', 'Sign in with a Wedbook Matrimony account');
 
     const customer = await one(
       `SELECT id, full_name, phone, agent_id, status, source, phone_verified_at,
@@ -32,11 +32,21 @@ export async function requireCustomer(req, _res, next) {
     );
     if (!customer) throw unauthorized('unknown_customer', 'Account no longer exists');
 
-    const [agent, rows] = await Promise.all([
-      one('SELECT id, full_name, agency_name, phone, city, status FROM agents WHERE id = $1', [customer.agent_id]),
+    const [agent, rows, own] = await Promise.all([
+      one('SELECT id, full_name, agency_name, phone, city, status, agent_code FROM agents WHERE id = $1', [
+        customer.agent_id,
+      ]),
       many('SELECT community_id FROM agent_communities WHERE agent_id = $1', [customer.agent_id]),
+      // The community of the customer's OWN profile — what a profile's audience
+      // is matched against for a customer viewer (SPEC §9.18 E).
+      many('SELECT DISTINCT community_id FROM profiles WHERE customer_id = $1', [customer.id]),
     ]);
-    req.customer = { ...customer, agent, community_ids: rows.map((r) => r.community_id) };
+    req.customer = {
+      ...customer,
+      agent,
+      community_ids: rows.map((r) => r.community_id),
+      own_community_ids: own.map((r) => r.community_id),
+    };
     next();
   } catch (e) {
     next(e);

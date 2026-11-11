@@ -158,7 +158,9 @@ class ProfilePhoto {
       );
 }
 
-/// Compact profile embedded in interest rows (SPEC §9.9 `profile: {summary}`).
+/// Compact profile embedded in interest rows (SPEC §9.9 `profile: {summary}`)
+/// and my own `profiles[]` in /customer/auth/me. Parsed leniently: anything
+/// but the id may be missing or hidden (SPEC §9.18 D).
 class ProfileSummary {
   const ProfileSummary({
     required this.id,
@@ -173,15 +175,29 @@ class ProfileSummary {
     this.paidAt,
     this.visibility,
     this.deleteRequestId,
+    this.profileCode,
+    this.nameHidden = false,
   });
 
   final int id;
+
+  /// The name — or, when the family keeps it back, the server's neutral
+  /// label ("Profile 1042", SPEC §9.18 D); see [nameHidden].
   final String fullName;
   final String gender;
   final int? age;
+
+  /// Null when not recorded — or hidden by the family (SPEC §9.18 D).
   final MasterItem? community;
   final MasterItem? subcaste;
   final String? status;
+
+  /// The permanent ID (`GN-KA1A-A001`, SPEC §9.18 C) — owner side only, so
+  /// only on my own profiles; null until the agent has a code.
+  final String? profileCode;
+
+  /// `name_hidden: true` — [fullName] is the neutral label, not a name.
+  final bool nameHidden;
 
   /// My own profiles only (`/customer/auth/me` → profiles[]): fee state.
   final bool paid;
@@ -201,15 +217,25 @@ class ProfileSummary {
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
+  /// Always something to show: the name (or the server's neutral label), and
+  /// "Profile 41" should a row ever arrive without either.
+  String get displayName => fullName.trim().isEmpty ? Profile.neutralName(id) : fullName;
+
+  /// What the photo placeholder's initials are taken from — nothing for a
+  /// hidden name ("P1" would read like a real one).
+  String? get initialsSource => nameHidden || fullName.trim().isEmpty ? null : fullName;
+
   factory ProfileSummary.fromJson(Map<String, dynamic> j) => ProfileSummary(
         id: (j['id'] as num).toInt(),
         fullName: '${j['full_name'] ?? ''}',
         gender: '${j['gender'] ?? ''}',
-        age: (j['age'] as num?)?.toInt(),
+        age: Profile._int(j['age']),
         community: Profile._ref(j['community']),
         subcaste: Profile._ref(j['subcaste']),
-        status: j['status'] as String?,
-        photoUrl: j['photo_url'] as String?,
+        status: Profile._str(j['status']),
+        photoUrl: Profile._str(j['photo_url']),
+        profileCode: Profile._code(j['profile_code']),
+        nameHidden: j['name_hidden'] == true,
         paid: j['paid'] == true || j['paid_at'] != null,
         paidAt: Profile._date(j['paid_at']),
         visibility: ProfileVisibility.fromApi(j['visibility'] as String?),
@@ -280,9 +306,12 @@ class Interest {
 
 /// A profile as the customer routes return it (SPEC §9.8 / §9.9).
 ///
-/// PUBLIC fields are always present. PROTECTED ("on request") fields are
-/// OMITTED by the server unless access is granted — never assume they are
-/// there: check [detailsShared] before showing the personal-details card.
+/// PUBLIC fields are present unless the family switched them off (SPEC
+/// §9.18 D): a hidden detail arrives as null / `[]` / (`is_nri`) false and its
+/// key is listed in [maskedFields] — so every public field except the id,
+/// gender and age may be null. PROTECTED ("on request") fields are OMITTED by
+/// the server unless access is granted — never assume they are there: check
+/// [detailsShared] before showing the personal-details card.
 class Profile {
   const Profile({
     required this.id,
@@ -336,6 +365,11 @@ class Profile {
     this.visibility,
     this.profileFeeInr,
     this.deleteRequest,
+    this.profileCode,
+    this.hiddenFields = const [],
+    this.audienceAll = false,
+    this.audienceCommunities = const [],
+    this.maskedFields = const [],
     // ---- protected
     this.city,
     this.state,
@@ -407,7 +441,7 @@ class Profile {
   final MasterItem? nriCountry;
   final String? about;
 
-  /// Owned by a Gandharva customer (vs. uploaded by an agent).
+  /// Owned by a customer of this app (vs. uploaded by an agent).
   final bool isCustomerProfile;
   final List<ProfilePhoto> photos;
 
@@ -445,6 +479,25 @@ class Profile {
   /// The pending deletion request on this (paid) profile of mine, if any.
   final DeleteRequest? deleteRequest;
 
+  /// My profile's permanent ID, e.g. `GN-KA1A-A001` (SPEC §9.18 C). Owner
+  /// side only — never sent for other people's profiles; null until assigned.
+  final String? profileCode;
+
+  /// The privacy toggles I switched OFF (SPEC §9.18 D) — keys of the masters'
+  /// `privacy_fields`. Own profiles only; empty = everything shown.
+  final List<String> hiddenFields;
+
+  /// Who my profile is shown to (SPEC §9.18 E): every community, or my own
+  /// community plus [audienceCommunities]. Own profiles only.
+  final bool audienceAll;
+  final List<MasterItem> audienceCommunities;
+
+  // ---- any profile
+  /// The privacy keys the server withheld from ME on this profile (SPEC
+  /// §9.18 D): their values arrive null / empty, a hidden name as the neutral
+  /// label. Empty when nothing was held back.
+  final List<String> maskedFields;
+
   // ---- protected ("on request") — present only when access is granted
   final String? city;
   final String? state;
@@ -475,6 +528,24 @@ class Profile {
   final String? propertyDetails;
 
   bool get isBride => gender == 'bride';
+
+  /// "Profile 1042" — the neutral label of a profile whose name is hidden.
+  /// The server already sends it as `full_name`; this is the same text for
+  /// the rare row that has no name at all.
+  static String neutralName(int id) => 'Profile $id';
+
+  /// Always something to show (never an empty title).
+  String get displayName => fullName.trim().isEmpty ? neutralName(id) : fullName;
+
+  /// Some details were held back from me — the page says so.
+  bool get hasMaskedFields => maskedFields.isNotEmpty;
+
+  /// The family keeps the name back: [fullName] is the neutral label.
+  bool get nameHidden => maskedFields.contains('name');
+
+  /// What the photo placeholder's initials are taken from — nothing for a
+  /// hidden or missing name.
+  String? get initialsSource => nameHidden || fullName.trim().isEmpty ? null : fullName;
 
   /// Job for the guest card: profession, else occupation type.
   String? get jobLabel => profession?.name ?? occupationType?.name;
@@ -637,12 +708,25 @@ class Profile {
         _ => ContactAccess.none,
       };
 
+  /// `{id, name}` → [MasterItem]; null for a missing, masked or malformed ref.
   static MasterItem? _ref(dynamic j) =>
-      j == null ? null : MasterItem.fromJson(j as Map<String, dynamic>);
+      j is Map<String, dynamic> && j['id'] is num && j['name'] != null ? MasterItem.fromJson(j) : null;
+
+  static List<MasterItem> _refs(dynamic list) =>
+      (list is List ? list : const []).map(_ref).whereType<MasterItem>().toList();
 
   static DateTime? _date(dynamic v) => v == null ? null : DateTime.tryParse('$v')?.toLocal();
 
-  static int? _int(dynamic v) => (v as num?)?.toInt();
+  static int? _int(dynamic v) => v is num ? v.toInt() : null;
+
+  static String? _str(dynamic v) => v is String ? v : null;
+
+  /// A list of strings (`masked_fields`, `hidden_fields`); anything else → [].
+  static List<String> _strings(dynamic v) =>
+      (v is List ? v : const []).whereType<String>().where((s) => s.isNotEmpty).toList();
+
+  /// An ID / code as shown to people; null when absent or blank.
+  static String? _code(dynamic v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
 
   factory Profile.fromJson(Map<String, dynamic> j) => Profile(
         id: (j['id'] as num).toInt(),
@@ -658,37 +742,36 @@ class Profile {
         religion: _ref(j['religion']),
         community: _ref(j['community']),
         subcaste: _ref(j['subcaste']),
-        gothram: j['gothram'] as String?,
+        gothram: _str(j['gothram']),
         motherTongue: _ref(j['mother_tongue']),
-        knownLanguages: (j['known_languages'] as List? ?? [])
-            .map((e) => MasterItem.fromJson(e as Map<String, dynamic>))
-            .toList(),
+        knownLanguages: _refs(j['known_languages']),
         foodHabit: _ref(j['food_habit']),
         nationality: _ref(j['nationality']),
         education: _ref(j['education']),
-        educationDetails: j['education_details'] as String?,
-        educationLevels: (j['education_levels'] as List? ?? [])
-            .map((e) => EducationLevelEntry.fromJson(e as Map<String, dynamic>))
+        educationDetails: _str(j['education_details']),
+        educationLevels: (j['education_levels'] is List ? j['education_levels'] as List : const [])
+            .map((e) => e is Map<String, dynamic> ? EducationLevelEntry.fromJson(e) : null)
             .whereType<EducationLevelEntry>()
             .toList(),
         profession: _ref(j['profession']),
-        professionDetails: j['profession_details'] as String?,
+        professionDetails: _str(j['profession_details']),
         occupationType: _ref(j['occupation_type']),
         workCountry: _ref(j['work_country']),
         maritalStatus: _ref(j['marital_status']),
-        zodiac: j['zodiac'] == null ? null : ZodiacSign.fromJson(j['zodiac'] as Map<String, dynamic>),
+        zodiac: j['zodiac'] is Map<String, dynamic> ? ZodiacSign.fromJson(j['zodiac'] as Map<String, dynamic>) : null,
         nakshatram: _ref(j['nakshatram']),
-        birthTime: j['birth_time'] as String?,
-        incomeText: j['income_text'] as String?,
-        otherIncome: j['other_income'] as String?,
+        birthTime: _str(j['birth_time']),
+        incomeText: _str(j['income_text']),
+        otherIncome: _str(j['other_income']),
         isNri: j['is_nri'] == true,
         nriCountry: _ref(j['nri_country']),
-        about: j['about'] as String?,
+        about: _str(j['about']),
         isCustomerProfile: j['is_customer_profile'] == true,
-        photos: (j['photos'] as List? ?? [])
-            .map((e) => ProfilePhoto.fromJson(e as Map<String, dynamic>))
+        photos: (j['photos'] is List ? j['photos'] as List : const [])
+            .whereType<Map<String, dynamic>>()
+            .map(ProfilePhoto.fromJson)
             .toList(),
-        primaryPhotoPath: j['primary_photo_url'] as String?,
+        primaryPhotoPath: _str(j['primary_photo_url']),
         isMine: j['is_mine'] == true,
         createdAt: _date(j['created_at']),
         updatedAt: _date(j['updated_at']),
@@ -704,6 +787,11 @@ class Profile {
         visibility: ProfileVisibility.fromApi(j['visibility'] as String?),
         profileFeeInr: j['profile_fee_inr'] as num?,
         deleteRequest: DeleteRequest.tryParse(j['delete_request']),
+        profileCode: _code(j['profile_code']),
+        hiddenFields: _strings(j['hidden_fields']),
+        audienceAll: j['audience_all'] == true,
+        audienceCommunities: _refs(j['audience_communities']),
+        maskedFields: _strings(j['masked_fields']),
         // protected
         city: j['city'] as String?,
         state: j['state'] as String?,

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { many } from '../lib/db.js';
 import { asyncHandler } from '../lib/errors.js';
+import { PRIVACY_ALWAYS_VISIBLE, PRIVACY_FIELDS } from '../lib/privacy.js';
 
 export const mastersRouter = Router();
 
@@ -14,7 +15,7 @@ export async function loadMasters({ includeInactive = false } = {}) {
   const [
     communities, subcastes, professions, educations, marital_statuses,
     complexions, countries, religions, languages, food_habits, occupation_types,
-    zodiac_signs, nakshatrams,
+    zodiac_signs, nakshatrams, states,
   ] = await Promise.all([
     simple('communities'),
     // Subcastes carry community_id so the app can scope them to the chosen community.
@@ -35,12 +36,18 @@ export async function loadMasters({ includeInactive = false } = {}) {
     simple('occupation_types'),
     many('SELECT id, english_name, indian_name, sort_order FROM zodiac_signs ORDER BY sort_order'),
     many('SELECT id, name, sort_order FROM nakshatrams ORDER BY sort_order'),
+    // States with the 2-letter code that starts an agent code (SPEC §9.18 B).
+    many(`SELECT id, name, code, active, sort_order FROM states ${activeOnly} ORDER BY sort_order, name`),
   ]);
 
   return {
     communities, subcastes, professions, educations, marital_statuses,
     complexions, countries, religions, languages, food_habits, occupation_types,
-    zodiac_signs, nakshatrams,
+    zodiac_signs, nakshatrams, states,
+    // The privacy toggles (SPEC §9.18 D) — code-defined, served here so the
+    // apps never hardcode the list.
+    privacy_fields: PRIVACY_FIELDS,
+    privacy_always_visible: PRIVACY_ALWAYS_VISIBLE,
   };
 }
 

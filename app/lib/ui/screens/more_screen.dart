@@ -77,6 +77,27 @@ class MoreScreen extends StatelessWidget {
                           color: Colors.white.withValues(alpha: 0.7),
                         ),
                       ),
+                      // The permanent agent code (SPEC §9.18 B) — tap to copy.
+                      if (agent != null && agent.hasAgentCode) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                S.agentCode,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            AgentCodeChip(code: agent.agentCode!, copyable: true),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -153,11 +174,11 @@ class MoreScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 36),
-          const Center(child: AppLogo(size: 44, shadow: false)),
+          const Center(child: AppLogo(size: 64, shadow: false)),
           const SizedBox(height: 8),
           Center(
             child: Text(
-              '${AppConfig.appName} · v2.1',
+              '${AppConfig.appName} · v${AppConfig.appVersion}',
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
             ),
           ),

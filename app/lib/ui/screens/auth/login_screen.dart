@@ -124,7 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Navy brand header with the icon and wordmark.
+              // Royal-blue brand header with the gold rings and the wordmark.
               Container(
                 padding: EdgeInsets.fromLTRB(24, topPad + 28, 24, 52),
                 decoration: const BoxDecoration(
@@ -133,8 +133,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 child: Column(
                   children: [
-                    const AppLogoMark(size: 118),
-                    const SizedBox(height: 8),
+                    const AppLogoMark(width: 168),
+                    const SizedBox(height: 10),
                     const AppWordmark(onDark: true, size: 36),
                     const SizedBox(height: 14),
                     Text(

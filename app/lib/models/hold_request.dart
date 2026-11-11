@@ -21,11 +21,16 @@ class HoldRequest {
     this.requesterName,
     this.requesterAgency,
     this.requesterPhone,
+    this.profileNameHidden = false,
   });
 
   final int id;
   final int profileId;
+
+  /// The profile's name, or "Profile 1042" when [profileNameHidden]
+  /// (SPEC §9.18 D — the sent box of someone without access).
   final String profileName;
+  final bool profileNameHidden;
 
   /// 'pending' | 'approved' | 'rejected' | 'cancelled' | 'released'
   final String status;
@@ -68,10 +73,13 @@ class HoldRequest {
 
   factory HoldRequest.fromJson(Map<String, dynamic> j) {
     final requester = j['requester'] as Map<String, dynamic>?;
+    final profileId = (j['profile_id'] as num).toInt();
+    final name = j['profile_name'];
     return HoldRequest(
-      id: j['id'] as int,
-      profileId: j['profile_id'] as int,
-      profileName: '${j['profile_name'] ?? ''}',
+      id: (j['id'] as num).toInt(),
+      profileId: profileId,
+      profileName: name is String && name.trim().isNotEmpty ? name : 'Profile $profileId',
+      profileNameHidden: j['profile_name_hidden'] == true,
       status: '${j['status']}',
       profileGender: j['profile_gender'] as String?,
       profileCommunity: j['profile_community'] as String?,

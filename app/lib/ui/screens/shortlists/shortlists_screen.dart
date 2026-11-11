@@ -131,7 +131,14 @@ class _ShortlistsScreenState extends State<ShortlistsScreen> {
                                     ),
                                   ),
                                 ),
-                                title: Text(e.fullName),
+                                // A hidden name arrives as "Profile 1042"
+                                // (SPEC §9.18 D).
+                                title: Text(
+                                  e.fullName,
+                                  style: e.nameHidden
+                                      ? const TextStyle(fontStyle: FontStyle.italic)
+                                      : null,
+                                ),
                                 subtitle: Text(
                                   [
                                     e.gender == 'bride' ? S.bride : S.groom,

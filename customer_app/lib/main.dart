@@ -8,8 +8,10 @@ import 'services/agents_service.dart';
 import 'services/api_client.dart';
 import 'services/customer_auth_service.dart';
 import 'services/payment_service.dart';
+import 'services/phone_auth_gateway.dart';
 import 'services/profile_service.dart';
 import 'services/push_service.dart';
+import 'services/razorpay_gateway.dart';
 import 'state/auth_state.dart';
 import 'state/browse_state.dart';
 import 'state/home_tab.dart';
@@ -53,6 +55,8 @@ class GandharvaApp extends StatelessWidget {
     final agentsService = AgentsService(api);
     final paymentService = PaymentService(api);
     final pushService = PushService(api);
+    final phoneAuth = FirebasePhoneAuthGateway();
+    final razorpay = RazorpayCheckoutGateway();
 
     return MultiProvider(
       providers: [
@@ -62,6 +66,10 @@ class GandharvaApp extends StatelessWidget {
         Provider<AgentsService>.value(value: agentsService),
         Provider<PaymentService>.value(value: paymentService),
         Provider<PushService>.value(value: pushService),
+        // Firebase phone auth and Razorpay Checkout behind interfaces so
+        // the screens can be tested with fakes (SPEC §9.19).
+        Provider<PhoneAuthGateway>.value(value: phoneAuth),
+        Provider<RazorpayGateway>.value(value: razorpay),
         // The home shell's selected tab — app-wide so notification taps
         // (list and push) can switch it.
         ChangeNotifierProvider<HomeTab>(create: (_) => HomeTab()),
@@ -174,26 +182,25 @@ class _Splash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(gradient: AppColors.brandGradient),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // The tile already carries "MILI MATRIMONY".
-              const AppLogo(size: 168),
-              const SizedBox(height: 44),
-              SizedBox(
+    // The same picture as the native launch screen (cream, the logo tile in
+    // the middle at 128 dp), so nothing jumps when Flutter takes over; the
+    // tile already carries "Wedbook Matrimony".
+    return const Scaffold(
+      backgroundColor: AppColors.cream,
+      body: SizedBox.expand(
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            AppLogo(size: 128, shadow: false),
+            Align(
+              alignment: Alignment(0, 0.55),
+              child: SizedBox(
                 width: 26,
                 height: 26,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: AppColors.gold.withValues(alpha: 0.9),
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.goldDark),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

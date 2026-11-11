@@ -283,6 +283,7 @@ class _RequestListState extends State<_RequestList> with AutomaticKeepAliveClien
     required String statusLabel,
     required String statusKey,
     required VoidCallback onTap,
+    bool nameHidden = false,
   }) =>
       InkWell(
         onTap: onTap,
@@ -302,10 +303,19 @@ class _RequestListState extends State<_RequestList> with AutomaticKeepAliveClien
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline)),
+                  // A hidden name arrives as "Profile 1042" (SPEC §9.18 D).
+                  Text(
+                    name,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontStyle: nameHidden ? FontStyle.italic : null,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline)),
+                  ],
                   const SizedBox(height: 6),
                   StatusChip(
                     label: statusLabel,
@@ -385,7 +395,11 @@ class _RequestListState extends State<_RequestList> with AutomaticKeepAliveClien
             theme: theme,
             photoUrl: h.photoAbsoluteUrl,
             name: h.profileName,
-            subtitle: [h.genderLabel, h.profileCommunity].whereType<String>().join(' · '),
+            nameHidden: h.profileNameHidden,
+            subtitle: [h.genderLabel, h.profileCommunity]
+                .whereType<String>()
+                .where((s) => s.isNotEmpty)
+                .join(' · '),
             statusLabel: h.statusLabel,
             statusKey: h.status,
             onTap: () => _openProfile(h.profileId),
@@ -450,7 +464,11 @@ class _RequestListState extends State<_RequestList> with AutomaticKeepAliveClien
             theme: theme,
             photoUrl: r.photoAbsoluteUrl,
             name: r.profileName,
-            subtitle: [r.genderLabel, r.profileCommunity].whereType<String>().join(' · '),
+            nameHidden: r.profileNameHidden,
+            subtitle: [r.genderLabel, r.profileCommunity]
+                .whereType<String>()
+                .where((s) => s.isNotEmpty)
+                .join(' · '),
             statusLabel: r.statusLabel,
             statusKey: r.status,
             onTap: () => _openProfile(r.profileId),

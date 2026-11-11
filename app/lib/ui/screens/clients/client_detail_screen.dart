@@ -160,7 +160,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     if (action == 'approve') {
       final ok = await confirmAction(
         context,
-        title: '${r.customer.fullName} → ${r.toAgent.fullName}',
+        title: '${r.customer.fullName} → ${r.toAgent.nameWithCode}',
         body: S.approveTransferBody,
         confirmLabel: S.approve,
       );
@@ -366,9 +366,17 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Text(
-                          '+91 ${c.phone}',
-                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                        // Shrinks on a narrow phone rather than cutting digits off.
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '+91 ${c.phone}',
+                              style:
+                                  theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
                         ),
                         IconButton(
                           tooltip: 'Copy',
@@ -391,6 +399,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
             spacing: 6,
             runSpacing: 6,
             children: [
+              // The customer's permanent ID (SPEC §9.18 C) — tap to copy.
+              if (c.code != null) IdChip(code: c.code!, copyable: true, color: AppColors.goldDark),
               StatusChip(
                 label: c.statusLabel,
                 color: clientStatusColor(c.status, theme.colorScheme),
@@ -398,7 +408,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               SourceChip(source: c.source),
               if (c.agent != null)
                 StatusChip(
-                  label: '${S.agentLabel}: ${c.agent!.label}',
+                  label: '${S.agentLabel}: ${c.agent!.labelWithCode}',
                   color: AppColors.navyLight,
                   icon: Icons.support_agent_rounded,
                 )

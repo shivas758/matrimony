@@ -1,5 +1,6 @@
 import { many, one, query } from './db.js';
 import { deleteStoredPhoto } from './photos.js';
+import { displayName, hiddenSet, mask } from './privacy.js';
 
 /**
  * An interest that is still "in play" (SPEC §9.4): pending, or accepted with
@@ -10,13 +11,22 @@ import { deleteStoredPhoto } from './photos.js';
 export const LIVE_INTEREST = `(ci.status = 'pending' OR (ci.status = 'accepted' AND ci.access_expires_at > now()))`;
 
 /**
- * Visibility SQL for the profiles table (CLAUDE.md rule 1, SPEC §3.1).
- * Agents: active profiles in their communities, plus all their own uploads.
- * Admins: everything.
+ * "Shown to" (SPEC §9.18 E): a profile is shown to its own community, and to
+ * the extra communities its family chose — or to every community. `$n` is an
+ * int[] of the viewer's communities; profiles aliased `p`.
+ */
+export const shownToSql = (n) =>
+  `(p.community_id = ANY($${n}::int[]) OR p.audience_all OR p.audience_community_ids && $${n}::int[])`;
+
+/**
+ * Visibility SQL for the profiles table (CLAUDE.md rule 1, SPEC §3.1 / §9.18 E).
+ * Agents: active profiles shown to one of their communities, plus all their
+ * own uploads. Admins: everything.
  * Returns a { clause, params } fragment; `next` is the next $n placeholder index.
  */
 export function visibilityClause(agent, next) {
   if (agent.is_admin) return { clause: 'TRUE', params: [], next };
+  const shown = shownToSql(next + 1);
   // Third branch: a profile on hold stays visible to the agent whose hold was
   // approved — they are the ones in talks — but to nobody else.
   // Fourth branch (SPEC §9.4): a customer who marked interest in one of my
@@ -29,8 +39,8 @@ export function visibilityClause(agent, next) {
   // it as 'expired' (LIVE_INTEREST).
   return {
     clause: `(p.uploaded_by = $${next}
-      OR (p.status = 'active' AND p.community_id = ANY($${next + 1}::int[]))
-      OR (p.status = 'on_hold' AND p.community_id = ANY($${next + 1}::int[])
+      OR (p.status = 'active' AND ${shown})
+      OR (p.status = 'on_hold' AND ${shown}
           AND EXISTS (SELECT 1 FROM hold_requests h
                        WHERE h.profile_id = p.id AND h.requester_id = $${next} AND h.status = 'approved'))
       OR (p.customer_id IS NOT NULL AND p.status = 'active'
@@ -44,16 +54,21 @@ export function visibilityClause(agent, next) {
 }
 
 /**
- * Visibility for a Gandharva customer (SPEC §9.9): their own profile, plus
- * active profiles in their agent's communities. `customer.community_ids` are
- * the agent's communities (loaded by requireCustomer).
+ * Visibility for a Gandharva customer (SPEC §9.9 / §9.18 E): their own
+ * profile, plus active profiles in their agent's communities, profiles shown
+ * to every community, and profiles whose audience includes the community of
+ * the customer's OWN profile. `customer.community_ids` are the agent's
+ * communities, `customer.own_community_ids` the community of their profile
+ * (both loaded by requireCustomer).
  */
 export function customerVisibilityClause(customer, next) {
   return {
     clause: `(p.customer_id = $${next}
-      OR (p.status = 'active' AND p.community_id = ANY($${next + 1}::int[])))`,
-    params: [customer.id, customer.community_ids || []],
-    next: next + 2,
+      OR (p.status = 'active'
+          AND (p.community_id = ANY($${next + 1}::int[]) OR p.audience_all
+               OR p.audience_community_ids && $${next + 2}::int[])))`,
+    params: [customer.id, customer.community_ids || [], customer.own_community_ids || []],
+    next: next + 3,
   };
 }
 
@@ -62,6 +77,9 @@ export const EDUCATION_LEVELS = ['below_10th', '10th', 'intermediate', 'graduati
 
 export const PROFILE_SELECT = `
   SELECT p.id, p.uploaded_by, p.customer_id, p.paid_at, p.full_name, p.gender, p.dob, p.height_cm, p.weight_kg,
+         p.profile_code, p.hidden_fields, p.audience_all, p.audience_community_ids,
+         COALESCE((SELECT json_agg(json_build_object('id', au.id, 'name', au.name) ORDER BY au.sort_order, au.name)
+                     FROM communities au WHERE au.id = ANY(p.audience_community_ids)), '[]'::json) AS audience_communities,
          p.gothram, p.education_details, p.profession_details, p.work_place,
          p.income_text, p.other_income, p.is_nri, p.nri_place, p.about, p.family_details,
          p.has_siblings, p.siblings_count, p.siblings_details,
@@ -194,10 +212,28 @@ export function protectedFields(row) {
  * Shapes a profile row for the API — PUBLIC ("appearance profile") fields only.
  * Protected fields and uploader identity are added by the caller only when
  * allowed — never here. `agent` or `customer` (Gandharva) marks ownership.
+ *
+ * Privacy toggles (SPEC §9.18 D): the details the family switched off are
+ * masked (lib/privacy.js mask()) unless the viewer is on the owner side — the
+ * uploader, an admin, the owning customer — or the caller passes
+ * `reveal: true` after establishing access (an approved contact request, an
+ * accepted interest). `masked_fields` lists what was withheld.
+ *
+ * `share: true` shapes the object for something that LEAVES the app (WhatsApp
+ * text, photo card, PDF): always masked, never the owner-side keys — whoever
+ * shares it (SPEC §3.3, CLAUDE.md rule 3).
+ *
+ * The owner side also gets the profile ID (SPEC §9.18 C — it carries the
+ * agent's code, so nobody else may see it), the family's privacy setting and
+ * the community audience (§9.18 E).
  */
-export function profilePublic(row, { photos = [], agent, customer } = {}) {
+export function profilePublic(
+  row,
+  { photos = [], agent, customer, reveal = false, share = false, photoUrlBase = '/api/photos' } = {},
+) {
   const isMine = agent ? row.uploaded_by === agent.id : customer ? row.customer_id === customer.id : false;
-  return {
+  const ownerSide = !share && (isMine || Boolean(agent?.is_admin));
+  const out = {
     id: row.id,
     full_name: row.full_name,
     gender: row.gender,
@@ -239,28 +275,65 @@ export function profilePublic(row, { photos = [], agent, customer } = {}) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     is_mine: isMine,
-    // Not `.map(photoPublic)`: the index would land in photoPublic's url-base argument.
-    photos: photos.map((p) => photoPublic(p)),
-    primary_photo_url: photos.length ? photoPublic(photos[0]).url : null,
+    photos: photos.map((p) => photoPublic(p, photoUrlBase)),
   };
+  out.masked_fields = ownerSide || (reveal && !share) ? [] : mask(out, row.hidden_fields);
+  // After mask(): a family that hides its other photos leaves only the main one.
+  out.primary_photo_url = out.photos.length ? out.photos[0].url : null;
+  if (ownerSide) {
+    out.profile_code = row.profile_code ?? null;
+    out.hidden_fields = [...hiddenSet(row.hidden_fields)];
+    out.audience_all = Boolean(row.audience_all);
+    out.audience_communities = Array.isArray(row.audience_communities) ? row.audience_communities : [];
+  }
+  return out;
+}
+
+/**
+ * Of `profileIds`, the ones this agent currently has contact access to (an
+ * approved, unexpired request) — list rows of those come unmasked like their
+ * detail page does (SPEC §9.18 D).
+ */
+export async function agentAccessIds(agentId, profileIds) {
+  if (!profileIds.length) return new Set();
+  const rows = await many(
+    `SELECT DISTINCT profile_id FROM contact_requests
+      WHERE requester_id = $1 AND profile_id = ANY($2::int[])
+        AND status = 'approved' AND expires_at > now()`,
+    [agentId, profileIds],
+  );
+  return new Set(rows.map((r) => r.profile_id));
 }
 
 /**
  * Compact summary for embedding in client / interest rows (SPEC §9.4, §9.5).
  * Public fields only. `photoUrlBase` lets customer routes point at their own
  * photo endpoint.
+ *
+ * `reveal` (SPEC §9.18 D): pass true only for a viewer with access to this
+ * profile — its own agent, an admin, the owning customer, or someone holding
+ * a live approval. Everyone else gets the neutral name and no hidden
+ * community / subcaste (`name_hidden` says the name was replaced). The
+ * default is the safe one. `code` adds the profile ID — owner side ONLY
+ * (§9.18 C: it carries the agent's code).
  */
-export function profileSummary(row, { photoId = null, photoUrlBase = '/api/photos' } = {}) {
+export function profileSummary(
+  row,
+  { photoId = null, photoUrlBase = '/api/photos', reveal = false, code = false } = {},
+) {
   if (!row) return null;
+  const hidden = reveal ? new Set() : hiddenSet(row.hidden_fields);
   return {
     id: row.id,
-    full_name: row.full_name,
+    full_name: displayName(row, reveal),
+    name_hidden: hidden.has('name'),
     gender: row.gender,
     age: row.age ?? null,
-    community: ref(row.community_id, row.community_name),
-    subcaste: ref(row.subcaste_id, row.subcaste_name),
+    community: hidden.has('community') ? null : ref(row.community_id, row.community_name),
+    subcaste: hidden.has('subcaste') ? null : ref(row.subcaste_id, row.subcaste_name),
     status: row.status,
     photo_url: photoId ? `${photoUrlBase}/${photoId}` : null,
+    ...(code ? { profile_code: row.profile_code ?? null } : {}),
   };
 }
 

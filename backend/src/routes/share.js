@@ -17,7 +17,7 @@ export const shareTokensRouter = Router();
 // 'whatsapp'/'link' → public masked page; 'download' → JPEG card; 'pdf' → A4 bio-data.
 const shareSchema = z.object({ method: z.enum(['whatsapp', 'link', 'download', 'pdf']) });
 
-export const DEFAULT_AGENCY_LABEL = 'Mediator';
+export const DEFAULT_AGENCY_LABEL = 'Wedbook';
 
 /** Finds or creates the active public token for a profile. */
 async function activeToken(profileId, agentId) {
@@ -66,8 +66,14 @@ profileShareRouter.post(
     if (row.customer_id && !row.paid_at) {
       throw conflict('payment_required', 'The customer has not paid the registration fee for this profile yet');
     }
-    const photos = (await photosByProfile([row.id])).get(row.id);
-    const profile = profilePublic(row, { photos, agent: req.agent });
+    const allPhotos = (await photosByProfile([row.id])).get(row.id);
+    // `share: true`: what leaves the app is always masked by the family's
+    // privacy toggles — also when the uploader shares their own profile — and
+    // never carries the profile ID (SPEC §9.18 C / D, CLAUDE.md rule 3).
+    const profile = profilePublic(row, { photos: allPhotos, agent: req.agent, share: true });
+    // Only the photos that survived the mask (the main one when the others are hidden).
+    const shown = new Set(profile.photos.map((p) => p.id));
+    const photos = allPhotos.filter((p) => shown.has(p.id));
     const agencyLabel = req.agent.agency_name || DEFAULT_AGENCY_LABEL;
 
     // Every share is logged (CLAUDE.md rule 5).

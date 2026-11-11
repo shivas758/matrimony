@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../config.dart';
+import '../../../models/customer.dart';
+import '../../../models/master_data.dart';
+import '../../../models/privacy_settings.dart';
 import '../../../models/profile.dart';
 import '../../../services/api_client.dart';
 import '../../../services/profile_service.dart';
@@ -16,12 +19,14 @@ import '../../widgets/photo_viewer.dart';
 import '../../widgets/profile_sections.dart';
 import '../payment/checkout_screen.dart';
 import 'my_profiles_screen.dart';
+import 'privacy_screen.dart';
 import 'profile_form_screen.dart';
 
-/// My profile (SPEC §9.11 Gandharva 5 / §9.12 / §9.17): where it stands with
-/// the fee and approval (with *Pay* while unpaid), the same cards as the
-/// detail screen plus the on-request block (it is mine), Edit, photo
-/// management, and *Delete* while it is still unpaid. A PAID profile can
+/// My profile (SPEC §9.11 Gandharva 5 / §9.12 / §9.17 / §9.18): **Your ID**
+/// (tap to copy) once it is assigned, where the profile stands with the fee
+/// and approval (with *Pay* while unpaid), *Privacy settings* with a one-line
+/// summary, the same cards as the detail screen plus the on-request block (it
+/// is mine), Edit, photo management, and *Delete* while it is still unpaid. A PAID profile can
 /// only be deleted by the agent: *Request deletion* → banner with *Cancel
 /// request* while it waits (SPEC §9.13). If the agent approved meanwhile
 /// (404), it pops back to the list. [MyProfilesScreen] shows it [embedded]
@@ -87,11 +92,23 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     final saved = await Navigator.of(context).push<Profile>(
       MaterialPageRoute(builder: (_) => ProfileFormScreen(existing: existing)),
     );
-    if (saved == null || !mounted) return;
+    if (!mounted) return;
+    if (saved == null) {
+      // Nothing saved — but a photo removed on the form is gone for good.
+      await _load();
+      return;
+    }
     setState(() => _profile = saved);
     showSnack(context, S.profileSaved);
     // Name / photo on the My profiles list.
     await context.read<AuthState>().refresh();
+  }
+
+  /// Privacy settings (SPEC §9.18 D / E): what others see, and which
+  /// communities see the profile at all.
+  Future<void> _openPrivacy(Profile profile) async {
+    final updated = await PrivacyScreen.open(context, profile);
+    if (updated != null && mounted) setState(() => _profile = updated);
   }
 
   Future<void> _pay(Profile profile) async {
@@ -309,7 +326,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(profile?.fullName ?? S.myProfile),
+        title: Text(profile?.displayName ?? S.myProfile),
         actions: [
           if (widget.embedded) const NotificationBell(),
           if (profile != null)
@@ -365,6 +382,8 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     }
 
     final theme = Theme.of(context);
+    final masters = context.watch<MastersState>().data;
+    final code = _idOf(profile, context.watch<AuthState>().customer);
     final visibility = profile.visibility;
     final (icon, tint) = switch (visibility) {
       ProfileVisibility.paymentPending => (Icons.lock_rounded, AppColors.goldDark),
@@ -377,6 +396,11 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
         children: [
+          // The ID the family quotes to the bureau (SPEC §9.18 C).
+          if (code != null) ...[
+            CodeTile(label: S.yourId, code: code, copiedMessage: S.idCopied),
+            const SizedBox(height: 12),
+          ],
           if (profile.deleteRequest != null) ...[
             NoticeCard(
               icon: Icons.delete_outline_rounded,
@@ -397,6 +421,14 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             body: S.visibilityNote(visibility?.apiValue),
             tint: tint,
           ),
+          // Only a server that knows the toggles (v2.8+) gets the entry.
+          if (masters.hasPrivacy) ...[
+            const SizedBox(height: 12),
+            _PrivacyEntry(
+              summary: _privacySummary(profile, masters),
+              onTap: () => _openPrivacy(profile),
+            ),
+          ],
           const SizedBox(height: 16),
           SectionHeader(
             S.photos,
@@ -439,6 +471,74 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// The profile's ID: from the profile itself, else from the same profile in
+/// the account's `profiles[]` (a write response may come without it).
+String? _idOf(Profile profile, Customer? customer) {
+  if (profile.profileCode != null) return profile.profileCode;
+  for (final p in customer?.profiles ?? const <ProfileSummary>[]) {
+    if (p.id == profile.id && p.profileCode != null) return p.profileCode;
+  }
+  return null;
+}
+
+/// "3 details hidden · shown to all communities".
+String _privacySummary(Profile profile, MasterData masters) {
+  final settings = PrivacySettings.fromProfile(profile);
+  return S.privacySummary(
+    hidden: settings.hiddenCount(masters.privacyFields),
+    allCommunities: settings.audience == AudienceMode.all,
+    extraCommunities: settings.audienceCommunityIds(ownCommunityId: profile.community?.id).length,
+  );
+}
+
+/// The *Privacy settings* card on My profile: what it is, how it is set now.
+class _PrivacyEntry extends StatelessWidget {
+  const _PrivacyEntry({required this.summary, required this.onTap});
+
+  final String summary;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(color: AppColors.goldLight, borderRadius: BorderRadius.circular(12)),
+                alignment: Alignment.center,
+                child: const Icon(Icons.shield_outlined, size: 20, color: AppColors.wine),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(S.privacyTitle, style: theme.textTheme.titleSmall?.copyWith(color: AppColors.wine)),
+                    const SizedBox(height: 2),
+                    Text(
+                      summary,
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.3),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+            ],
+          ),
+        ),
       ),
     );
   }

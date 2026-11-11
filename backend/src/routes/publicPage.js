@@ -4,12 +4,22 @@ import { many, one } from '../lib/db.js';
 import { asyncHandler, notFound } from '../lib/errors.js';
 import { escapeXml, watermarkedBuffer } from '../lib/photos.js';
 import { ROW_GROUPS, formatDob, publicRows } from '../lib/card.js';
+import { hiddenSet, mask } from '../lib/privacy.js';
 
 // Mounted at /p — PUBLIC, no auth. Masked view only (CLAUDE.md rule 6).
 export const publicRouter = Router();
 
 const esc = escapeXml;
-const DEFAULT_LABEL = 'Mediator';
+const DEFAULT_LABEL = 'Wedbook';
+
+/** The photos a public page may show: all of them, or only the main one when the family hides the rest (SPEC §9.18 D). */
+async function sharedPhotos(profile) {
+  const limit = hiddenSet(profile.hidden_fields).has('photos') ? 1 : 8;
+  return many(
+    `SELECT id, file_path FROM profile_photos WHERE profile_id = $1 ORDER BY is_primary DESC, sort_order, id LIMIT ${limit}`,
+    [profile.id],
+  );
+}
 
 /** Loads the profile behind an active share token. */
 async function loadShared(token) {
@@ -22,7 +32,7 @@ async function loadShared(token) {
   // (CLAUDE.md rule 6). Work country / NRI country are the location.
   const row = await one(
     `SELECT st.id AS token_id, st.token,
-            p.id, p.full_name, p.gender, p.status,
+            p.id, p.full_name, p.gender, p.status, p.hidden_fields,
             p.dob, date_part('year', age(p.dob))::int AS age, p.height_cm, p.weight_kg,
             to_char(p.birth_time, 'HH24:MI') AS birth_time,
             p.gothram, p.education_details, p.profession_details,
@@ -86,13 +96,15 @@ publicRouter.get(
   '/:token',
   asyncHandler(async (req, res) => {
     const p = await loadShared(req.params.token);
-    const photos = await many(
-      `SELECT id FROM profile_photos WHERE profile_id = $1 ORDER BY is_primary DESC, sort_order, id LIMIT 8`,
-      [p.id],
-    );
+    const photos = await sharedPhotos(p);
 
-    // Same row list as the download card and the PDF (lib/card.js publicRows).
-    const rows = publicRows({
+    // The same profile object the card and the PDF are drawn from, then the
+    // family's privacy toggles on top: a public page never shows a detail
+    // that was switched off (SPEC §9.18 D), whoever created the link.
+    const profile = {
+      id: p.id,
+      full_name: p.full_name,
+      about: p.about,
       dob: p.dob,
       age: p.age,
       birth_time: p.birth_time,
@@ -123,19 +135,21 @@ publicRouter.get(
       zodiac: p.zodiac_english_name
         ? { english_name: p.zodiac_english_name, indian_name: p.zodiac_indian_name }
         : null,
-    });
+    };
+    mask(profile, p.hidden_fields);
+    // Same row list as the download card and the PDF (lib/card.js publicRows).
+    const rows = publicRows(profile);
     const groups = ROW_GROUPS.map(([title, labels]) => [title, rows.filter(([k]) => labels.includes(k))]).filter(
       ([, r]) => r.length,
     );
 
     const label = p.agency_name || DEFAULT_LABEL;
     const who = p.gender === 'bride' ? 'Bride' : 'Groom';
-    const sub = [who, p.age ? `${p.age} yrs${p.dob ? ` (${formatDob(p.dob)})` : ''}` : null, p.community_name]
-      .filter(Boolean)
-      .join('  ·  ');
+    const dob = profile.dob ? ` (${formatDob(profile.dob)})` : '';
+    const sub = [who, p.age ? `${p.age} yrs${dob}` : null, profile.community?.name].filter(Boolean).join('  ·  ');
     // Location in the preview = the country only (work country, or the NRI country).
-    const location = p.is_nri ? p.nri_country_name : p.work_country_name;
-    const description = [who, p.age ? `${p.age} yrs` : null, p.community_name, p.education_name, location]
+    const location = profile.is_nri ? profile.nri_country?.name : profile.work_country?.name;
+    const description = [who, p.age ? `${p.age} yrs` : null, profile.community?.name, profile.education?.name, location]
       .filter(Boolean)
       .join(' · ');
     const pageUrl = `${config.publicBaseUrl}/p/${p.token}`;
@@ -166,11 +180,11 @@ publicRouter.get(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#0F2F52">
-<title>${esc(p.full_name)} — Mediator</title>
+<meta name="theme-color" content="#043270">
+<title>${esc(profile.full_name)} — Wedbook</title>
 <meta property="og:type" content="profile">
-<meta property="og:site_name" content="Mediator · ${esc(label)}">
-<meta property="og:title" content="${esc(p.full_name)}">
+<meta property="og:site_name" content="Wedbook · ${esc(label)}">
+<meta property="og:title" content="${esc(profile.full_name)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${esc(pageUrl)}">
 ${ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : ''}
@@ -178,19 +192,19 @@ ${ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : ''}
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light; --navy:#0F2F52; --navy-deep:#081C33; --gold:#C9962E; --gold-light:#E8C25F;
+  :root { color-scheme: light; --navy:#043270; --navy-deep:#021E4A; --gold:#C9962E; --gold-light:#E8C25F;
           --ink:#1C2430; --muted:#6B7280; --rule:#E7E2D8; --ivory:#F7F5F0; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--ivory); color:var(--ink);
          font-family: Poppins, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .brand { background: linear-gradient(135deg, #1B4F82 0%, var(--navy) 55%, var(--navy-deep) 100%);
+  .brand { background: linear-gradient(135deg, #0D4A9A 0%, var(--navy) 55%, var(--navy-deep) 100%);
            color:#fff; padding: 14px 20px 16px; border-bottom: 3px solid var(--gold); }
   .brand .in { max-width: 600px; margin: 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px; }
   .brand .name { font-family: "Playfair Display", Georgia, serif; font-weight:600; font-size:1.35rem; color:var(--gold-light); line-height:1; }
   .brand .tag { font-size:.62rem; letter-spacing:.2em; text-transform:uppercase; opacity:.75; margin-top:4px; }
   .brand .agency { font-size:.8rem; font-weight:500; text-align:right; opacity:.92; }
   .wrap { max-width: 600px; margin: 0 auto; padding: 16px 16px 28px; }
-  .hero { background:#fff; border-radius: 20px; overflow:hidden; box-shadow: 0 10px 30px rgba(8,28,51,.08); }
+  .hero { background:#fff; border-radius: 20px; overflow:hidden; box-shadow: 0 10px 30px rgba(2,30,74,.08); }
   .gallery { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; background:var(--navy-deep); scrollbar-width:none; }
   .gallery::-webkit-scrollbar { display:none; }
   .shot { position:relative; overflow:hidden; width:100%; flex:0 0 100%; scroll-snap-align:center; aspect-ratio:4/5; }
@@ -198,7 +212,7 @@ ${ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : ''}
   .shot .fill { object-fit:cover; filter: blur(22px) brightness(.7); transform: scale(1.15); }
   .shot .pic { object-fit:contain; }
   .noimg { aspect-ratio:4/5; display:grid; place-items:center; color:var(--gold); font-size:1.1rem;
-           background: radial-gradient(circle at 50% 40%, #1B4F82, var(--navy-deep)); }
+           background: radial-gradient(circle at 50% 40%, #0D4A9A, var(--navy-deep)); }
   .dots { display:flex; justify-content:center; gap:6px; padding: 10px 0 0; }
   .dots i { width:7px; height:7px; border-radius:50%; background:#D6D0C4; display:block; }
   .dots i.on { background:var(--gold); }
@@ -207,7 +221,7 @@ ${ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : ''}
   .sub { color:var(--gold); font-weight:600; font-size:.92rem; margin-top:6px; }
   .rule { width:48px; height:3px; background:var(--gold-light); border-radius:2px; margin-top:12px; }
   .card { background:#fff; border-radius: 18px; padding: 16px 20px 6px; margin-top: 14px;
-          box-shadow: 0 6px 20px rgba(8,28,51,.05); }
+          box-shadow: 0 6px 20px rgba(2,30,74,.05); }
   .card h2 { margin:0 0 6px; font-size:.7rem; letter-spacing:.16em; text-transform:uppercase; color:var(--gold); font-weight:600; }
   dl { margin:0; }
   dl > div { display:flex; gap:14px; padding: 10px 0; border-top: 1px solid var(--rule); }
@@ -222,7 +236,7 @@ ${ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : ''}
 </style>
 </head><body>
 <header class="brand"><div class="in">
-  <div><div class="name">Mediator</div><div class="tag">Matrimony Partners</div></div>
+  <div><div class="name">Wedbook</div><div class="tag">Matrimony</div></div>
   <div class="agency">${esc(label)}</div>
 </div></header>
 <main class="wrap">
@@ -230,17 +244,17 @@ ${ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : ''}
     <div class="gallery">${gallery || '<div class="noimg">No photo</div>'}</div>
     ${dots}
     <div class="head">
-      <h1>${esc(p.full_name)}</h1>
+      <h1>${esc(profile.full_name)}</h1>
       <div class="sub">${esc(sub)}</div>
       <div class="rule"></div>
     </div>
   </div>
   ${groups.map(([title, r]) => section(title, r)).join('')}
-  ${p.about ? `<section class="card about"><h2>About</h2><p>${esc(p.about)}</p></section>` : ''}
+  ${profile.about ? `<section class="card about"><h2>About</h2><p>${esc(profile.about)}</p></section>` : ''}
   <footer class="foot">
     <div class="agency">${esc(label)}</div>
     <div class="note">Contact your agent for details</div>
-    <div class="by">Shared privately via Mediator</div>
+    <div class="by">Shared privately via Wedbook</div>
   </footer>
 </main>
 </body></html>`);
@@ -252,10 +266,10 @@ publicRouter.get(
   '/:token/photo/:photoId',
   asyncHandler(async (req, res) => {
     const p = await loadShared(req.params.token);
-    const photo = await one('SELECT id, file_path FROM profile_photos WHERE id = $1 AND profile_id = $2', [
-      Number(req.params.photoId),
-      p.id,
-    ]);
+    // Only a photo the page itself shows — the main one alone when the family
+    // hides the others (SPEC §9.18 D).
+    const wanted = Number(req.params.photoId);
+    const photo = (await sharedPhotos(p)).find((ph) => ph.id === wanted);
     if (!photo) throw notFound('photo_not_found', 'Photo not found');
 
     const buf = await watermarkedBuffer(photo.file_path, p.agency_name || DEFAULT_LABEL);

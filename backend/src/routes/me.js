@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { many, one } from '../lib/db.js';
+import { many, one, tx } from '../lib/db.js';
 import { asyncHandler, badRequest, conflict } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
-import { agentPublic } from '../lib/serialize.js';
+import { AGENT_SELECT, agentPublic } from '../lib/serialize.js';
+import { findState, issueAgentCode, issueMissingProfileCodes } from '../lib/codes.js';
 
 // Mounted at /api/my — agent self-service (SPEC §5 screen 10).
 export const meRouter = Router();
@@ -45,12 +46,36 @@ meRouter.patch(
     if (!sets.length) throw badRequest('nothing_to_update', 'Send a city or an agency name to update');
 
     params.push(req.agent.id);
-    const agent = await one(
-      `UPDATE agents SET ${sets.join(', ')}
-        WHERE id = $${params.length}
-        RETURNING id, full_name, phone, agency_name, role, status, must_change_password, city, created_at`,
-      params,
-    );
+    await one(`UPDATE agents SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING id`, params);
+    const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [req.agent.id]);
+    res.json({ agent: agentPublic(agent, await agentCommunities(agent.id)) });
+  }),
+);
+
+const stateSchema = z.object({ state_id: z.coerce.number().int().positive('Select your state') });
+
+// POST /api/my/state {state_id} — an agent registered before v2.8 chooses
+// their State ONCE (SPEC §9.18 B). That issues their permanent agent code and
+// the IDs of every profile they already have (oldest first). Neither can be
+// changed afterwards: 409 state_already_set.
+meRouter.post(
+  '/state',
+  asyncHandler(async (req, res) => {
+    const { state_id } = parse(stateSchema, req.body ?? {});
+    await tx(async (client) => {
+      // Lock the row: two taps must not issue two codes.
+      const { rows } = await client.query('SELECT id, agent_code FROM agents WHERE id = $1 FOR UPDATE', [
+        req.agent.id,
+      ]);
+      if (rows[0].agent_code) {
+        throw conflict('state_already_set', `Your agent code is ${rows[0].agent_code} — it cannot be changed`);
+      }
+      const state = await findState(client, state_id);
+      if (!state) throw badRequest('invalid_state', 'Select your state from the list');
+      await issueAgentCode(client, req.agent.id, state);
+      await issueMissingProfileCodes(client, { agentId: req.agent.id });
+    });
+    const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [req.agent.id]);
     res.json({ agent: agentPublic(agent, await agentCommunities(agent.id)) });
   }),
 );

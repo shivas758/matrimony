@@ -31,7 +31,9 @@ import {
   profilePublic,
   protectedFields,
 } from '../lib/profiles.js';
-import { SORTS, applyListFilters, listQuerySchema } from '../lib/profileQuery.js';
+import { applyListFilters, listQuerySchema, sortSql } from '../lib/profileQuery.js';
+import { filterViewer, hiddenSet } from '../lib/privacy.js';
+import { issueMissingProfileCodes } from '../lib/codes.js';
 import { config } from '../lib/config.js';
 import { confirmPayment, createProfilePayment, paymentPublic } from '../lib/payments.js';
 import {
@@ -62,15 +64,17 @@ import { requireActiveCustomer, requireFullAccess, requireNotSuspended } from '.
 
 export const customerRouter = Router();
 
-const DEFAULT_WATERMARK = 'MILI';
+const DEFAULT_WATERMARK = 'Wedbook';
 const MAX_PROFILES = () => config.payments.maxCustomerProfiles;
 
-/** Public profile shape with photo urls pointing at /api/customer/photos. */
-function customerProfilePublic(row, photos, customer) {
-  const out = profilePublic(row, { photos, customer });
-  out.photos = photos.map((p) => photoPublic(p, CUSTOMER_PHOTO_BASE));
-  out.primary_photo_url = out.photos.length ? out.photos[0].url : null;
-  return out;
+/**
+ * Public profile shape with photo urls pointing at /api/customer/photos.
+ * `reveal` lifts the family's privacy toggles (SPEC §9.18 D) — pass true only
+ * for an accepted, unexpired interest; the customer's own profile is always
+ * shown in full.
+ */
+function customerProfilePublic(row, photos, customer, { reveal = false } = {}) {
+  return profilePublic(row, { photos, customer, reveal, photoUrlBase: CUSTOMER_PHOTO_BASE });
 }
 
 /**
@@ -451,13 +455,16 @@ customerRouter.get(
     const vis =
       access === 'full' ? customerVisibilityClause(req.customer, 2) : guestVisibilityClause(req.customer, 2);
     const row = await one(
-      `SELECT ph.id, ph.file_path, p.customer_id,
+      `SELECT ph.id, ph.file_path, p.customer_id, p.hidden_fields,
               ph.id = (SELECT x.id FROM profile_photos x WHERE x.profile_id = p.id
-                        ORDER BY x.is_primary DESC, x.sort_order, x.id LIMIT 1) AS is_first
+                        ORDER BY x.is_primary DESC, x.sort_order, x.id LIMIT 1) AS is_first,
+              EXISTS (SELECT 1 FROM customer_interests ci
+                       WHERE ci.profile_id = p.id AND ci.customer_id = $${vis.next}
+                         AND ci.status = 'accepted' AND ci.access_expires_at > now()) AS has_access
          FROM profile_photos ph
          JOIN profiles p ON p.id = ph.profile_id
         WHERE ph.id = $1 AND ${vis.clause}`,
-      [photoId, ...vis.params],
+      [photoId, ...vis.params, req.customer.id],
     );
     if (!row) throw notFound('photo_not_found', 'Photo not found');
 
@@ -465,6 +472,11 @@ customerRouter.get(
     if (!own) {
       if (access !== 'full' && !row.is_first) {
         throw forbidden('unlock_required', 'Register and get approved to see more photos');
+      }
+      // A family that hides its other photos shows only the main one until
+      // it accepts my interest (SPEC §9.18 D).
+      if (!row.is_first && !row.has_access && hiddenSet(row.hidden_fields).has('photos')) {
+        throw notFound('photo_not_found', 'Photo not found');
       }
       const label = access === 'full' ? req.customer.agent?.agency_name || DEFAULT_WATERMARK : DEFAULT_WATERMARK;
       const buf = await watermarkedBuffer(row.file_path, label);
@@ -509,18 +521,24 @@ function guestVisibilityClause(customer, next) {
 
 const ref = (id, name) => (id ? { id, name } : null);
 
-/** The guest card: photo, age, job, caste, package — nothing else (SPEC §9.12). */
+/**
+ * The guest card: photo, age, job, caste, package — nothing else (SPEC
+ * §9.12), and of those only what the family has not switched off (SPEC
+ * §9.18 D; the main photo, age and gender are always shown).
+ */
 function guestRow(row, photos) {
   const first = photos?.[0];
+  const hidden = hiddenSet(row.hidden_fields);
+  const job = !hidden.has('profession');
   return {
     id: row.id,
     gender: row.gender,
     age: row.age,
-    community: ref(row.community_id, row.community_name),
-    subcaste: ref(row.subcaste_id, row.subcaste_name),
-    profession: ref(row.profession_id, row.profession_name),
-    occupation_type: ref(row.occupation_type_id, row.occupation_type_name),
-    income_text: row.income_text,
+    community: hidden.has('community') ? null : ref(row.community_id, row.community_name),
+    subcaste: hidden.has('subcaste') ? null : ref(row.subcaste_id, row.subcaste_name),
+    profession: job ? ref(row.profession_id, row.profession_name) : null,
+    occupation_type: job ? ref(row.occupation_type_id, row.occupation_type_name) : null,
+    income_text: hidden.has('income') ? null : row.income_text,
     primary_photo_url: first ? `${CUSTOMER_PHOTO_BASE}/${first.id}` : null,
     locked: true,
   };
@@ -568,13 +586,15 @@ customerRouter.get(
     params.push(...vis.params);
     add('p.customer_id IS DISTINCT FROM $#', req.customer.id);
     add(`p.status = 'active'`);
-    applyListFilters(f, add);
+    // A filter never matches a detail the family switched off (SPEC §9.18 D).
+    const viewer = filterViewer();
+    applyListFilters(f, add, viewer);
 
     const whereSql = `WHERE ${where.join(' AND ')}`;
     const offset = (f.page - 1) * f.limit;
     const { rows: countRows } = await query(`SELECT count(*)::int AS total FROM profiles p ${whereSql}`, params);
     const rows = await many(
-      `${PROFILE_SELECT} ${whereSql} ORDER BY ${SORTS[f.sort]} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      `${PROFILE_SELECT} ${whereSql} ORDER BY ${sortSql(f.sort, viewer)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, f.limit, offset],
     );
 
@@ -609,8 +629,9 @@ customerRouter.get(
       gender: f.gender ?? null,
       access,
       profiles: rows.map((r) => {
-        const out = customerProfilePublic(r, photos.get(r.id), req.customer);
         const it = byProfile.get(r.id);
+        // An accepted, unexpired interest lifts the privacy toggles on the row too.
+        const out = customerProfilePublic(r, photos.get(r.id), req.customer, { reveal: Boolean(it?.live) });
         out.interest_status = it ? (it.status === 'accepted' && !it.live ? 'expired' : it.status) : null;
         out.is_interested = Boolean(it && (it.status === 'pending' || it.live));
         return out;
@@ -637,7 +658,7 @@ customerRouter.get(
     const row = await loadVisibleProfile(Number(req.params.id), req.customer);
     const photos = (await photosByProfile([row.id])).get(row.id);
     const access = await customerAccess(row, req.customer);
-    const out = customerProfilePublic(row, photos, req.customer);
+    const out = customerProfilePublic(row, photos, req.customer, { reveal: access.access === 'granted' });
     out.interest = access.interest;
     out.contact_access = access.access;
     out.contact_expires_at = access.expires_at;
@@ -762,8 +783,11 @@ customerRouter.get(
     const where = [`a.status = 'active'`, 'EXISTS (SELECT 1 FROM agent_communities y WHERE y.agent_id = a.id)'];
     const params = [];
     if (f.q) {
+      // Name, agency or agent code (SPEC §9.18 B).
       params.push(`%${f.q}%`);
-      where.push(`(a.full_name ILIKE $${params.length} OR a.agency_name ILIKE $${params.length})`);
+      where.push(
+        `(a.full_name ILIKE $${params.length} OR a.agency_name ILIKE $${params.length} OR a.agent_code ILIKE $${params.length})`,
+      );
     }
     if (f.city) {
       params.push(`%${f.city}%`);
@@ -775,7 +799,7 @@ customerRouter.get(
     }
     params.push(req.customer.agent_id ?? 0);
     const rows = await many(
-      `SELECT a.id, a.full_name, a.agency_name, a.city, a.phone,
+      `SELECT a.id, a.full_name, a.agency_name, a.city, a.phone, a.agent_code,
               COALESCE(json_agg(json_build_object('id', c.id, 'name', c.name) ORDER BY c.sort_order, c.name)
                        FILTER (WHERE c.id IS NOT NULL), '[]') AS communities
          FROM agents a
@@ -796,11 +820,23 @@ const linkSchema = z
   .object({
     agent_phone: z.preprocess((v) => (v === '' || v === null ? undefined : v), phoneSchema.optional()),
     agent_id: z.coerce.number().int().positive().optional(),
+    // The agent's code, e.g. KA1A (SPEC §9.18 B) — typed in any case.
+    agent_code: z.preprocess(
+      (v) => (v === '' || v === null ? undefined : v),
+      z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-Z]{2}\d{1,3}[A-Z]{1,3}$/, 'That does not look like an agent code (for example KA1A)')
+        .optional(),
+    ),
   })
-  .refine((b) => b.agent_phone || b.agent_id, { message: "Enter your agent's mobile number" });
+  .refine((b) => b.agent_phone || b.agent_id || b.agent_code, {
+    message: "Enter your agent's mobile number or agent code",
+  });
 
-// POST /api/customer/agent {agent_phone | agent_id} — a guest (or a pending /
-// rejected customer) links an agent and waits for their approval; my
+// POST /api/customer/agent {agent_phone | agent_code | agent_id} — a guest (or
+// a pending / rejected customer) links an agent and waits for their approval; my
 // profiles move with me (SPEC §9.12). Active customers use /agent-change.
 customerRouter.post(
   '/agent',
@@ -812,8 +848,17 @@ customerRouter.post(
     }
     const agent = body.agent_id
       ? await one('SELECT id, status FROM agents WHERE id = $1', [body.agent_id])
-      : await one('SELECT id, status FROM agents WHERE phone = $1', [body.agent_phone]);
-    if (!agent) throw notFound('agent_not_found', 'No agent has this mobile number — check with your agent');
+      : body.agent_code
+        ? await one('SELECT id, status FROM agents WHERE agent_code = $1', [body.agent_code])
+        : await one('SELECT id, status FROM agents WHERE phone = $1', [body.agent_phone]);
+    if (!agent) {
+      throw notFound(
+        'agent_not_found',
+        body.agent_code
+          ? 'No agent has this agent code — check with your agent'
+          : 'No agent has this mobile number — check with your agent',
+      );
+    }
     if (agent.status !== 'active') {
       throw badRequest('agent_not_active', "This agent's account is not active yet — check with your agent");
     }
@@ -832,6 +877,9 @@ customerRouter.post(
         req.customer.id,
         agent.id,
       ]);
+      // A profile that has no ID yet gets one from this agent (SPEC §9.18 C);
+      // one that has an ID keeps it.
+      await issueMissingProfileCodes(client, { customerId: req.customer.id });
     });
     res.json({ customer: await loadCustomerMe(req.customer.id) });
   }),

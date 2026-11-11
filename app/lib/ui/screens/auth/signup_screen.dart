@@ -6,14 +6,21 @@ import 'package:provider/provider.dart';
 
 import '../../../services/api_client.dart';
 import '../../../services/auth_service.dart';
+import '../../../services/phone_auth_gateway.dart';
 import '../../../state/auth_state.dart';
 import '../../../state/masters_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
+import 'choose_state_screen.dart';
 import 'login_screen.dart';
 
 /// Two-step signup (SPEC §9.1 / §9.11): verify the mobile number with an OTP,
 /// then the details form, submitted with the phone verification token.
+///
+/// The server picks the OTP provider. `mock` / `msg91`: the server sends the
+/// code and checks it. `firebase` (SPEC §9.19 A): the phone sends and checks
+/// the SMS through Firebase phone auth ([PhoneAuthGateway]); the server then
+/// checks the Firebase ID token and answers the same verification token.
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
 
@@ -32,6 +39,9 @@ class _SignupScreenState extends State<SignupScreen> {
   final _confirm = TextEditingController();
   final Set<int> _communityIds = {};
 
+  /// The agent's state (SPEC §9.18 B) — decides their permanent agent code.
+  int? _stateId;
+
   /// Step 1 state: a code was sent / the number is verified.
   bool _otpSent = false;
   bool _verified = false;
@@ -39,6 +49,15 @@ class _SignupScreenState extends State<SignupScreen> {
   String? _verificationToken;
   int _resendIn = 0;
   Timer? _countdown;
+
+  /// Firebase mode (SPEC §9.19 A): set by a `provider: 'firebase'` send
+  /// answer, cleared by "change number".
+  FirebaseClientOptions? _firebase;
+  String? _verificationId;
+  int? _resendToken;
+  bool _autoVerifying = false;
+  PhoneAuthGateway? _gateway;
+  StreamSubscription<String>? _autoSub;
 
   bool _busy = false;
   bool _obscure = true;
@@ -54,6 +73,7 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   void dispose() {
     _countdown?.cancel();
+    _autoSub?.cancel();
     _phone.dispose();
     _code.dispose();
     _name.dispose();
@@ -88,7 +108,12 @@ class _SignupScreenState extends State<SignupScreen> {
     try {
       final result = await context.read<AuthService>().sendSignupOtp(_phone.text.trim());
       if (!mounted) return;
+      if (result.isFirebase) {
+        await _startFirebase(result);
+        return;
+      }
       setState(() {
+        _firebase = null;
         _otpSent = true;
         _mockCode = result.mockCode;
         _code.clear();
@@ -97,9 +122,111 @@ class _SignupScreenState extends State<SignupScreen> {
     } on ApiException catch (e) {
       // phone_taken / otp_cooldown / otp_limit — the server message says it all.
       if (mounted) setState(() => _error = e.message);
+    } on PhoneAuthFailure catch (e) {
+      if (mounted) setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Firebase mode: the phone asks Firebase for the SMS (a Resend passes
+  /// Firebase's resend token). Android may verify the number by itself —
+  /// then there is nothing to type. Called with [_busy] held.
+  Future<void> _startFirebase(OtpSendResult result) async {
+    final gateway = _gateway ??= context.read<PhoneAuthGateway>();
+    _autoSub ??= gateway.autoVerifiedIdTokens.listen(_onAutoVerified);
+    final phone = _phone.text.trim();
+    // A Resend for the same number reuses Firebase's token; a first send not.
+    final resendToken = _firebase != null && _otpSent ? _resendToken : null;
+    setState(() {
+      _firebase = result.firebase;
+      _mockCode = null;
+    });
+    final step = await gateway.start(result.firebase!, phone, resendToken: resendToken);
+    if (!mounted) return;
+    switch (step) {
+      case PhoneCodeSent(:final verificationId, resendToken: final token):
+        setState(() {
+          _otpSent = true;
+          _verificationId = verificationId;
+          _resendToken = token ?? _resendToken;
+          _code.clear();
+        });
+        _startCountdown(result.retryAfter);
+      case PhoneAutoVerified(:final idToken):
+        setState(() {
+          _otpSent = true;
+          _autoVerifying = true;
+        });
+        _startCountdown(result.retryAfter);
+        try {
+          await _verifyFirebaseToken(idToken);
+        } on ApiException catch (e) {
+          _onFirebaseVerifyError(e);
+        } finally {
+          if (mounted) setState(() => _autoVerifying = false);
+        }
+    }
+  }
+
+  /// Android read the SMS after the code field was already shown.
+  void _onAutoVerified(String idToken) {
+    if (!mounted || _firebase == null || !_otpSent || _verified || _busy) return;
+    _autoVerify(idToken);
+  }
+
+  Future<void> _autoVerify(String idToken) async {
+    setState(() {
+      _busy = true;
+      _autoVerifying = true;
+      _error = null;
+    });
+    try {
+      await _verifyFirebaseToken(idToken);
+    } on ApiException catch (e) {
+      _onFirebaseVerifyError(e);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _autoVerifying = false;
+        });
+      }
+    }
+  }
+
+  /// The server checks the Firebase ID token and answers the verification
+  /// token. Win or lose, the Firebase session ends here — the app keeps none.
+  Future<void> _verifyFirebaseToken(String idToken) async {
+    try {
+      final token =
+          await context.read<AuthService>().verifySignupFirebase(_phone.text.trim(), idToken);
+      if (!mounted) return;
+      _onVerified(token);
+    } finally {
+      unawaited(_gateway?.signOut());
+    }
+  }
+
+  /// invalid_firebase_token / phone_mismatch / otp_provider_mismatch: the
+  /// server message says it all. The code was spent on Firebase, so a retry
+  /// needs a new one; a provider switch needs a fresh send.
+  void _onFirebaseVerifyError(ApiException e) {
+    if (!mounted) return;
+    if (e.code == 'otp_provider_mismatch') _resetOtp();
+    setState(() {
+      _error = e.message;
+      _code.clear();
+    });
+  }
+
+  void _onVerified(String token) {
+    _countdown?.cancel();
+    setState(() {
+      _verificationToken = token;
+      _verified = true;
+      _resendIn = 0;
+    });
   }
 
   Future<void> _verify() async {
@@ -108,6 +235,7 @@ class _SignupScreenState extends State<SignupScreen> {
       setState(() => _error = S.otpInvalidLength);
       return;
     }
+    if (_firebase != null) return _verifyFirebaseCode(code);
     setState(() {
       _busy = true;
       _error = null;
@@ -115,12 +243,7 @@ class _SignupScreenState extends State<SignupScreen> {
     try {
       final token = await context.read<AuthService>().verifySignupOtp(_phone.text.trim(), code);
       if (!mounted) return;
-      _countdown?.cancel();
-      setState(() {
-        _verificationToken = token;
-        _verified = true;
-        _resendIn = 0;
-      });
+      _onVerified(token);
     } on ApiException catch (e) {
       if (!mounted) return;
       // invalid_otp keeps the field for a retry; an expired or locked code
@@ -134,17 +257,54 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
-  void _changeNumber() {
+  /// Firebase mode: the typed code → Firebase ID token → the server.
+  Future<void> _verifyFirebaseCode(String code) async {
+    final verificationId = _verificationId;
+    final gateway = _gateway;
+    if (verificationId == null || gateway == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final idToken = await gateway.confirmCode(verificationId, code);
+      if (!mounted) return;
+      await _verifyFirebaseToken(idToken);
+    } on PhoneAuthFailure catch (e) {
+      if (!mounted) return;
+      // A wrong code keeps the field for a retry; an expired one needs Resend.
+      setState(() {
+        _error = e.message;
+        if (e.needsNewCode) _code.clear();
+      });
+    } on ApiException catch (e) {
+      _onFirebaseVerifyError(e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Back to "enter your number" (the number itself stays in the field).
+  void _resetOtp() {
     _countdown?.cancel();
+    if (_firebase != null) unawaited(_gateway?.signOut());
     setState(() {
       _verified = false;
       _otpSent = false;
       _verificationToken = null;
       _mockCode = null;
+      _firebase = null;
+      _verificationId = null;
+      _resendToken = null;
+      _autoVerifying = false;
       _resendIn = 0;
-      _error = null;
       _code.clear();
     });
+  }
+
+  void _changeNumber() {
+    _resetOtp();
+    setState(() => _error = null);
   }
 
   // ---- step 2: details
@@ -172,6 +332,7 @@ class _SignupScreenState extends State<SignupScreen> {
             agencyName: _agency.text.trim().isEmpty ? null : _agency.text.trim(),
             communityIds: _communityIds.toList(),
             phoneVerificationToken: token,
+            stateId: _stateId,
           );
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
@@ -179,6 +340,11 @@ class _SignupScreenState extends State<SignupScreen> {
       // The 15-minute token lapsed (or the number was taken meanwhile):
       // back to step 1 with the server's message.
       if (e.code == 'phone_not_verified' || e.code == 'phone_taken') _changeNumber();
+      // The chosen state was deactivated meanwhile — fetch the current list.
+      if (e.code == 'invalid_state') {
+        _stateId = null;
+        context.read<MastersState>().load(force: true);
+      }
       setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -308,6 +474,25 @@ class _SignupScreenState extends State<SignupScreen> {
               ],
             ),
           ],
+          if (_autoVerifying) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    S.verifyingAutomatically,
+                    style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 12),
             ErrorBanner(message: _error!),
@@ -329,6 +514,9 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Widget _detailsStep(ThemeData theme) {
     final masters = context.watch<MastersState>();
+    // Empty against a server older than v2.8 — the field is left out then
+    // and the agent chooses their state after the upgrade.
+    final states = masters.data.activeStates;
     return Form(
       key: _detailsForm,
       child: Column(
@@ -390,6 +578,19 @@ class _SignupScreenState extends State<SignupScreen> {
               prefixIcon: Icon(Icons.storefront_rounded),
             ),
           ),
+          if (states.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            StateDropdown(
+              states: states,
+              value: _stateId,
+              enabled: !_busy,
+              validator: (v) => v == null ? S.stateRequired : null,
+              onChanged: (v) => setState(() {
+                _stateId = v;
+                _error = null;
+              }),
+            ),
+          ],
           const SizedBox(height: 16),
           TextFormField(
             controller: _password,

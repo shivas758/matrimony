@@ -106,9 +106,15 @@ class _BrowseScreenState extends State<BrowseScreen> {
             const AppWordmark(size: 22, showTagline: false),
             if (state.total > 0) ...[
               const SizedBox(width: 10),
-              Text(
-                S.matchesCount(state.total),
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+              // Gives way first on a narrow phone.
+              Flexible(
+                child: Text(
+                  S.matchesCount(state.total),
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+                ),
               ),
             ],
           ],

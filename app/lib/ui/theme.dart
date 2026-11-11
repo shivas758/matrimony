@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
-/// Brand palette — navy and gold from the Mediator logo, on warm ivory.
+/// Brand palette — the royal blue and gold of the Wedbook Agent logo, on warm
+/// ivory (SPEC §9.18 A). The `navy*` names are kept from the Mediator days so
+/// every screen follows the new blue without touching it.
 /// Mirrored in backend/src/lib/pdf.js and card.js so shares match the app.
 class AppColors {
-  static const navyDeep = Color(0xFF081C33);
-  static const navy = Color(0xFF0F2F52);
-  static const navyLight = Color(0xFF1B4F82);
-  static const navyTint = Color(0xFFDCE6F3);
+  static const navyDeep = Color(0xFF021E4A);
+  static const navy = Color(0xFF043270);
+  static const navyLight = Color(0xFF0D4A9A);
+  static const navyTint = Color(0xFFDCE6F7);
   static const gold = Color(0xFFC9962E);
   static const goldDark = Color(0xFFA6781C);
   static const goldLight = Color(0xFFE8C25F);

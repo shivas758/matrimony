@@ -46,6 +46,14 @@ class AuthState extends ChangeNotifier {
   /// Logged in with a temporary password — the root shows the
   /// "set a new password" screen until this clears (SPEC §5 screen 2).
   bool get mustChangePassword => _agent?.mustChangePassword ?? false;
+
+  /// An active agent without an agent code — the root shows the "Choose your
+  /// State" screen (after the set-password one) until a state is saved
+  /// (SPEC §9.18 B). Never true against a server that knows no agent codes.
+  bool get needsState => _agent?.needsState ?? false;
+
+  /// Home is reachable: active, own password set, state chosen.
+  bool get canUseApp => isActive && !mustChangePassword && !needsState;
   NotificationFeed get notifications => _notifications;
   int get badge => _notifications.badge;
 
@@ -90,6 +98,7 @@ class AuthState extends ChangeNotifier {
     required List<int> communityIds,
     required String phoneVerificationToken,
     String? agencyName,
+    int? stateId,
   }) async {
     final result = await _auth.signup(
       fullName: fullName,
@@ -98,18 +107,33 @@ class AuthState extends ChangeNotifier {
       communityIds: communityIds,
       phoneVerificationToken: phoneVerificationToken,
       agencyName: agencyName,
+      stateId: stateId,
     );
     _set(AuthPhase.loggedIn, result.agent);
     _startPolling();
   }
 
   /// Replaces the signed-in agent after a self-service update
-  /// (PATCH /my/account returns the refreshed row).
+  /// (PATCH /my/account and POST /my/state return the refreshed row).
   void updateAgent(Agent agent) {
     if (_phase != AuthPhase.loggedIn) return;
     _agent = agent;
     notifyListeners();
     _startPush();
+  }
+
+  /// "Choose your State" (SPEC §9.18 B): saves the state and returns the
+  /// agent with their new code. The caller shows the code, then hands the
+  /// agent to [updateAgent] — that is what lets the root move on to Home.
+  /// `state_already_set` (chosen meanwhile, e.g. on another phone) is not an
+  /// error: the fresh agent from /auth/me is returned instead.
+  Future<Agent> chooseState(int stateId) async {
+    try {
+      return await _auth.chooseState(stateId);
+    } on ApiException catch (e) {
+      if (e.code != 'state_already_set') rethrow;
+      return _auth.me();
+    }
   }
 
   Future<void> logout() async {
