@@ -94,13 +94,18 @@ async function sendViaFast2sms(phone, code) {
  */
 async function sendViaStartMessaging(phone, code) {
   const { apiKey, templateId, appName, url } = config.otp.startmessaging;
-  if (!apiKey || !templateId) throw new ApiError(503, 'otp_provider_error', 'SMS service is not configured');
+  // templateId is "required for DLT routes"; the DLT-free route may work without one.
+  if (!apiKey) throw new ApiError(503, 'otp_provider_error', 'SMS service is not configured');
   let response;
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ phoneNumber: `+91${phone}`, templateId, variables: { otp: code, appName } }),
+      body: JSON.stringify({
+        phoneNumber: `+91${phone}`,
+        ...(templateId ? { templateId } : {}),
+        variables: { otp: code, appName },
+      }),
     });
   } catch (e) {
     console.error('[otp] startmessaging unreachable:', e.message);

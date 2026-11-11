@@ -1032,11 +1032,12 @@ routes need DLT or cost ₹7 per SMS, so the owner chose **StartMessaging** (sta
 KYC on their side. Same model as fast2sms / msg91 — our code, our verification, every app
 version works.
 
-- `OTP_PROVIDER=startmessaging` + `STARTMESSAGING_API_KEY` (`sm_live_…`) +
-  `STARTMESSAGING_TEMPLATE_ID` (their OTP template's id from the dashboard);
+- `OTP_PROVIDER=startmessaging` + `STARTMESSAGING_API_KEY` (`sm_live_…`) + optional
+  `STARTMESSAGING_TEMPLATE_ID` (their docs call it "required for DLT routes"; left out of the
+  request when empty);
   `STARTMESSAGING_APP_NAME` (default `Wedbook`) fills the template's app-name variable.
 - Send: `POST https://api.startmessaging.com/otp/send`, header `X-API-Key`, JSON
-  `{phoneNumber: '+91<10 digits>', templateId, variables: {otp: '<code>', appName}}`. Success =
+  `{phoneNumber: '+91<10 digits>', templateId?, variables: {otp: '<code>', appName}}`. Success =
   HTTP 2xx with `success: true`; anything else → logged, `503 otp_provider_error`, nothing stored.
 - Test hook `STARTMESSAGING_API_URL` (default the URL above).
 
