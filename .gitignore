@@ -8,3 +8,9 @@ backups/
 build/
 .dart_tool/
 *.tgz
+# Play upload keys (SPEC §9.20 G) — never commit
+key.properties
+*.jks
+*.keystore
+store/review-logins.txt
+*.aab

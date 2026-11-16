@@ -79,11 +79,13 @@ class AuthState extends ChangeNotifier {
     required String fullName,
     required String phone,
     required String verificationToken,
+    bool acceptedTerms = false,
   }) async {
     final result = await _auth.signup(
       fullName: fullName,
       phone: phone,
       verificationToken: verificationToken,
+      acceptedTerms: acceptedTerms,
     );
     _set(AuthPhase.loggedIn, result.customer);
   }

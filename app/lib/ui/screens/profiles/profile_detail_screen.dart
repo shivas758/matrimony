@@ -19,6 +19,8 @@ import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/photo_viewer.dart';
+import '../../widgets/report_sheet.dart';
+import '../clients/client_widgets.dart' show confirmAction;
 import 'profile_form_screen.dart';
 
 class ProfileDetailScreen extends StatefulWidget {
@@ -385,6 +387,45 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     });
   }
 
+  // ------------------------------------------------------------- report / block
+
+  /// Report profile (SPEC §9.22 A): a reason and optional details go to the
+  /// admins. Server errors (`own_profile`, not visible) show as they come.
+  Future<void> _report() async {
+    final picked = await ReportSheet.show(context);
+    if (picked == null || !mounted) return;
+    final (reason, details) = picked;
+    await _run(() async {
+      await context.read<ProfileService>().report(
+        widget.profileId,
+        reason: reason.apiValue,
+        details: details,
+      );
+      if (mounted) showSnack(context, S.reportSent);
+    });
+  }
+
+  /// Block (SPEC §9.22 B): the profile disappears for me — off the loaded
+  /// list, and this screen closes. Undone from Settings → Blocked profiles.
+  Future<void> _block() async {
+    final ok = await confirmAction(
+      context,
+      title: S.blockProfileTitle,
+      body: S.blockProfileBody,
+      confirmLabel: S.block,
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    await _run(() async {
+      await context.read<ProfileService>().block(widget.profileId);
+      if (!mounted) return;
+      context.read<ProfilesState>().removeProfile(widget.profileId);
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).pop(true);
+      messenger.showSnackBar(const SnackBar(content: Text(S.profileBlocked)));
+    });
+  }
+
   // ------------------------------------------------------------------ build
 
   @override
@@ -413,6 +454,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
               pinned: true,
               backgroundColor: AppColors.navy,
               foregroundColor: Colors.white,
+              // The theme's navy app-bar icons would vanish on the photo.
+              iconTheme: const IconThemeData(color: Colors.white),
+              actionsIconTheme: const IconThemeData(color: Colors.white),
               systemOverlayStyle: SystemUiOverlayStyle.light,
               actions: [
                 if (p.canEdit)
@@ -431,6 +475,8 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                     'cancel_hold' => _cancelHold(),
                     'release' => _releaseHold(),
                     'delete' => _delete(),
+                    'report' => _report(),
+                    'block' => _block(),
                     _ => null,
                   },
                   itemBuilder: (_) => [
@@ -458,6 +504,23 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                           title: Text(S.releaseHold),
                         ),
                       ),
+                    // Not on my own uploads (SPEC §9.22 D).
+                    if (!p.isMine) ...[
+                      const PopupMenuItem(
+                        value: 'report',
+                        child: ListTile(
+                          leading: Icon(Icons.flag_outlined),
+                          title: Text(S.reportProfile),
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'block',
+                        child: ListTile(
+                          leading: Icon(Icons.block_rounded),
+                          title: Text(S.block),
+                        ),
+                      ),
+                    ],
                     if (p.canDelete)
                       PopupMenuItem(
                         value: 'delete',
@@ -562,13 +625,17 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                     _ContactSection(profile: p, busy: _busy, onRequest: _requestContact),
                     if (facts.isNotEmpty) ...[
                       const SizedBox(height: 20),
-                      GridView.count(
-                        crossAxisCount: 2,
+                      // A fixed height that fits a two-line value: an aspect
+                      // ratio left 360 dp phones ~15 px short.
+                      GridView(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 10,
-                        crossAxisSpacing: 10,
-                        childAspectRatio: 2.55,
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          mainAxisExtent: 80,
+                        ),
                         children: [
                           for (final f in facts) FactTile(icon: f.$1, label: f.$2, value: f.$3),
                         ],
@@ -804,16 +871,19 @@ class _ActionRow extends StatelessWidget {
 class _ShareSheet extends StatelessWidget {
   const _ShareSheet();
 
+  /// Sized to its content (not capped at 9/16 of the screen), and
+  /// scrollable, so a short 360×640 phone shows all three options.
   static Future<ShareMode?> show(BuildContext context) => showModalBottomSheet<ShareMode>(
         context: context,
         useSafeArea: true,
+        isScrollControlled: true,
         builder: (_) => const _ShareSheet(),
       );
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,

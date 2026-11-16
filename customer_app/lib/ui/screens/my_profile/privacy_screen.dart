@@ -10,6 +10,7 @@ import '../../../state/masters_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/searchable_list.dart';
 
 /// Privacy settings of my profile (SPEC §9.18 D / E / G).
 ///
@@ -18,7 +19,9 @@ import '../../widgets/common.dart';
 ///   Professional / Horoscope: ON = "Shown to everyone", OFF = "Only after
 ///   approval". Hiding the community hides the subcaste with it.
 /// * **Show my profile to** — my community only · selected communities
-///   (multi-select; my own is always in) · all communities.
+///   (multi-select; my own is always in) · all communities. More than eight
+///   other communities: the picked ones as chips and *Choose communities*,
+///   a picker with a search box (SPEC §9.23 E).
 ///
 /// Save → `PATCH /customer/my-profiles/:id {hidden_fields, audience_all,
 /// audience_community_ids}` and pops the updated [Profile]. Leaving with
@@ -388,11 +391,30 @@ class _AudienceCard extends StatelessWidget {
   final ValueChanged<AudienceMode> onMode;
   final ValueChanged<int> onToggleCommunity;
 
+  /// The search picker over [others]; what changed is toggled one by one.
+  Future<void> _pick(BuildContext context, List<MasterItem> others) async {
+    final current = {
+      for (final c in others)
+        if (settings.communityIds.contains(c.id)) c.id,
+    };
+    final next = await showMultiChoicePicker(
+      context,
+      title: S.chooseCommunities,
+      options: pickOptionsOf(others),
+      selected: current,
+    );
+    if (next == null) return;
+    for (final id in current.difference(next).followedBy(next.difference(current))) {
+      onToggleCommunity(id);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final others = communities.where((c) => c.id != ownCommunity?.id).toList();
+    final long = isLongList(others.length);
 
     Widget option(AudienceMode mode, String title, String subtitle) => RadioListTile<AudienceMode>(
           value: mode,
@@ -438,15 +460,34 @@ class _AudienceCard extends StatelessWidget {
                             side: const BorderSide(color: AppColors.gold),
                             visualDensity: VisualDensity.compact,
                           ),
-                        for (final c in others)
-                          FilterChip(
-                            label: Text(c.name),
-                            selected: settings.communityIds.contains(c.id),
-                            onSelected: enabled ? (_) => onToggleCommunity(c.id) : null,
-                            visualDensity: VisualDensity.compact,
-                          ),
+                        if (!long)
+                          for (final c in others)
+                            FilterChip(
+                              label: Text(c.name),
+                              selected: settings.communityIds.contains(c.id),
+                              onSelected: enabled ? (_) => onToggleCommunity(c.id) : null,
+                              visualDensity: VisualDensity.compact,
+                            )
+                        else
+                          // A long list: only the picked ones, each removable.
+                          for (final c in others.where((c) => settings.communityIds.contains(c.id)))
+                            InputChip(
+                              label: Text(c.name),
+                              selected: true,
+                              showCheckmark: false,
+                              onDeleted: enabled ? () => onToggleCommunity(c.id) : null,
+                              visualDensity: VisualDensity.compact,
+                            ),
                       ],
                     ),
+                    if (long) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: enabled ? () => _pick(context, others) : null,
+                        icon: const Icon(Icons.search_rounded, size: 18),
+                        label: const Text(S.chooseCommunities),
+                      ),
+                    ],
                   ],
                 ),
               ),

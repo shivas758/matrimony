@@ -7,10 +7,14 @@ import '../../../state/browse_filters.dart';
 import '../../../state/masters_state.dart';
 import '../../strings.dart';
 import '../../widgets/common.dart';
+import '../../widgets/searchable_list.dart';
 
 /// Bottom sheet with the age / height sliders and the multi-select chips
 /// (SPEC §9.11 Gandharva 3). Community chips are my agent's communities —
-/// the server never shows anything outside them anyway.
+/// the server never shows anything outside them anyway. A chip group longer
+/// than eight gets a search field above it, and the countries open a picker
+/// with a search box (SPEC §9.23 E) — [SearchableChipGroup] /
+/// [MultiPickerField].
 class FilterSheet extends StatefulWidget {
   const FilterSheet({super.key, required this.initial, required this.communities, this.guest = false});
 
@@ -135,9 +139,9 @@ class _FilterSheetState extends State<FilterSheet> {
                       )),
                 ),
                 const SizedBox(height: 12),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.community,
-                  items: communities,
+                  options: pickOptionsOf(communities),
                   selected: _f.communityIds,
                   onToggle: (id) => setState(() {
                     final next = _toggle(_f.communityIds, id);
@@ -151,73 +155,73 @@ class _FilterSheetState extends State<FilterSheet> {
                     );
                   }),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.subcaste,
-                  items: [
+                  options: [
                     for (final s in subcastes)
-                      MasterItem(
-                        id: s.id,
-                        name: scope.length > 1
-                            ? '${masters.communityName(s.communityId) ?? ''} · ${s.name}'
-                            : s.name,
+                      PickOption(
+                        s.id,
+                        scope.length > 1 ? '${masters.communityName(s.communityId) ?? ''} · ${s.name}' : s.name,
+                        // Typing the community's name finds its subcastes too.
+                        keywords: masters.communityName(s.communityId),
                       ),
                   ],
                   selected: _f.subcasteIds,
                   onToggle: (id) =>
                       setState(() => _f = _f.copyWith(subcasteIds: _toggle(_f.subcasteIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.education,
-                  items: masters.educations,
+                  options: pickOptionsOf(masters.educations),
                   selected: _f.educationIds,
                   onToggle: (id) =>
                       setState(() => _f = _f.copyWith(educationIds: _toggle(_f.educationIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.profession,
-                  items: masters.professions,
+                  options: pickOptionsOf(masters.professions),
                   selected: _f.professionIds,
                   onToggle: (id) =>
                       setState(() => _f = _f.copyWith(professionIds: _toggle(_f.professionIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.occupationType,
-                  items: masters.occupationTypes,
+                  options: pickOptionsOf(masters.occupationTypes),
                   selected: _f.occupationTypeIds,
                   onToggle: (id) => setState(
                       () => _f = _f.copyWith(occupationTypeIds: _toggle(_f.occupationTypeIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.maritalStatus,
-                  items: masters.maritalStatuses,
+                  options: pickOptionsOf(masters.maritalStatuses),
                   selected: _f.maritalStatusIds,
                   onToggle: (id) => setState(
                       () => _f = _f.copyWith(maritalStatusIds: _toggle(_f.maritalStatusIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.religion,
-                  items: masters.religions,
+                  options: pickOptionsOf(masters.religions),
                   selected: _f.religionIds,
                   onToggle: (id) =>
                       setState(() => _f = _f.copyWith(religionIds: _toggle(_f.religionIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.motherTongue,
-                  items: masters.languages,
+                  options: pickOptionsOf(masters.languages),
                   selected: _f.motherTongueIds,
                   onToggle: (id) => setState(
                       () => _f = _f.copyWith(motherTongueIds: _toggle(_f.motherTongueIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.foodHabit,
-                  items: masters.foodHabits,
+                  options: pickOptionsOf(masters.foodHabits),
                   selected: _f.foodHabitIds,
                   onToggle: (id) =>
                       setState(() => _f = _f.copyWith(foodHabitIds: _toggle(_f.foodHabitIds, id))),
                 ),
-                _ChipGroup(
+                SearchableChipGroup(
                   title: S.complexion,
-                  items: masters.complexions,
+                  options: pickOptionsOf(masters.complexions),
                   selected: _f.complexionIds,
                   onToggle: (id) =>
                       setState(() => _f = _f.copyWith(complexionIds: _toggle(_f.complexionIds, id))),
@@ -225,22 +229,13 @@ class _FilterSheetState extends State<FilterSheet> {
                 // Work country — the public coarse location (SPEC §9.8).
                 if (masters.countries.isNotEmpty) ...[
                   const SectionHeader(S.worksIn),
-                  _MultiPickerField(
+                  MultiPickerField(
                     icon: Icons.public_rounded,
                     hint: S.anyCountry,
-                    selectedLabels: masters.countries
-                        .where((c) => _f.workCountryIds.contains(c.id))
-                        .map((c) => c.name)
-                        .toList(),
-                    onTap: () async {
-                      final next = await _MultiPickerDialog.show(
-                        context,
-                        title: S.workCountry,
-                        options: masters.countries,
-                        selected: _f.workCountryIds,
-                      );
-                      if (next != null) setState(() => _f = _f.copyWith(workCountryIds: next));
-                    },
+                    title: S.workCountry,
+                    options: pickOptionsOf(masters.countries),
+                    selected: _f.workCountryIds,
+                    onChanged: (next) => setState(() => _f = _f.copyWith(workCountryIds: next)),
                   ),
                   const SizedBox(height: 20),
                 ],
@@ -262,22 +257,13 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 if (_f.nriOnly) ...[
                   const SizedBox(height: 8),
-                  _MultiPickerField(
+                  MultiPickerField(
                     icon: Icons.public_rounded,
                     hint: S.anyCountry,
-                    selectedLabels: masters.countries
-                        .where((c) => _f.countryIds.contains(c.id))
-                        .map((c) => c.name)
-                        .toList(),
-                    onTap: () async {
-                      final next = await _MultiPickerDialog.show(
-                        context,
-                        title: S.nriCountry,
-                        options: masters.countries,
-                        selected: _f.countryIds,
-                      );
-                      if (next != null) setState(() => _f = _f.copyWith(countryIds: next));
-                    },
+                    title: S.nriCountry,
+                    options: pickOptionsOf(masters.countries),
+                    selected: _f.countryIds,
+                    onChanged: (next) => setState(() => _f = _f.copyWith(countryIds: next)),
                   ),
                 ],
                 const SizedBox(height: 24),
@@ -331,131 +317,4 @@ class _FilterSheetState extends State<FilterSheet> {
       ),
     );
   }
-}
-
-class _ChipGroup extends StatelessWidget {
-  const _ChipGroup({
-    required this.title,
-    required this.items,
-    required this.selected,
-    required this.onToggle,
-  });
-
-  final String title;
-  final List<MasterItem> items;
-  final Set<int> selected;
-  final ValueChanged<int> onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(title),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in items)
-              FilterChip(
-                label: Text(item.name),
-                selected: selected.contains(item.id),
-                onSelected: (_) => onToggle(item.id),
-              ),
-          ],
-        ),
-        const SizedBox(height: 20),
-      ],
-    );
-  }
-}
-
-/// Tappable field that summarises a long multi-select (countries).
-class _MultiPickerField extends StatelessWidget {
-  const _MultiPickerField({
-    required this.hint,
-    required this.selectedLabels,
-    required this.onTap,
-    required this.icon,
-  });
-
-  final String hint;
-  final List<String> selectedLabels;
-  final VoidCallback onTap;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final empty = selectedLabels.isEmpty;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: InputDecorator(
-        decoration: InputDecoration(prefixIcon: Icon(icon)),
-        child: Text(
-          empty ? hint : selectedLabels.join(', '),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: empty ? theme.colorScheme.outline : null),
-        ),
-      ),
-    );
-  }
-}
-
-class _MultiPickerDialog extends StatefulWidget {
-  const _MultiPickerDialog({required this.title, required this.options, required this.selected});
-
-  final String title;
-  final List<MasterItem> options;
-  final Set<int> selected;
-
-  static Future<Set<int>?> show(
-    BuildContext context, {
-    required String title,
-    required List<MasterItem> options,
-    required Set<int> selected,
-  }) =>
-      showDialog<Set<int>>(
-        context: context,
-        builder: (_) => _MultiPickerDialog(title: title, options: options, selected: selected),
-      );
-
-  @override
-  State<_MultiPickerDialog> createState() => _MultiPickerDialogState();
-}
-
-class _MultiPickerDialogState extends State<_MultiPickerDialog> {
-  late final Set<int> _selected = {...widget.selected};
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: Text(widget.title),
-        contentPadding: const EdgeInsets.only(top: 12),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: widget.options.length,
-            itemBuilder: (_, i) {
-              final o = widget.options[i];
-              return CheckboxListTile(
-                dense: true,
-                value: _selected.contains(o.id),
-                title: Text(o.name),
-                onChanged: (on) => setState(() {
-                  on == true ? _selected.add(o.id) : _selected.remove(o.id);
-                }),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => setState(() => _selected.clear()), child: const Text(S.clearAll)),
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text(S.cancel)),
-          FilledButton(onPressed: () => Navigator.pop(context, _selected), child: const Text(S.done)),
-        ],
-      );
 }

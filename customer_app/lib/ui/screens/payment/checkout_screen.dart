@@ -10,14 +10,19 @@ import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import 'upi_checkout.dart';
 
-/// The registration-fee checkout for one profile (SPEC §9.12, §9.19 B).
+/// The registration-fee checkout for one profile (SPEC §9.12, §9.19 B, §9.20).
 /// - `mock`: amount, what it is for, "Test mode — no money is charged",
 ///   *Pay* and *Simulate failure*.
 /// - `razorpay`: amount, "Secure payment by Razorpay", *Pay* → Razorpay
 ///   Checkout → the server confirms it. Cancel / failure show a note and
 ///   *Try again* starts a new order.
+/// - `upi`: amount, then [UpiCheckout] — pay with a UPI app / QR / UPI ID,
+///   enter the UTR, an admin verifies it.
 /// - any other provider: "Online payment is coming soon", never an order.
+/// - the Play build ([PaymentService.playStore]): mock only; anything else
+///   reads "Online payment isn't available in this version yet" (SPEC §9.20 G).
 /// Pops `true` once the profile is paid.
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key, required this.profileId, required this.profileName});
@@ -156,6 +161,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   Widget build(BuildContext context) {
     final customer = context.watch<AuthState>().customer;
+    final payments = Provider.of<PaymentService>(context, listen: false);
     final provider = customer?.paymentProvider ?? 'mock';
     final fee = _amount ?? customer?.profileFeeInr;
     final result = _result;
@@ -185,11 +191,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               else ...[
                 _AmountCard(fee: fee, profileName: widget.profileName),
                 const SizedBox(height: 16),
-                if (!PaymentService.supportsInApp(provider))
-                  const NoticeCard(
+                if (!payments.canPayInApp(provider))
+                  // The Play build says only that — never where else to pay (SPEC §9.20 G).
+                  NoticeCard(
                     icon: Icons.schedule_rounded,
-                    title: S.paymentComingSoon,
+                    title: payments.playStore ? S.paymentUnavailable : S.paymentComingSoon,
                     tint: AppColors.warning,
+                  )
+                else if (provider == 'upi')
+                  UpiCheckout(
+                    profileId: widget.profileId,
+                    fee: fee,
+                    onPaid: _apply,
+                    onHandOff: _onError,
                   )
                 else if (provider == 'razorpay') ...[
                   const NoticeCard(

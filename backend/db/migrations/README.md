@@ -46,3 +46,22 @@ Applied so far:
 - `011_razorpay_settlement.sql` — Razorpay settlement (SPEC §9.19 B): `payments.status`
   gains `refund_due`; unique index `uq_payments_razorpay_order` on the Razorpay order id.
   No data changes
+- `012_upi_payments_community_fee.sql` — direct UPI + paid extra communities + account deletion
+  (SPEC §9.20): `payments` gains provider `upi`, status `submitted`, purpose `extra_community`,
+  `utr` / `submitted_at` / `verified_by` / `verified_at` / `reject_reason` / `agent_id` /
+  `community_request_id`; `community_change_requests.fee_paise`; new `account_deletion_requests`.
+  No data changes
+- `013_demo_world.sql` — store-review demo world (SPEC §9.21): `is_demo` on agents, customers and
+  profiles; triggers keep a profile's flag equal to its uploader's. No data changes
+- `014_reports_blocks_terms.sql` — report, block, terms consent (SPEC §9.22): `reports`, `blocks`,
+  `customers.terms_accepted_at`, `agents.terms_accepted_at`. No data changes
+- `015_gift_codes_agent_approval.sql` — gift codes, approved agents, publish last (SPEC §9.23):
+  `agents.approved_at` / `approved_by` / `gift_codes_granted_at`, new `gift_codes`, payments
+  provider `gift`, `profiles.uploaded_by` nullable (+ `profiles_owner_check`), the demo trigger
+  falls back to the customer's flag. Data: first run turns `pending` agents `active`; every run
+  approves admins, demo agents and agents with 10 live clients
+
+**Re-runs:** `deploy/update.sh` applies every file on every deploy, in order. A migration must never
+*narrow* something a later one widened: 007 and 011 only touch the payments checks while those are
+still in their old form (a `DO` block), because re-adding them broke the 2026-11-13 deploy once
+`upi` / `submitted` rows existed. 012 does the same since 015 added `gift`.

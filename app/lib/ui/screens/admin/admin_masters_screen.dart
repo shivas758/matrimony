@@ -7,6 +7,7 @@ import '../../../services/api_client.dart';
 import '../../../state/masters_state.dart';
 import '../../strings.dart';
 import '../../widgets/common.dart';
+import '../../widgets/searchable_lists.dart';
 
 /// Editor for the master lists. Seed data is only a starting point — the admin
 /// grows these over time (SPEC §2). Subcastes belong to a community, so adding
@@ -130,17 +131,13 @@ class _AdminMastersScreenState extends State<AdminMastersScreen> {
                   ]
                 : [
                     if (_isSubcaste && adding) ...[
-                      DropdownButtonFormField<int>(
-                        initialValue: communityId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: S.community,
-                          prefixIcon: Icon(Icons.groups_rounded),
-                        ),
-                        items: [
-                          for (final c in _data.communities)
-                            DropdownMenuItem(value: c.id, child: Text(c.name)),
-                        ],
+                      // Searchable once the list is long (SPEC §9.23 E).
+                      MasterSelectField(
+                        label: S.community,
+                        icon: Icons.groups_rounded,
+                        allowClear: false,
+                        options: masterOptions(_data.communities),
+                        value: communityId,
                         onChanged: (v) => setInner(() => communityId = v),
                       ),
                       const SizedBox(height: 12),

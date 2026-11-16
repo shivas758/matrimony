@@ -3,17 +3,28 @@
 // and routes/admin.js so a customer, an interest or an agent-change request
 // has ONE wire shape wherever it appears.
 import { many, one, tx } from './db.js';
+import { profileUpiState } from './payments.js';
 import { config } from './config.js';
 import { conflict, forbidden, notFound } from './errors.js';
 import { agentDirectory, customerPublic } from './serialize.js';
 import { LIVE_INTEREST, profileSummary } from './profiles.js';
 import { issueMissingProfileCodes } from './codes.js';
+import { liveClientsSql, refreshAgentApproval } from './agentApproval.js';
 
 export const CUSTOMER_COLUMNS = `id, full_name, phone, agent_id, status, source, phone_verified_at,
   approved_by, approved_at, last_login_at, created_at, updated_at`;
 
 /** Customer routes serve photos from their own endpoint (SPEC §9.9). */
 export const CUSTOMER_PHOTO_BASE = '/api/customer/photos';
+
+/**
+ * SQL: how the registration fee of profile `ref` was settled — the provider of
+ * its paid payment ('upi' | 'cash' | 'gift' | 'mock' | 'razorpay' | 'waived'),
+ * or NULL while unpaid (SPEC §9.23 B).
+ */
+export const PAID_VIA_SQL = (ref) => `(SELECT py.provider FROM payments py
+   WHERE py.profile_id = ${ref} AND py.status = 'paid' AND py.purpose = 'profile_registration'
+   ORDER BY py.paid_at DESC NULLS LAST, py.id DESC LIMIT 1)`;
 
 /**
  * Where one of a customer's own profiles stands (SPEC §9.12): unpaid →
@@ -41,7 +52,7 @@ export async function customerAccessLevel(customer) {
 export async function ownProfilesSummary(customer) {
   const rows = await many(
     `SELECT p.id, p.full_name, p.gender, date_part('year', age(p.dob))::int AS age, p.status, p.paid_at,
-            p.profile_code, p.hidden_fields,
+            p.profile_code, p.hidden_fields, ${PAID_VIA_SQL('p.id')} AS paid_via,
             c.id AS community_id, c.name AS community_name, sc.id AS subcaste_id, sc.name AS subcaste_name,
             (SELECT ph.id FROM profile_photos ph WHERE ph.profile_id = p.id
               ORDER BY ph.is_primary DESC, ph.sort_order, ph.id LIMIT 1) AS photo_id,
@@ -54,14 +65,21 @@ export async function ownProfilesSummary(customer) {
       ORDER BY p.created_at, p.id`,
     [customer.id],
   );
-  return rows.map((r) => ({
-    // My own profile: everything, and my ID (SPEC §9.18 C / D).
-    ...profileSummary(r, { photoId: r.photo_id, photoUrlBase: CUSTOMER_PHOTO_BASE, reveal: true, code: true }),
-    paid: r.paid_at != null,
-    paid_at: r.paid_at ?? null,
-    visibility: profileVisibility(r, customer.status),
-    delete_request_id: r.delete_request_id ?? null,
-  }));
+  const out = [];
+  for (const r of rows) {
+    out.push({
+      // My own profile: everything, and my ID (SPEC §9.18 C / D).
+      ...profileSummary(r, { photoId: r.photo_id, photoUrlBase: CUSTOMER_PHOTO_BASE, reveal: true, code: true }),
+      paid: r.paid_at != null,
+      paid_at: r.paid_at ?? null,
+      paid_via: r.paid_at ? r.paid_via ?? null : null,
+      visibility: profileVisibility(r, customer.status),
+      delete_request_id: r.delete_request_id ?? null,
+      // The open UPI claim while unpaid (SPEC §9.20 B).
+      payment: r.paid_at ? null : await profileUpiState(r.id),
+    });
+  }
+  return out;
 }
 
 /** The customer row for a (normalised) mobile number, or null. */
@@ -80,9 +98,12 @@ export async function loadCustomerMe(customerId) {
 
   const [agent, communities, profiles, change] = await Promise.all([
     customer.agent_id
-      ? one('SELECT id, full_name, agency_name, phone, city, status, agent_code FROM agents WHERE id = $1', [
-          customer.agent_id,
-        ])
+      ? one(
+          `SELECT a.id, a.full_name, a.agency_name, a.phone, a.city, a.status, a.agent_code,
+                  ${liveClientsSql('a.id')} AS live_clients
+             FROM agents a WHERE a.id = $1`,
+          [customer.agent_id],
+        )
       : null,
     customer.agent_id
       ? many(
@@ -218,6 +239,7 @@ const PROFILES_JSON = (cu) => `COALESCE((
              'id', x.id, 'full_name', x.full_name, 'gender', x.gender,
              'profile_code', x.profile_code, 'hidden_fields', x.hidden_fields,
              'age', date_part('year', age(x.dob))::int, 'status', x.status, 'paid_at', x.paid_at,
+             'paid_via', ${PAID_VIA_SQL('x.id')},
              'community_id', xc.id, 'community_name', xc.name,
              'subcaste_id', xs.id, 'subcaste_name', xs.name,
              'photo_id', (SELECT ph.id FROM profile_photos ph WHERE ph.profile_id = x.id
@@ -303,6 +325,7 @@ export function clientRow(row, { admin = false } = {}) {
       ...profileSummary(x, { photoId: x.photo_id, reveal: true, code: true }),
       paid: x.paid_at != null,
       paid_at: x.paid_at ?? null,
+      paid_via: x.paid_at ? x.paid_via ?? null : null,
       visibility: profileVisibility(x, row.status),
       delete_request_id: x.delete_request_id ?? null,
     })),
@@ -345,7 +368,7 @@ export async function transitionCustomer({ id, action, actorId, from }) {
   const allowed = from ?? spec.from;
 
   return tx(async (client) => {
-    const { rows } = await client.query('SELECT id, status, approved_at FROM customers WHERE id = $1 FOR UPDATE', [id]);
+    const { rows } = await client.query('SELECT id, status, approved_at, agent_id FROM customers WHERE id = $1 FOR UPDATE', [id]);
     const cu = rows[0];
     if (!cu) throw notFound('customer_not_found', 'Customer not found');
     if (!allowed.includes(cu.status)) {
@@ -367,6 +390,8 @@ export async function transitionCustomer({ id, action, actorId, from }) {
     } else {
       await client.query('UPDATE customers SET status = $2, updated_at = now() WHERE id = $1', [id, spec.to]);
     }
+    // A client going live may complete their agent's ten (SPEC §9.23 A).
+    if (spec.to === 'active') await refreshAgentApproval(cu.agent_id, client);
     return { id, from: cu.status, to: spec.to };
   });
 }
@@ -396,6 +421,8 @@ export async function reassignCustomer(client, { customerId, toAgentId, actorId,
       WHERE customer_id = $1 AND status = 'pending' AND ($3::int IS NULL OR id <> $3)`,
     [customerId, actorId, keepRequestId],
   );
+  // A live client moving in may complete the new agent's ten (SPEC §9.23 A).
+  await refreshAgentApproval(toAgentId, client);
 }
 
 // ---------------------------------------------------------------- interests (SPEC §9.4)

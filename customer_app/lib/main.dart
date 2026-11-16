@@ -7,11 +7,13 @@ import 'models/notification.dart';
 import 'services/agents_service.dart';
 import 'services/api_client.dart';
 import 'services/customer_auth_service.dart';
+import 'services/link_launcher.dart';
 import 'services/payment_service.dart';
 import 'services/phone_auth_gateway.dart';
 import 'services/profile_service.dart';
 import 'services/push_service.dart';
 import 'services/razorpay_gateway.dart';
+import 'services/upi_launcher.dart';
 import 'state/auth_state.dart';
 import 'state/browse_state.dart';
 import 'state/home_tab.dart';
@@ -70,6 +72,10 @@ class GandharvaApp extends StatelessWidget {
         // the screens can be tested with fakes (SPEC §9.19).
         Provider<PhoneAuthGateway>.value(value: phoneAuth),
         Provider<RazorpayGateway>.value(value: razorpay),
+        // Opening a UPI app with the payment link (SPEC §9.20 E) and web
+        // pages such as account deletion (SPEC §9.20 F) in the browser.
+        Provider<UpiLauncher>.value(value: const UrlUpiLauncher()),
+        Provider<LinkLauncher>.value(value: const UrlLinkLauncher()),
         // The home shell's selected tab — app-wide so notification taps
         // (list and push) can switch it.
         ChangeNotifierProvider<HomeTab>(create: (_) => HomeTab()),

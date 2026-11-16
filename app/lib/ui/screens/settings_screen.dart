@@ -2,17 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/master_data.dart';
+import '../../models/payment.dart';
 import '../../services/admin_service.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
 import '../../state/auth_state.dart';
 import '../../state/masters_state.dart';
+import '../../state/store_config.dart';
 import '../strings.dart';
 import '../theme.dart';
 import '../widgets/agent_code_card.dart';
 import '../widgets/common.dart';
+import '../widgets/delete_account.dart';
+import '../widgets/searchable_lists.dart';
+import 'blocked_profiles_screen.dart';
+import 'clients/client_widgets.dart' show confirmAction;
+import 'community_payment_screen.dart';
 
-/// My communities, requests to join more, my agent code, change password
+/// My communities, requests to join more (beyond the free ones with a
+/// one-time UPI fee, SPEC §9.20 C), my agent code, change password
 /// (SPEC §5 screen 10, §9.18 G).
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -24,6 +32,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   List<MasterItem> _mine = [];
   List<CommunityRequest> _requests = [];
+  MyCommunities? _info;
   bool _loading = true;
   String? _error;
 
@@ -42,6 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final result = await context.read<MyAccountService>().communities();
       if (mounted) {
         setState(() {
+          _info = result;
           _mine = result.communities;
           _requests = result.requests;
         });
@@ -67,40 +77,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    final picked = await showModalBottomSheet<int>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Text(
-                'An admin has to approve this before you can see those profiles.',
-              ),
-            ),
-            for (final c in options)
-              ListTile(
-                leading: const Icon(Icons.groups_rounded),
-                title: Text(c.name),
-                onTap: () => Navigator.pop(context, c.id),
-              ),
-          ],
-        ),
-      ),
+    // A long list gets a search field (SPEC §9.23 E).
+    final result = await showSinglePickerSheet(
+      context,
+      title: S.requestCommunity,
+      note: S.requestCommunityNote,
+      options: masterOptions(options),
     );
+    final picked = result?.id;
     if (picked == null || !mounted) return;
 
+    // Beyond the free limit the request carries a one-time fee — say so
+    // before sending (the server decides; admins never pay). A Play Store
+    // build cannot take the payment (SPEC §9.20 G): the admin adds it.
+    final info = _info;
+    final playStore = StoreConfig.isPlayStore(context);
+    String? feeHeadline;
+    if (info != null && info.nextIsPaid && !context.read<AuthState>().isAdmin) {
+      if (playStore) {
+        await _showPlayNoPayment();
+        return;
+      }
+      feeHeadline = S.extraCommunityFee(info.nextNumber, info.extraFeeInr);
+      final ok = await confirmAction(
+        context,
+        title: feeHeadline,
+        body: S.extraCommunityFeeBody(info.freeLimit),
+        confirmLabel: S.continueToPay,
+      );
+      if (!ok || !mounted) return;
+    }
+
     try {
-      await context.read<MyAccountService>().requestCommunity(picked);
-      if (mounted) {
+      final request = await context.read<MyAccountService>().requestCommunity(picked);
+      if (!mounted) return;
+      if (request.hasFee && playStore) {
+        // The server asked for a fee this build cannot take.
+        await _showPlayNoPayment();
+        _load();
+      } else if (request.hasFee && request.payment != null) {
+        await _openPayment(
+          request,
+          headline: feeHeadline ??
+              S.extraCommunityFee(info?.nextNumber ?? _mine.length + 1, request.feeInr),
+        );
+      } else {
         showSnack(context, S.requestSent);
         _load();
       }
     } on ApiException catch (e) {
+      // payment_provider_error: "UPI payments are not set up yet".
       if (mounted) showSnack(context, e.message, error: true);
     }
+  }
+
+  /// Play Store build: extra communities cannot be paid in the app.
+  Future<void> _showPlayNoPayment() => showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          content: const Text(S.playNoExtraCommunityPayment),
+          actions: [
+            FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text(S.ok)),
+          ],
+        ),
+      );
+
+  /// The UPI pay + UTR step of a fee request; the list reloads afterwards.
+  Future<void> _openPayment(CommunityRequest request, {String? headline}) async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CommunityPaymentScreen(request: request, headline: headline),
+      ),
+    );
+    if (mounted) _load();
   }
 
   Future<void> _changePassword() async {
@@ -212,6 +261,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final agent = context.watch<AuthState>().agent;
     final theme = Theme.of(context);
+    final playStore = StoreConfig.isPlayStore(context);
     final pending = _requests.where((r) => r.isPending).toList();
     final decided = _requests.where((r) => !r.isPending).toList();
 
@@ -241,20 +291,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: const Icon(Icons.add_rounded),
               label: const Text(S.requestCommunity),
             ),
+            if (_info != null && !(agent?.isAdmin ?? false)) ...[
+              const SizedBox(height: 8),
+              Text(
+                playStore
+                    ? S.playFreeCommunitiesNote(_info!.freeLimit)
+                    : S.freeCommunitiesNote(_info!.freeLimit, _info!.extraFeeInr),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+              ),
+            ],
             if (pending.isNotEmpty) ...[
               const SizedBox(height: 24),
-              const SectionHeader('Pending requests'),
+              const SectionHeader(S.pendingRequests),
               for (final r in pending)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.hourglass_top_rounded),
-                  title: Text(r.communityName),
-                  subtitle: const Text('Waiting for admin approval'),
+                _PendingRequestTile(
+                  request: r,
+                  // No UPI step in a Play Store build — the state only.
+                  onPay: playStore ? null : () => _openPayment(r),
                 ),
             ],
             if (decided.isNotEmpty) ...[
               const SizedBox(height: 16),
-              const SectionHeader('Past requests'),
+              const SectionHeader(S.pastRequests),
               for (final r in decided)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -263,7 +321,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: StatusColors.forRequestStatus(r.status, theme.colorScheme),
                   ),
                   title: Text(r.communityName),
-                  subtitle: Text(r.status),
+                  subtitle: Text(
+                    [
+                      r.status,
+                      if (r.hasFee) S.feeLabel(r.feeInr),
+                      if (r.feePaymentStatus == PaymentStatus.refundDue) S.refundDue,
+                    ].join(' · '),
+                  ),
                 ),
             ],
             const SizedBox(height: 32),
@@ -315,6 +379,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: Text(agent?.fullName ?? ''),
               subtitle: Text('+91 ${agent?.phone ?? ''}'),
             ),
+            // SPEC §9.23 A / F: approved, or how many live clients so far.
+            // Nothing against a server that does not send approvals.
+            if (agent != null && agent.knowsApproval)
+              ListTile(
+                key: const ValueKey('approval-status'),
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  agent.isApproved ? Icons.verified_rounded : Icons.hourglass_top_rounded,
+                  color: agent.isApproved ? AppColors.success : AppColors.goldDark,
+                ),
+                title: Text(
+                  agent.isApproved
+                      ? S.approvedAgent
+                      : S.clientsProgress(agent.liveClientCount, agent.approvalClients),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: agent.isApproved ? AppColors.success : null,
+                  ),
+                ),
+                subtitle: Text(
+                  agent.isApproved
+                      ? S.approvedAgentHint
+                      : S.approvalProgressHint(agent.approvalClients),
+                ),
+              ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.lock_reset_rounded),
@@ -322,8 +411,118 @@ class _SettingsScreenState extends State<SettingsScreen> {
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: _changePassword,
             ),
+            // SPEC §9.22 B: profiles I hid from myself.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.block_rounded),
+              title: const Text(S.blockedProfiles),
+              subtitle: const Text(S.blockedProfilesSubtitle),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BlockedProfilesScreen()),
+              ),
+            ),
+            // SPEC §9.20 F (Google Play): the public deletion page.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.person_remove_outlined, color: theme.colorScheme.error),
+              title: const Text(S.deleteMyAccount),
+              subtitle: const Text(S.deleteMyAccountSubtitle),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => confirmDeleteAccount(context),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A pending community request: free ("waiting for admin approval"), or
+/// with its fee payment's state — not paid yet / under verification / not
+/// verified (with the reason) — and the button to pay or submit again.
+class _PendingRequestTile extends StatelessWidget {
+  const _PendingRequestTile({required this.request, this.onPay});
+
+  final CommunityRequest request;
+
+  /// Null in a Play Store build: no way to pay in the app.
+  final VoidCallback? onPay;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final r = request;
+    final payment = r.payment;
+    final status = r.feePaymentStatus;
+
+    final (IconData icon, Color color, String subtitle) = !r.hasFee
+        ? (Icons.hourglass_top_rounded, AppColors.warning, S.waitingAdminApproval)
+        : switch (status) {
+            PaymentStatus.submitted => (
+                Icons.hourglass_top_rounded,
+                AppColors.warning,
+                S.paymentUnderVerification,
+              ),
+            PaymentStatus.failed => (
+                Icons.error_outline_rounded,
+                theme.colorScheme.error,
+                S.paymentNotVerified(payment?.rejectReason),
+              ),
+            PaymentStatus.paid => (
+                Icons.check_circle_outline_rounded,
+                AppColors.success,
+                S.paidWaitingApproval,
+              ),
+            _ => (
+                Icons.currency_rupee_rounded,
+                AppColors.navy,
+                '${S.feeLabel(r.feeInr)} · ${onPay == null ? S.onlinePaymentUnavailable : S.notPaidYet}',
+              ),
+          };
+    final canPay = onPay != null && r.needsPayment && payment?.upi != null;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2, right: 14),
+            child: Icon(icon, color: color),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(r.communityName, style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: status == PaymentStatus.failed ? color : null,
+                  ),
+                ),
+                if (r.hasFee && r.feeUtr != null && status != PaymentStatus.created)
+                  Text(
+                    S.utrValue(r.feeUtr!),
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+                  ),
+                if (canPay) ...[
+                  const SizedBox(height: 8),
+                  FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+                    onPressed: onPay,
+                    icon: const Icon(Icons.currency_rupee_rounded, size: 18),
+                    label: Text(
+                      status == PaymentStatus.failed ? S.submitAgain : S.payAmount(r.feeInr),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -5,10 +5,12 @@ import '../../../services/api_client.dart';
 import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../widgets/common.dart';
+import '../../widgets/delete_account.dart';
 
 /// The one gate left in v1.1 (SPEC §9.12): a SUSPENDED account. Guests,
 /// pending, rejected and active customers all land on Home. Shows the agent
-/// (with Call) when there is one, a "Check again" and Logout.
+/// (with Call) when there is one, a "Check again", Logout and *Delete my
+/// account* (SPEC §9.20 F).
 class BlockedScreen extends StatefulWidget {
   const BlockedScreen({super.key});
 
@@ -101,6 +103,9 @@ class _BlockedScreenState extends State<BlockedScreen> {
               icon: const Icon(Icons.logout_rounded),
               label: const Text(S.logout),
             ),
+            // A suspended customer can still ask for deletion (SPEC §9.20 F).
+            const SizedBox(height: 20),
+            const DeleteAccountTile(),
           ],
         ),
       ),

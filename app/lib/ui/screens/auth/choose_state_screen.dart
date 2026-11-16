@@ -10,6 +10,7 @@ import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/agent_code_card.dart';
 import '../../widgets/common.dart';
+import '../../widgets/searchable_lists.dart';
 import 'login_screen.dart';
 
 /// Shown instead of Home to an active agent who has no agent code yet — an
@@ -231,29 +232,21 @@ class StateDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Guard against an id that is not in the list (deactivated meanwhile).
-    final safeValue = states.any((s) => s.id == value) ? value : null;
-    return DropdownButtonFormField<int>(
-      initialValue: safeValue,
-      isExpanded: true,
+    // 36 states and territories: the searchable picker once the list is
+    // long (SPEC §9.23 E); a stale id shows as empty.
+    return MasterSelectField(
+      label: S.state,
+      icon: Icons.map_outlined,
+      helperText: S.stateHelper,
       menuMaxHeight: 420,
-      decoration: const InputDecoration(
-        labelText: S.state,
-        prefixIcon: Icon(Icons.map_outlined),
-        helperText: S.stateHelper,
-        helperMaxLines: 2,
-      ),
-      items: [
-        for (final s in states)
-          DropdownMenuItem(
-            value: s.id,
-            // Long names ("Dadra and Nagar Haveli and Daman and Diu") must
-            // not push the row past the field.
-            child: Text(s.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-      ],
+      allowClear: false,
+      enabled: enabled,
+      // Long names ("Dadra and Nagar Haveli and Daman and Diu") are cut
+      // with an ellipsis inside the field.
+      options: [for (final s in states) PickerOption(s.id, s.label, keywords: s.name)],
+      value: value,
       validator: validator,
-      onChanged: enabled ? onChanged : null,
+      onChanged: onChanged,
     );
   }
 }

@@ -19,7 +19,7 @@ void main() {
   group('brand (SPEC §9.18 A)', () {
     test('the app is Wedbook Agent; the customers\' app is Wedbook Matrimony', () {
       expect(AppConfig.appName, 'Wedbook Agent');
-      expect(AppConfig.appVersion, '3.1.0');
+      expect(AppConfig.appVersion, '3.4.0');
       expect(S.brandName, 'Wedbook');
       expect(S.appTagline, 'Agent');
       expect(S.customerAppName, 'Wedbook Matrimony');

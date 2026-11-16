@@ -8,8 +8,11 @@ import { asyncHandler, badRequest, conflict, unauthorized } from '../lib/errors.
 import { parse, passwordSchema, phoneSchema } from '../lib/validate.js';
 import { requireAuth } from '../middleware/auth.js';
 import { AGENT_SELECT, agentPublic } from '../lib/serialize.js';
+import { ensureInitialGiftCodes } from '../lib/giftCodes.js';
+import { refreshAgentApproval } from '../lib/agentApproval.js';
 import { checkOtp, otpSendSchema, otpVerifySchema, startOtp } from '../lib/otp.js';
 import { findState, issueAgentCode } from '../lib/codes.js';
+import { config } from '../lib/config.js';
 
 export const authRouter = Router();
 
@@ -51,6 +54,8 @@ const signupSchema = z.object({
   // Proof from /otp/verify (SPEC §9.1). Optional in the schema so a missing
   // token answers phone_not_verified rather than validation_failed.
   phone_verification_token: z.string().optional(),
+  // The 3.3.0 app requires the terms checkbox (SPEC §9.22 C); older builds omit it.
+  accepted_terms: z.boolean().optional(),
 });
 
 /** Communities the agent belongs to, as {id, name}. */
@@ -64,7 +69,8 @@ async function agentCommunities(agentId) {
   );
 }
 
-// POST /api/auth/signup — always creates a 'pending' agent (CLAUDE.md rule 2).
+// POST /api/auth/signup — creates an ACTIVE agent who is not approved yet, with
+// their free gift codes (CLAUDE.md rule 2, SPEC §9.23 A / B).
 authRouter.post(
   '/signup',
   asyncHandler(async (req, res) => {
@@ -75,6 +81,15 @@ authRouter.post(
 
     const existing = await one('SELECT id FROM agents WHERE phone = $1', [body.phone]);
     if (existing) throw conflict('phone_taken', 'This mobile number is already registered');
+
+    // The first communities are free; more are requested (and paid) later — SPEC §9.20 C.
+    const { freeLimit, extraFeeInr } = config.communities;
+    if (new Set(body.community_ids).size > freeLimit) {
+      throw badRequest(
+        'too_many_communities',
+        `Choose up to ${freeLimit} communities — you can add more later (₹${extraFeeInr} each)`,
+      );
+    }
 
     const valid = await many(
       'SELECT id FROM communities WHERE id = ANY($1::int[]) AND active = TRUE',
@@ -90,10 +105,10 @@ authRouter.post(
       if (body.state_id && !state) throw badRequest('invalid_state', 'Select your state from the list');
 
       const { rows } = await client.query(
-        `INSERT INTO agents (full_name, phone, password_hash, agency_name, role, status)
-         VALUES ($1, $2, $3, $4, 'agent', 'pending')
+        `INSERT INTO agents (full_name, phone, password_hash, agency_name, role, status, terms_accepted_at)
+         VALUES ($1, $2, $3, $4, 'agent', 'active', CASE WHEN $5 THEN now() END)
          RETURNING id`,
-        [body.full_name, body.phone, password_hash, body.agency_name || null],
+        [body.full_name, body.phone, password_hash, body.agency_name || null, body.accepted_terms === true],
       );
       await client.query(
         `INSERT INTO agent_communities (agent_id, community_id)
@@ -102,6 +117,8 @@ authRouter.post(
       );
       // The permanent agent code, issued with the account (SPEC §9.18 B).
       if (state) await issueAgentCode(client, rows[0].id, state);
+      // The free gift codes (SPEC §9.23 B).
+      await ensureInitialGiftCodes(rows[0].id, client);
       return rows[0];
     });
     const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [created.id]);
@@ -123,6 +140,10 @@ authRouter.post(
     const login = await one('SELECT id, password_hash FROM agents WHERE phone = $1', [body.phone]);
     const ok = login && (await verifyPassword(body.password, login.password_hash));
     if (!ok) throw unauthorized('bad_credentials', 'Mobile number or password is incorrect');
+    // Agents from before v2.13 get their free gift codes now; an agent who
+    // reached 10 live clients is approved now (SPEC §9.23 A / B).
+    await ensureInitialGiftCodes(login.id);
+    await refreshAgentApproval(login.id);
     const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [login.id]);
 
     res.json({
@@ -164,7 +185,11 @@ authRouter.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json({ agent: agentPublic(req.agent, await agentCommunities(req.agent.id)) });
+    // Agents from before v2.13 get their free gift codes now (SPEC §9.23 B).
+    const agent = (await ensureInitialGiftCodes(req.agent.id))
+      ? { ...req.agent, ...(await one(`${AGENT_SELECT} WHERE a.id = $1`, [req.agent.id])) }
+      : req.agent;
+    res.json({ agent: agentPublic(agent, await agentCommunities(agent.id)) });
   }),
 );
 

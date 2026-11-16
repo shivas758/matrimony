@@ -128,7 +128,7 @@ export const config = {
   // confirms any checkout; 'razorpay' creates real orders and checks the
   // checkout signature. Switching provider needs no backend code change.
   payments: {
-    provider: paymentProvider === 'razorpay' ? 'razorpay' : 'mock',
+    provider: ['razorpay', 'upi'].includes(paymentProvider) ? paymentProvider : 'mock',
     profileFeeInr: Number(process.env.PROFILE_FEE_INR || 150),
     // One profile per customer (SPEC §9.17) — also enforced by the database
     // (uq_profiles_one_per_customer, migration 009), so this is not an env knob.
@@ -141,5 +141,26 @@ export const config = {
       // Test hook only (backend/test/providers.mjs points it at a local fake).
       apiBase: (process.env.RAZORPAY_API_BASE || 'https://api.razorpay.com/v1').replace(/\/+$/, ''),
     },
+    // Direct UPI to the owner's UPI ID, verified by an admin (SPEC §9.20). Used by
+    // PAYMENT_PROVIDER=upi and, always, by the agents' extra-community fee.
+    upi: {
+      vpa: (process.env.UPI_PAYEE_VPA || '').trim(),
+      name: (process.env.UPI_PAYEE_NAME || 'Wedbook').trim(),
+    },
+  },
+
+  // ---- Agent communities (SPEC §9.20 C): the first COMMUNITY_FREE_LIMIT are free,
+  // each further one costs EXTRA_COMMUNITY_FEE_INR once.
+  communities: {
+    freeLimit: Number(process.env.COMMUNITY_FREE_LIMIT || 3),
+    extraFeeInr: Number(process.env.EXTRA_COMMUNITY_FEE_INR || 1000),
+  },
+
+  // ---- Approved agents and gift codes (SPEC §9.23): an agent is approved at
+  // APPROVAL_CLIENTS live clients; every agent gets GIFT_CODES_PER_AGENT free
+  // codes once.
+  agents: {
+    approvalClients: Math.max(1, Number(process.env.APPROVAL_CLIENTS || 10)),
+    giftCodesPerAgent: Math.max(0, Number(process.env.GIFT_CODES_PER_AGENT || 10)),
   },
 };

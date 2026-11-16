@@ -15,7 +15,9 @@ import {
   visibilityClause,
 } from '../lib/profiles.js';
 import { applyListFilters, listQuerySchema, sortSql } from '../lib/profileQuery.js';
-import { filterViewer } from '../lib/privacy.js';
+import { displayName, filterViewer } from '../lib/privacy.js';
+import { REPORT_REASONS, blockProfile, createReport } from '../lib/moderation.js';
+import { z } from 'zod';
 import {
   MAX_PHOTOS,
   addPhotos,
@@ -160,6 +162,40 @@ export async function loadDetail(id, agent) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- report / block (SPEC §9.22)
+
+const reportSchema = z.object({
+  reason: z.enum(REPORT_REASONS, { message: 'Choose a reason' }),
+  details: z.string().trim().max(500).optional().nullable().transform((v) => (v ? v : null)),
+});
+
+/** A visible profile that is not my own upload, with the name as I may see it. */
+async function moderationTarget(id, agent) {
+  const row = await loadRow(id, agent);
+  if (row.uploaded_by === agent.id) throw badRequest('own_profile', 'This is your own upload');
+  const access = await contactAccess(row, agent);
+  return { ...row, label: displayName(row, access.access === 'granted' || agent.is_admin) };
+}
+
+// POST /api/profiles/:id/report {reason, details?}
+profilesRouter.post(
+  '/:id/report',
+  asyncHandler(async (req, res) => {
+    const body = parse(reportSchema, req.body ?? {});
+    const profile = await moderationTarget(Number(req.params.id), req.agent);
+    res.status(201).json({ report: await createReport({ agentId: req.agent.id, profile, ...body }) });
+  }),
+);
+
+// POST /api/profiles/:id/block — hides the profile from me.
+profilesRouter.post(
+  '/:id/block',
+  asyncHandler(async (req, res) => {
+    const profile = await moderationTarget(Number(req.params.id), req.agent);
+    res.status(201).json(await blockProfile({ agentId: req.agent.id, profile }));
+  }),
+);
 
 // GET /api/profiles/:id
 profilesRouter.get(

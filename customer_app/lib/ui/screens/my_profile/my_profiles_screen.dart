@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../models/payment.dart';
 import '../../../models/profile.dart';
 import '../../../state/auth_state.dart';
 import '../../../state/masters_state.dart';
@@ -14,7 +15,8 @@ import 'profile_form_screen.dart';
 
 /// The *My profile* tab (SPEC §9.12, one profile per account since §9.17).
 /// No profile yet → the Get-started notice (until full access) and *Create
-/// profile*, which needs a linked agent. One profile → [MyProfileScreen]
+/// profile* — open to guests too: the agent and the fee come when it is
+/// published (SPEC §9.23 C). One profile → [MyProfileScreen]
 /// embedded right here (view, edit, photos, pay, delete); it is keyed on the
 /// profile id, so deleting the profile — or the agent approving its deletion —
 /// refreshes the account and brings the create button back. The profile list
@@ -40,9 +42,6 @@ class MyProfilesScreen extends StatelessWidget {
       final id = customer.profiles.first.id;
       return MyProfileScreen(key: ValueKey(id), profileId: id, embedded: true);
     }
-    final theme = Theme.of(context);
-    final linked = customer.agent != null;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text(S.myProfile),
@@ -57,7 +56,7 @@ class MyProfilesScreen extends StatelessWidget {
               NoticeCard(
                 icon: Icons.lock_open_rounded,
                 title: S.getStartedTitle,
-                body: linked ? S.getStartedIntro : S.addProfileNeedsAgent,
+                body: S.getStartedIntro,
                 tint: AppColors.goldDark,
                 action: OutlinedButton(
                   onPressed: () => GetStartedScreen.open(context),
@@ -76,18 +75,10 @@ class MyProfilesScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
-              onPressed: linked && customer.canAddProfile ? () => _add(context) : null,
+              onPressed: customer.canAddProfile ? () => _add(context) : null,
               icon: const Icon(Icons.person_add_alt_1_rounded),
               label: const Text(S.addProfile),
             ),
-            if (!linked) ...[
-              const SizedBox(height: 8),
-              Text(
-                S.addProfileNeedsAgent,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-              ),
-            ],
           ],
         ),
       ),
@@ -95,18 +86,36 @@ class MyProfilesScreen extends StatelessWidget {
   }
 }
 
-/// The state chip of one of my profiles (SPEC §9.12).
+/// The state chip of one of my profiles (SPEC §9.12); an unpaid profile's UPI
+/// fee being verified / not verified wins over "Pay ₹150" (SPEC §9.20 B).
 class VisibilityChip extends StatelessWidget {
-  const VisibilityChip({super.key, required this.visibility, this.fee});
+  const VisibilityChip({super.key, required this.visibility, this.fee, this.payment, this.payable = true});
 
   final ProfileVisibility? visibility;
   final num? fee;
+  final ProfilePayment? payment;
+
+  /// False in the Play build with no in-app payment: "Fee not paid" instead
+  /// of "Pay ₹150" (SPEC §9.20 G).
+  final bool payable;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final upi = payment;
+    if (upi != null && upi.isSubmitted) {
+      return const StatusChip(
+        label: S.chipVerifyingPayment,
+        color: AppColors.warning,
+        icon: Icons.hourglass_top_rounded,
+      );
+    }
+    if (upi != null && upi.isRejected) {
+      return StatusChip(label: S.chipPaymentNotVerified, color: scheme.error, icon: Icons.error_outline_rounded);
+    }
     final (label, color, icon) = switch (visibility) {
-      ProfileVisibility.paymentPending => (S.chipPay(fee), AppColors.goldDark, Icons.lock_rounded),
+      ProfileVisibility.paymentPending =>
+        (payable ? S.chipPay(fee) : S.chipFeeNotPaid, AppColors.goldDark, Icons.lock_rounded),
       ProfileVisibility.awaitingApproval => (S.chipWaitingForAgent, AppColors.warning, Icons.hourglass_top_rounded),
       ProfileVisibility.live => (S.chipLive, AppColors.success, Icons.visibility_rounded),
       _ => (S.chipHidden, scheme.outline, Icons.visibility_off_outlined),

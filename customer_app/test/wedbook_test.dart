@@ -153,7 +153,7 @@ void main() {
       expect(S.appTagline, 'Matrimony');
       expect(S.signupBody, contains('Wedbook Matrimony'));
       expect(S.signupBody, isNot(contains('MILI')));
-      expect(S.version, 'v3.1.0');
+      expect(S.version, 'v3.4.0');
     });
   });
 

@@ -25,11 +25,14 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   /// Selected tab, switchable from the Notifications screen and pushes
   /// (SPEC §9.14 / §9.16). App-level, so a tapped push can reach it.
-  late final HomeNav _nav = context.read<HomeNav>();
+  /// Read in initState: dispose() must not look it up (the element is
+  /// already deactivated by then).
+  late final HomeNav _nav;
 
   @override
   void initState() {
     super.initState();
+    _nav = context.read<HomeNav>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<MastersState>().load();
       final profiles = context.read<ProfilesState>();

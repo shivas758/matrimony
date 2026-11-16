@@ -57,7 +57,7 @@ class S {
   static const createAccount = 'Create account';
   static const startAgain = 'Start again';
   static const signupNote =
-      'You can browse as a guest straight away. To open profiles, choose your agent, register a profile and pay the registration fee.';
+      'You can browse as a guest straight away. To open profiles, create your profile and publish it: choose your agent and pay the registration fee (or use a gift code).';
 
   // ---- waiting / pending / rejected / suspended
   static const pendingTitle = 'Waiting for approval';
@@ -96,7 +96,7 @@ class S {
   static String changeAgentPending(String name) => 'Waiting for approval to move to $name';
   static const logout = 'Logout';
   static const logoutConfirm = 'You will need a new one-time code to log in again.';
-  static const version = 'v3.1.0';
+  static const version = 'v3.4.0';
   static const accountStatus = 'Account';
 
   // ---- customer statuses
@@ -448,7 +448,7 @@ class S {
   static const errProfileNotFound = 'This profile is no longer available.';
   static const errValidation = 'Please check the details and try again.';
   static const errUnlockRequired =
-      'Choose your agent, register a profile and pay the registration fee to open profiles.';
+      'Create your profile and publish it — choose your agent and pay the registration fee or use a gift code — to open profiles.';
   static const errAgentRequired = 'Choose your agent first.';
   static const errProfileLimit = 'You have already registered your profile — each account has one.';
   static const errAlreadyPaid = 'This profile is already paid for.';
@@ -469,12 +469,15 @@ class S {
   static const getStartedIntro =
       'Four steps to see full profiles, express interest and let your agent take it forward.';
   static const lockedProfile = 'Locked';
-  static const step1Title = 'Choose your agent';
+  // The order since v3.4.0 (SPEC §9.23 C / F): 1 Create your profile · 2 Choose
+  // your agent · 3 Pay or use a gift code · 4 Agent approval.
+  static const step1Title = 'Create your profile';
   static const step1Body =
+      'Fill in the registration form for the bride or groom. Do it now — you choose your agent and pay when you publish it.';
+  static const step2Title = 'Choose your agent';
+  static const step2Body =
       "Enter your marriage bureau agent's mobile number or agent code, or pick one from the list.";
-  static const step2Title = 'Register your profile';
-  static const step2Body = 'Fill in the registration form for the bride or groom.';
-  static String step3Title(num? fee) => 'Pay ${feeLabel(fee)}';
+  static String step3Title(num? fee) => 'Pay ${feeLabel(fee)} or use a gift code';
   static String step3Body(num? fee) =>
       'A one-time registration fee of ${feeLabel(fee)}. Your profile is shown to other families only after this.';
   static const step4Title = 'Agent approval';
@@ -492,8 +495,8 @@ class S {
   static const agentLinkedSnack = 'Agent chosen — they will approve your account';
   static const profileRegistered = 'Profile registered';
   static const allPaid = 'Registration fee paid';
-  static const needAgentFirst = 'Choose your agent first (step 1).';
-  static const needProfileFirst = 'Register your profile first (step 2).';
+  static const needAgentFirst = 'Choose your agent first (step 2) — or use a gift code from an agent.';
+  static const needProfileFirst = 'Create your profile first (step 1).';
   static const chooseYourAgent = 'Choose your agent';
   static const chooseYourAgentBody =
       'Your agent registers your profile with the bureau and takes interests forward for you.';
@@ -505,27 +508,27 @@ class S {
       'Pick the marriage bureau agent you want to work with. They approve your account.';
   static const lockedInterestsTitle = 'Interests open after registration';
   static const lockedInterestsBody =
-      'Choose your agent, register a profile and pay the registration fee. Once your agent approves you, you can express interest.';
+      'Create your profile and publish it — choose your agent and pay the registration fee or use a gift code. Once your agent approves you, you can express interest.';
   static const lockedDetailTitle = 'This profile is locked';
 
   // ---- my profile (SPEC §9.12, one per account since §9.17)
   static const addProfile = 'Create profile';
-  static const addProfileNeedsAgent = 'Choose your agent first — tap Get started.';
-  static const noProfilesYetTitle = 'Register your profile';
+  static const noProfilesYetTitle = 'Create your profile';
   static const noProfilesYetBody =
-      'Fill in the registration form for the bride or groom. Each account registers one profile.';
+      'Fill in the registration form for the bride or groom — no agent needed yet. You choose your agent and pay when you publish it. Each account registers one profile.';
   static String chipPay(num? fee) => 'Pay ${feeLabel(fee)}';
   static const chipWaitingForAgent = 'Waiting for agent';
   static const chipLive = 'Live';
   static const chipHidden = 'Hidden';
   static String visibilityTitle(String? visibility) => switch (visibility) {
-        'payment_pending' => 'Registration fee not paid',
+        'payment_pending' => 'Not published yet',
         'awaiting_approval' => 'Waiting for your agent',
         'live' => 'Live — other families can see it',
         _ => 'Hidden',
       };
   static String visibilityNote(String? visibility) => switch (visibility) {
-        'payment_pending' => 'Pay the registration fee so this profile can be shown to other families.',
+        'payment_pending' =>
+          'Publish it — choose your agent and pay the registration fee, or use a gift code — so other families can see it.',
         'awaiting_approval' => 'Paid. It goes live once your agent approves your account.',
         'live' =>
           'Other families see only the public part. Family, contact and place details are shared only after your agent approves an interest.',
@@ -639,6 +642,156 @@ class S {
   static const errPaymentProviderChanged = 'The payment method has just changed. Please try again.';
   static const tryAgain = 'Try again';
   static const amount = 'Amount';
+
+  // ---- direct UPI, verified by the Wedbook team (v3.2 — SPEC §9.20 B / E)
+  static const upiStep1 = 'Pay by UPI';
+  static String payWithUpiApp(num? fee) => 'Pay ${feeLabel(fee)} with UPI app';
+  static const upiNoAppTitle = 'No UPI app could open this payment';
+  static const upiNoAppBody = 'Scan the QR code below from another phone, or pay to the UPI ID shown.';
+  static const upiScanCaption = 'Or scan with any UPI app on another phone';
+  static const upiId = 'UPI ID';
+  static const upiIdCopied = 'UPI ID copied';
+  static const copy = 'Copy';
+  static String upiPayTo(String name) => 'Pay to $name';
+  static String upiAmountNote(num? fee) => 'Amount ${feeLabel(fee)} — enter it exactly if your app asks.';
+  static const upiStep2 = 'After paying';
+  static const upiStep2Body = 'Enter the 12-digit UPI reference (UTR) from your UPI app.';
+  static const utrLabel = 'UPI reference / UTR (12 digits)';
+  static const utrHelper = "Find it in your UPI app's payment details after paying";
+  static const utrInvalid = 'Enter the 12-digit UTR exactly as your UPI app shows it';
+  static const submitForVerification = 'Submit for verification';
+  static const upiUnderReviewTitle = 'Payment under verification';
+  static const upiUnderReviewBody = "We'll confirm within a few hours. You'll get a notification.";
+  static String utrLine(String utr) => 'UTR $utr';
+  static const checkStatus = 'Check status';
+  static String upiNotVerified(String? reason) =>
+      reason == null || reason.trim().isEmpty ? 'Payment not verified' : 'Payment not verified: ${reason.trim()}';
+  static const upiNotVerifiedBody =
+      'Check the 12-digit UTR in your UPI app and submit it again — or pay again if no money was taken.';
+  static const step3UnderReview = "Payment under verification — we'll confirm within a few hours.";
+  static const viewPaymentStatus = 'View payment status';
+  static const fixPayment = 'Fix payment';
+  static const chipVerifyingPayment = 'Verifying payment';
+  static const chipPaymentNotVerified = 'Payment not verified';
+  static const errUtrUsed =
+      'This UTR has already been used. Check the 12-digit number in your UPI app.';
+  static const errPaymentUnderReview = 'Your payment is already being verified.';
+
+  // ---- the Google Play build (SPEC §9.20 G): no payment other than Google's
+  static const paymentUnavailable = "Online payment isn't available in this version yet.";
+  static const chipFeeNotPaid = 'Fee not paid';
+  static const step3TitleNoPayment = 'Registration fee or gift code';
+
+  // ---- publish last, gift codes, recommended agents (v3.4.0 — SPEC §9.23 B / C / F)
+  /// "12 clients" — an agent's live clients.
+  static String clientsCount(int n) => n == 1 ? '1 client' : '$n clients';
+  static const publishMyProfile = 'Publish my profile';
+  static const publishStepAgent = 'Agent';
+  static const publishStepPayment = 'Payment';
+  static const publishStepApproval = 'Approval';
+  static const publishReadyTitle = 'Your profile is ready to publish';
+  static String publishReadyBody(num? fee) =>
+      'Choose your agent and pay ${feeLabel(fee)} — or use a gift code from an agent — so other families can see it.';
+  static const publishReadyBodyNoPayment =
+      'Choose your agent — use a gift code from them, or ask them to publish it for you.';
+  static const publishNeedsProfileTitle = 'Create your profile first';
+  static const publishNeedsProfileBody =
+      'Fill in your profile. Then come back here to choose your agent and publish it.';
+  static const publishAgentIntro =
+      'Your agent takes your profile to other families and follows up interests for you.';
+  static const giftCodeQuestion = 'Have a gift code from an agent?';
+  static const giftCodeQuestionBody =
+      'Enter it here — it links you to that agent and publishes your profile at once, with no fee.';
+  static const giftCodeOnPayBody = 'Got a gift code from your agent? Enter it instead of paying.';
+  static const giftCodeLabel = 'Gift code';
+  static const giftCodeHint = 'WB-K7M2QX';
+  static const giftCodeApply = 'Apply';
+  static const giftCodeEmpty = 'Enter the gift code your agent gave you';
+  static const giftCodeApplied = 'Gift code applied — your profile is live';
+  static const useGiftCode = 'Use a gift code';
+  static const errGiftCodeNotFound = 'This gift code is not valid — check it with your agent.';
+  static const errGiftCodeUsed = 'This gift code has already been used.';
+  static const errGiftCodeOtherAgent = 'This code is from another agent. Ask your agent for a code.';
+  static const errGiftCodeTooMany = 'Too many wrong codes. Please try again in an hour.';
+  static const recommendedTitle = 'Recommended for you';
+  static const recommendedBasedOn = 'Based on your community and native place';
+  static const recommendedNone =
+      "No agents to recommend yet — search all agents or enter your agent's number.";
+  static const searchAllAgents = 'Search all agents';
+  static const enterAgentNumberOrCode = "Enter your agent's mobile number or code";
+  static const publishPayIntro = 'Pay the one-time registration fee, or use a gift code from your agent.';
+  static const publishWaitingTitle = "Waiting for your agent's approval";
+  static String publishWaitingBody(String agent) =>
+      '$agent approves your account, then your profile goes live. Call them if it takes long.';
+  static const publishLiveTitle = 'Your profile is live';
+  static const publishLiveBody = 'Other families can now find your profile. Your agent takes interests forward.';
+  static String paidViaLine(String via) => switch (via) {
+        'gift' => 'Fee: covered by a gift code',
+        'cash' => 'Fee: paid in cash to your agent',
+        'upi' || 'razorpay' => 'Fee: paid online',
+        'waived' => 'Fee: waived',
+        _ => 'Fee: paid',
+      };
+
+  // ---- "View as others see it" (v3.4.0 — SPEC §9.23 D)
+  static const viewAsOthers = 'View as others see it';
+  static const viewAsOthersHint = 'Check what other families see before and after you accept their interest';
+  static const previewTitle = 'As others see it';
+  static const previewBanner = 'Preview — this is how other families see your profile';
+  static const previewTabBefore = 'Before interest is accepted';
+  static const previewTabAfter = 'After interest is accepted';
+  static const previewBeforeNote =
+      'Family, contact and place details — and anything you switched off in Privacy settings — are shared only after you accept a family\'s interest.';
+
+  // ---- searchable long lists (v3.4.0 — SPEC §9.23 E)
+  static String searchIn(String what) => 'Search ${what.toLowerCase()}';
+  static const nothingMatches = 'Nothing matches — try fewer letters.';
+  static const selectHint = 'Select';
+  static String selectedCount(int n) => '$n selected';
+  static const chooseCommunities = 'Choose communities';
+
+  // ---- account deletion (SPEC §9.20 F)
+  static const deleteAccount = 'Delete my account';
+  static const deleteAccountSubtitle = 'Ask us to delete your account and data';
+  static const deleteAccountBody =
+      "We'll open our account deletion page. After we confirm with you on your registered number, your account, profile and photos are deleted within 7 days.";
+  static const openDeletionPage = 'Open deletion page';
+  static const linkOpenFailed = 'Could not open the browser. Please try again.';
+
+  // ---- report / block (SPEC §9.22 A / B)
+  static const moreOptions = 'More options';
+  static const reportProfile = 'Report profile';
+  static const reportProfileBody = 'Why are you reporting this profile? Our team reviews every report.';
+  static String reportReasonLabel(String apiValue) => switch (apiValue) {
+        'fake_profile' => 'Fake profile',
+        'inappropriate_photo' => 'Inappropriate photo',
+        'offensive_content' => 'Offensive content',
+        'scam_or_fraud' => 'Scam or fraud',
+        'harassment' => 'Harassment',
+        _ => 'Other',
+      };
+  static const reportDetailsHint = 'Anything else we should know? (optional)';
+  static const submitReport = 'Submit';
+  static const reportThanks = 'Thanks — our team will review this profile.';
+  static const block = 'Block';
+  static const blockTitle = 'Block this profile?';
+  static const blockBody =
+      "You won't see this profile any more, and they won't see yours. You can unblock later in More → Blocked profiles.";
+  static const profileBlocked = 'Profile blocked';
+  static const blockedProfiles = 'Blocked profiles';
+  static const blockedProfilesSubtitle = 'Profiles you have blocked';
+  static const noBlockedTitle = 'No blocked profiles';
+  static const noBlockedBody = 'Profiles you block are listed here. You can unblock them any time.';
+  static String blockedOn(String date) => 'Blocked on $date';
+  static const unblock = 'Unblock';
+  static String unblockedSnack(String label) => '$label unblocked';
+
+  // ---- terms consent at signup (SPEC §9.22 C)
+  static const termsAgreePrefix = 'I agree to the ';
+  static const termsLink = 'Terms & Conditions';
+  static const termsAnd = ' and ';
+  static const privacyLink = 'Privacy Policy';
+  static const termsRequired = 'Please agree to the Terms & Conditions and Privacy Policy to continue.';
 
   /// "₹150" (or "₹150.50"); "the fee" when the server did not say.
   static String feeLabel(num? fee) {

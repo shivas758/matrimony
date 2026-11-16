@@ -4,9 +4,12 @@ import 'package:provider/provider.dart';
 import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../widgets/agent_code_card.dart';
+import '../../widgets/delete_account.dart';
 
 /// Shown to agents whose account is still `pending` (or `suspended`).
 /// They hold a valid token but every data route returns 403 (CLAUDE.md rule 2).
+/// Since v2.13 (SPEC §9.23 A) signups are `active` at once and go straight
+/// to Home — `pending` remains only on old rows.
 class PendingScreen extends StatefulWidget {
   const PendingScreen({super.key});
 
@@ -109,6 +112,15 @@ class _PendingScreenState extends State<PendingScreen> {
                 ],
               ),
             ],
+            // SPEC §9.20 F: pending and suspended agents can ask too.
+            const SizedBox(height: 32),
+            Center(
+              child: TextButton(
+                style: TextButton.styleFrom(foregroundColor: theme.colorScheme.outline),
+                onPressed: () => confirmDeleteAccount(context),
+                child: const Text(S.deleteMyAccount),
+              ),
+            ),
           ],
         ),
       ),

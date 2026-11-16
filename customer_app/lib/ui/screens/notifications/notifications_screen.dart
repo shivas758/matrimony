@@ -156,6 +156,7 @@ Future<bool> openNotificationRoute(
       'interest_declined' => (Icons.do_not_disturb_on_outlined, const Color(0xFFC62828)),
       'interest_revoked' => (Icons.lock_outline_rounded, const Color(0xFFC62828)),
       'payment_received' => (Icons.receipt_long_rounded, AppColors.success),
+      'payment_rejected' => (Icons.money_off_rounded, const Color(0xFFC62828)),
       'agent_change_approved' => (Icons.swap_horiz_rounded, AppColors.success),
       'agent_change_rejected' => (Icons.swap_horiz_rounded, const Color(0xFFC62828)),
       'delete_request_approved' => (Icons.delete_outline_rounded, AppColors.success),

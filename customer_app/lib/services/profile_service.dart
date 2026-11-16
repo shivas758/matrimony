@@ -5,6 +5,7 @@ import 'package:http_parser/http_parser.dart';
 
 import '../models/master_data.dart';
 import '../models/profile.dart';
+import '../models/safety.dart';
 import 'api_client.dart';
 
 /// Everything the Browse / Interested / My profile screens need from the
@@ -77,11 +78,22 @@ class ProfileService {
     return Profile.fromJson(json['profile'] as Map<String, dynamic>);
   }
 
+  /// GET /customer/my-profiles/:id/preview?as=before|after → {profile} — my
+  /// profile exactly as another family sees it (SPEC §9.23 D): [after] =
+  /// once their interest is accepted (hidden details and the on-request
+  /// fields revealed), else before. Same shape as [detail], with `is_mine:
+  /// false` and `preview: true`. Works whether or not it is published.
+  Future<Profile> preview(int id, {bool after = false}) async {
+    final json = await _api.get('/customer/my-profiles/$id/preview', query: {'as': after ? 'after' : 'before'});
+    return Profile.fromJson(json['profile'] as Map<String, dynamic>);
+  }
+
   /// POST /customer/my-profiles — multipart create (SPEC §9.12). Empty values
   /// are not sent (the server treats absent as "not recorded"); lists and
   /// maps travel as JSON strings (`education_levels`), which is what the
-  /// multipart route parses (SPEC §9.7). Photos go as `photos[]`.
-  /// 409 `profile_limit`, 409/403 `agent_required`.
+  /// multipart route parses (SPEC §9.7). Photos go as `photos[]`. Since
+  /// v2.13 a guest may create it before choosing an agent (SPEC §9.23 C).
+  /// 409 `profile_limit`.
   Future<Profile> createProfile(Map<String, dynamic> fields, List<String> photoPaths) async {
     final form = FormData();
     fields.forEach((k, v) {
@@ -140,6 +152,34 @@ class ProfileService {
     });
     return DeleteRequest.fromJson(json['delete_request'] as Map<String, dynamic>);
   }
+
+  // ------------------------------------------------------------ report / block (SPEC §9.22)
+
+  /// POST /customer/profiles/:id/report {reason, details?} → 201 {report}.
+  /// `404` when the profile is not visible to me, `400 own_profile`.
+  Future<void> reportProfile(int id, ReportReason reason, {String? details}) async {
+    final text = details?.trim() ?? '';
+    await _api.post('/customer/profiles/$id/report', body: {
+      'reason': reason.apiValue,
+      if (text.isNotEmpty) 'details': text,
+    });
+  }
+
+  /// POST /customer/profiles/:id/block — both ways: I no longer see it, its
+  /// family no longer sees mine; pending interests between us are withdrawn.
+  Future<void> blockProfile(int id) => _api.post('/customer/profiles/$id/block');
+
+  /// GET /customer/blocks → {blocks: [{profile_id, profile_label, created_at}]}.
+  Future<List<BlockedProfile>> blockedProfiles() async {
+    final json = await _api.get('/customer/blocks');
+    return (json['blocks'] as List? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(BlockedProfile.fromJson)
+        .toList();
+  }
+
+  /// DELETE /customer/blocks/:profileId.
+  Future<void> unblockProfile(int profileId) => _api.delete('/customer/blocks/$profileId');
 
   /// POST /customer/delete-requests/:id/cancel (while pending) → {delete_request}.
   Future<DeleteRequest> cancelDeleteRequest(int requestId) async {

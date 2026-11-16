@@ -395,9 +395,9 @@ void main() {
       expect(find.text('ID GN-KA1A-A001'), findsOneWidget);
       expect(find.text(S.agentCode), findsOneWidget);
       expect(find.text('KA1A'), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Wedbook Matrimony · v3.1.0'), 300,
+      await tester.scrollUntilVisible(find.text('Wedbook Matrimony · v3.4.0'), 300,
           scrollable: find.byType(Scrollable).first);
-      expect(find.text('Wedbook Matrimony · v3.1.0'), findsOneWidget);
+      expect(find.text('Wedbook Matrimony · v3.4.0'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -448,11 +448,21 @@ void main() {
       return host;
     }
 
+    /// *Link agent* sits in step 2 since v3.4.0 (SPEC §9.23 F), below the
+    /// profile step: let the focus scroll finish (a blinking cursor never
+    /// "settles"), bring it into view, tap.
+    Future<void> tapLink(WidgetTester tester) async {
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.ensureVisible(find.text(S.agentPhoneLink));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text(S.agentPhoneLink));
+    }
+
     testWidgets('the one field is labelled for both and a code links by agent_code', (tester) async {
       final host = await open(tester);
       expect(find.text(S.agentPhoneOrCode), findsOneWidget);
       await tester.enterText(find.byType(TextField).first, 'ka1a');
-      await tester.tap(find.text(S.agentPhoneLink));
+      await tapLink(tester);
       await tester.pump();
       await tester.pump();
       expect(host.agents.code, 'KA1A');
@@ -464,7 +474,7 @@ void main() {
     testWidgets('ten digits link by agent_phone', (tester) async {
       final host = await open(tester);
       await tester.enterText(find.byType(TextField).first, '+91 98765 43210');
-      await tester.tap(find.text(S.agentPhoneLink));
+      await tapLink(tester);
       await tester.pump();
       await tester.pump();
       expect(host.agents.phone, '9876543210');
@@ -476,7 +486,7 @@ void main() {
     testWidgets('neither a number nor a code: an inline message, nothing is sent', (tester) async {
       final host = await open(tester);
       await tester.enterText(find.byType(TextField).first, '98765');
-      await tester.tap(find.text(S.agentPhoneLink));
+      await tapLink(tester);
       await tester.pump();
       expect(find.text(S.agentPhoneOrCodeInvalid), findsOneWidget);
       expect(host.agents.phone, isNull);
@@ -489,7 +499,7 @@ void main() {
       final host = await open(tester);
       host.agents.failWith = ApiException('agent_not_found', 'No agent has the code KA9Z', status: 404);
       await tester.enterText(find.byType(TextField).first, 'KA9Z');
-      await tester.tap(find.text(S.agentPhoneLink));
+      await tapLink(tester);
       await tester.pump();
       await tester.pump();
       expect(find.text('No agent has the code KA9Z'), findsOneWidget);

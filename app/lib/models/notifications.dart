@@ -32,8 +32,9 @@ class NotificationItem {
 
   factory NotificationItem.fromJson(Map<String, dynamic> j) => NotificationItem(
         type: '${j['type']}',
-        title: '${j['title']}',
-        body: '${j['body']}',
+        // Absent text is empty, never the word "null".
+        title: '${j['title'] ?? ''}',
+        body: '${j['body'] ?? ''}',
         id: (j['id'] as num?)?.toInt(),
         profileId: (j['profile_id'] as num?)?.toInt(),
         customerId: (j['customer_id'] as num?)?.toInt(),
@@ -53,6 +54,9 @@ class NotificationFeed {
     this.interestsInbox = 0,
     this.agentChangeInbox = 0,
     this.deleteRequestsInbox = 0,
+    this.paymentsToVerify = 0,
+    this.deletionRequests = 0,
+    this.reportsOpen = 0,
   });
 
   final int badge;
@@ -69,8 +73,18 @@ class NotificationFeed {
   /// Admins only: agents who tapped "Forgot password?" and are waiting.
   final int pendingPasswordResets;
 
+  /// Admins only (SPEC §9.20 D): UPI payments whose UTR waits for a check.
+  final int paymentsToVerify;
+
+  /// Admins only (SPEC §9.20 F): account deletion requests to confirm.
+  final int deletionRequests;
+
+  /// Admins only (SPEC §9.22 A): reported profiles to review.
+  final int reportsOpen;
+
   /// Everything an admin has to act on from the Admin screen.
-  int get adminPending => pendingAgents + pendingPasswordResets;
+  int get adminPending =>
+      pendingAgents + pendingPasswordResets + paymentsToVerify + deletionRequests + reportsOpen;
 
   /// SPEC §9.10 — customers waiting for my approval, pending interests on my
   /// uploads, and my clients asking to move to another agent.
@@ -103,6 +117,9 @@ class NotificationFeed {
       interestsInbox: (counts['interests_inbox'] as num?)?.toInt() ?? 0,
       agentChangeInbox: (counts['agent_change_inbox'] as num?)?.toInt() ?? 0,
       deleteRequestsInbox: (counts['delete_requests_inbox'] as num?)?.toInt() ?? 0,
+      paymentsToVerify: (counts['payments_to_verify'] as num?)?.toInt() ?? 0,
+      deletionRequests: (counts['deletion_requests'] as num?)?.toInt() ?? 0,
+      reportsOpen: (counts['reports_open'] as num?)?.toInt() ?? 0,
     );
   }
 }

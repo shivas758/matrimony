@@ -18,7 +18,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { z } from 'zod';
 import { many, one, query, tx } from '../lib/db.js';
-import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { ApiError, asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
 import { intQuery, parse, phoneSchema } from '../lib/validate.js';
 import { deleteStoredPhoto, resolveStoredPath, watermarkedBuffer } from '../lib/photos.js';
 import {
@@ -32,10 +32,15 @@ import {
   protectedFields,
 } from '../lib/profiles.js';
 import { applyListFilters, listQuerySchema, sortSql } from '../lib/profileQuery.js';
-import { filterViewer, hiddenSet } from '../lib/privacy.js';
+import { displayName, filterViewer, hiddenSet } from '../lib/privacy.js';
+import {
+  REPORT_REASONS, blockProfile, createReport, customerBlockSql, listBlocks, unblockProfile,
+} from '../lib/moderation.js';
 import { issueMissingProfileCodes } from '../lib/codes.js';
 import { config } from '../lib/config.js';
-import { confirmPayment, createProfilePayment, paymentPublic } from '../lib/payments.js';
+import {
+  confirmPayment, createProfilePayment, paymentPublic, profileUpiState, submitUpiPayment,
+} from '../lib/payments.js';
 import {
   MAX_PHOTOS,
   addPhotos,
@@ -46,6 +51,8 @@ import {
   upload,
 } from '../lib/profileWrite.js';
 import { agentDirectory } from '../lib/serialize.js';
+import { approvedSql, liveClientsSql, refreshAgentApproval } from '../lib/agentApproval.js';
+import { redeemGiftCodeAsCustomer } from '../lib/giftCodes.js';
 import {
   AGENT_CHANGE_SELECT,
   CUSTOMER_PHOTO_BASE,
@@ -58,6 +65,7 @@ import {
   loadAgentChange,
   loadCustomerMe,
   loadInterest,
+  PAID_VIA_SQL,
   profileVisibility,
 } from '../lib/customers.js';
 import { requireActiveCustomer, requireFullAccess, requireNotSuspended } from '../middleware/customerAuth.js';
@@ -78,14 +86,25 @@ function customerProfilePublic(row, photos, customer, { reveal = false } = {}) {
 }
 
 /**
- * Own-profile WRITES are allowed while pending (and active) — SPEC §9.9 /
- * §9.2 — but not for a rejected or suspended account: suspension is the stop
- * button, and the profile stays live under the agent's uploads otherwise.
- * Delegates to requireActiveCustomer for the exact 403 code.
+ * Own-profile WRITES (SPEC §9.23 C): the family fills in the whole profile
+ * before choosing an agent, so guests may write too, as may pending, active
+ * and rejected customers (a rejected one picks another agent next). Not a
+ * suspended account: suspension is the stop button.
  */
 function requireProfileEditor(req, res, next) {
   const { status } = req.customer;
-  if (status === 'active' || status === 'pending') return next();
+  if (['guest', 'pending', 'active', 'rejected'].includes(status)) return next();
+  return requireActiveCustomer(req, res, next);
+}
+
+/**
+ * Paying the fee needs a linked agent (SPEC §9.23 C: agent first, then pay) —
+ * pending or active; a guest gets 403 agent_required, a rejected or suspended
+ * account its own code (requireActiveCustomer).
+ */
+function requirePayer(req, res, next) {
+  const { status } = req.customer;
+  if ((status === 'active' || status === 'pending') && req.customer.agent_id) return next();
   return requireActiveCustomer(req, res, next);
 }
 
@@ -125,8 +144,11 @@ async function ownProfileView(customer, id) {
   out.interest = null;
   out.paid = row.paid_at != null;
   out.paid_at = row.paid_at ?? null;
+  out.paid_via = row.paid_at ? (await one(`SELECT ${PAID_VIA_SQL('$1::int')} AS v`, [id]))?.v ?? null : null;
   out.visibility = profileVisibility(row, customer.status);
   out.profile_fee_inr = config.payments.profileFeeInr;
+  // The open UPI claim of an unpaid profile (SPEC §9.20 B).
+  out.payment = row.paid_at ? null : await profileUpiState(id);
   const pendingDelete = await one(
     `SELECT id, status, reason, created_at FROM profile_delete_requests WHERE profile_id = $1 AND status = 'pending'`,
     [id],
@@ -143,7 +165,8 @@ async function ownProfileView(customer, id) {
  * keeps one — uq_profiles_one_per_customer, migration 009).
  */
 async function createOwnProfile(req) {
-  if (!req.customer.agent_id) throw forbidden('agent_required', 'Choose your agent before registering a profile');
+  // No agent needed (SPEC §9.23 C): without one the profile is nobody's upload
+  // and has no ID until the customer links an agent at publish time.
   const limitReached = () => conflict('profile_limit', 'You can register only one profile');
   const { n } = await one('SELECT count(*)::int AS n FROM profiles WHERE customer_id = $1', [req.customer.id]);
   if (n >= MAX_PROFILES()) throw limitReached();
@@ -152,7 +175,7 @@ async function createOwnProfile(req) {
   const body = await prepareProfileBody(raw, { multipart: true });
   try {
     const { id } = await createProfileRecord({
-      uploadedBy: req.customer.agent_id,
+      uploadedBy: req.customer.agent_id ?? null,
       customerId: req.customer.id,
       body,
       files: req.files || [],
@@ -312,7 +335,7 @@ customerRouter.post(
 // POST /api/customer/my-profiles/:id/payment — starts a checkout.
 customerRouter.post(
   '/my-profiles/:id/payment',
-  requireProfileEditor,
+  requirePayer,
   asyncHandler(async (req, res) => {
     const id = await ownProfileId(req.customer, Number(req.params.id));
     res.status(201).json({ payment: paymentPublic(await createProfilePayment(req.customer, id)) });
@@ -325,10 +348,28 @@ const confirmSchema = z.object({
   outcome: z.enum(['success', 'failure']).optional(),
 });
 
+// POST /api/customer/payments/:id/submit {utr} — a UPI payment's reference (SPEC §9.20 B).
+const utrSchema = z.object({
+  utr: z.string().trim().regex(/^\d{12}$/, 'Enter the 12-digit UPI reference (UTR) from your UPI app'),
+});
+customerRouter.post(
+  '/payments/:id/submit',
+  requirePayer,
+  asyncHandler(async (req, res) => {
+    const { utr } = parse(utrSchema, req.body ?? {});
+    const payment = await submitUpiPayment(Number(req.params.id), { customerId: req.customer.id }, utr);
+    res.json({
+      payment: paymentPublic(payment),
+      profile: payment.profile_id ? await ownProfileView(req.customer, payment.profile_id) : null,
+      customer: await loadCustomerMe(req.customer.id),
+    });
+  }),
+);
+
 // POST /api/customer/payments/:id/confirm → {payment, profile, customer}
 customerRouter.post(
   '/payments/:id/confirm',
-  requireProfileEditor,
+  requirePayer,
   asyncHandler(async (req, res) => {
     const body = parse(confirmSchema, req.body ?? {});
     const payment = await confirmPayment(req.customer, Number(req.params.id), body);
@@ -337,6 +378,89 @@ customerRouter.post(
       profile: payment.profile_id ? await ownProfileView(req.customer, payment.profile_id) : null,
       customer: await loadCustomerMe(req.customer.id),
     });
+  }),
+);
+
+// ---- gift codes (SPEC §9.23 B)
+
+// Wrong codes per customer per hour — a code is 6 characters, so guessing is
+// already hopeless; this keeps it that way.
+const GIFT_ATTEMPTS = 10;
+const giftFailures = new Map(); // customerId -> [timestamps]
+function giftAttemptsLeft(customerId) {
+  const since = Date.now() - 60 * 60 * 1000;
+  const recent = (giftFailures.get(customerId) || []).filter((t) => t > since);
+  giftFailures.set(customerId, recent);
+  return GIFT_ATTEMPTS - recent.length;
+}
+
+const giftSchema = z.object({
+  code: z.string({ message: 'Enter the gift code' }).trim().min(1, 'Enter the gift code').max(20),
+});
+
+// POST /api/customer/my-profiles/:id/gift-code {code} → {profile, customer}:
+// links me to the code's agent if needed, approves me, and the profile goes
+// live free.
+customerRouter.post(
+  '/my-profiles/:id/gift-code',
+  requireNotSuspended,
+  asyncHandler(async (req, res) => {
+    const id = await ownProfileId(req.customer, Number(req.params.id));
+    const { code } = parse(giftSchema, req.body ?? {});
+    if (giftAttemptsLeft(req.customer.id) <= 0) {
+      throw new ApiError(429, 'too_many_attempts', 'Too many wrong codes — try again in an hour');
+    }
+    let result;
+    try {
+      result = await tx((client) => redeemGiftCodeAsCustomer(client, { customerId: req.customer.id, profileId: id, codeText: code }));
+    } catch (e) {
+      if (e.invalid) giftFailures.get(req.customer.id)?.push(Date.now());
+      throw e;
+    }
+    await refreshAgentApproval(result.agentId);
+    // The redeem changed my status and agent: build the answer from the fresh row.
+    const fresh = await one('SELECT status, agent_id FROM customers WHERE id = $1', [req.customer.id]);
+    res.json({
+      profile: await ownProfileView({ ...req.customer, ...fresh }, id),
+      customer: await loadCustomerMe(req.customer.id),
+    });
+  }),
+);
+
+// ---- "View as others see it" (SPEC §9.23 D)
+
+const previewSchema = z.object({ as: z.enum(['before', 'after']).default('before') });
+
+// GET /api/customer/my-profiles/:id/preview?as=before|after — my profile in the
+// exact shape another family gets from GET /customer/profiles/:id, before or
+// after their interest is accepted.
+customerRouter.get(
+  '/my-profiles/:id/preview',
+  asyncHandler(async (req, res) => {
+    const id = await ownProfileId(req.customer, Number(req.params.id));
+    const { as } = parse(previewSchema, req.query);
+    const row = await one(`${PROFILE_SELECT} WHERE p.id = $1`, [id]);
+    if (!row) throw notFound('profile_not_found', 'Profile not found');
+    const photos = (await photosByProfile([row.id])).get(row.id);
+    const after = as === 'after';
+    // No viewer passed: profilePublic treats it as someone else's profile.
+    const out = profilePublic(row, { photos, reveal: after, photoUrlBase: CUSTOMER_PHOTO_BASE });
+    out.interest = after
+      ? {
+          id: null,
+          status: 'accepted',
+          note: null,
+          created_at: null,
+          decided_at: null,
+          access_expires_at: null,
+          days_left: config.contactAccessDays,
+        }
+      : null;
+    out.contact_access = after ? 'granted' : 'none';
+    out.contact_expires_at = null;
+    if (after) Object.assign(out, protectedFields(row));
+    out.preview = true;
+    res.json({ profile: out });
   }),
 );
 
@@ -512,10 +636,11 @@ customerRouter.get(
  * any community — a teaser; rows are cut down to guestRow().
  */
 function guestVisibilityClause(customer, next) {
+  // Only profiles of the customer's own world (SPEC §9.21).
   return {
-    clause: `(p.customer_id = $${next} OR p.status = 'active')`,
-    params: [customer.id],
-    next: next + 1,
+    clause: `(p.customer_id = $${next} OR (p.status = 'active' AND p.is_demo = $${next + 1} AND ${customerBlockSql(next)}))`,
+    params: [customer.id, Boolean(customer.is_demo)],
+    next: next + 2,
   };
 }
 
@@ -667,6 +792,62 @@ customerRouter.get(
   }),
 );
 
+// ================================================================ report / block (SPEC §9.22)
+
+const reportSchema = z.object({
+  reason: z.enum(REPORT_REASONS, { message: 'Choose a reason' }),
+  details: z.string().trim().max(500).optional().nullable().transform((v) => (v ? v : null)),
+});
+
+/** A profile the customer can currently see (guest or full scope), with the label they see. */
+async function visibleForModeration(customer, id) {
+  if (!Number.isInteger(id) || id <= 0) throw notFound('profile_not_found', 'Profile not found');
+  const access = await customerAccessLevel(customer);
+  const vis = access === 'full' ? customerVisibilityClause(customer, 2) : guestVisibilityClause(customer, 2);
+  const row = await one(
+    `SELECT p.id, p.full_name, p.hidden_fields, p.customer_id FROM profiles p WHERE p.id = $1 AND ${vis.clause}`,
+    [id, ...vis.params],
+  );
+  if (!row) throw notFound('profile_not_found', 'Profile not found');
+  if (row.customer_id === customer.id) throw badRequest('own_profile', 'This is your own profile');
+  return { ...row, label: displayName(row) };
+}
+
+// POST /api/customer/profiles/:id/report {reason, details?}
+customerRouter.post(
+  '/profiles/:id/report',
+  requireNotSuspended,
+  asyncHandler(async (req, res) => {
+    const body = parse(reportSchema, req.body ?? {});
+    const profile = await visibleForModeration(req.customer, Number(req.params.id));
+    res.status(201).json({ report: await createReport({ customerId: req.customer.id, profile, ...body }) });
+  }),
+);
+
+// POST /api/customer/profiles/:id/block — both ways between the two families.
+customerRouter.post(
+  '/profiles/:id/block',
+  requireNotSuspended,
+  asyncHandler(async (req, res) => {
+    const profile = await visibleForModeration(req.customer, Number(req.params.id));
+    res.status(201).json(await blockProfile({ customerId: req.customer.id, profile }));
+  }),
+);
+
+// GET /api/customer/blocks · DELETE /api/customer/blocks/:profileId
+customerRouter.get(
+  '/blocks',
+  asyncHandler(async (req, res) => {
+    res.json({ blocks: await listBlocks({ customerId: req.customer.id }) });
+  }),
+);
+customerRouter.delete(
+  '/blocks/:profileId',
+  asyncHandler(async (req, res) => {
+    res.json(await unblockProfile({ customerId: req.customer.id, profileId: Number(req.params.profileId) }));
+  }),
+);
+
 // ================================================================ interests (active only)
 
 const noteSchema = z.string().trim().max(500).optional().nullable().transform((v) => (v ? v : null));
@@ -773,7 +954,9 @@ const agentsSchema = z.object({
 });
 
 // GET /api/customer/agents?q=&community_id=&city= — the directory (SPEC §9.6):
-// active agents' business details; `is_current` marks mine.
+// active, APPROVED agents' business details (SPEC §9.23 A) — plus my current
+// agent, always first; then most live clients, then name. `is_current` marks
+// mine; `live_clients` = how many families they have published (§9.23 D).
 customerRouter.get(
   '/agents',
   requireNotSuspended,
@@ -781,7 +964,10 @@ customerRouter.get(
     const f = parse(agentsSchema, req.query);
     // Only agents who can actually show profiles (at least one community).
     const where = [`a.status = 'active'`, 'EXISTS (SELECT 1 FROM agent_communities y WHERE y.agent_id = a.id)'];
-    const params = [];
+    // Agents of my own world only (SPEC §9.21).
+    const params = [Boolean(req.customer.is_demo), req.customer.agent_id ?? 0];
+    where.push('a.is_demo = $1');
+    where.push(`(${approvedSql('a')} OR a.id = $2)`);
     if (f.q) {
       // Name, agency or agent code (SPEC §9.18 B).
       params.push(`%${f.q}%`);
@@ -797,9 +983,9 @@ customerRouter.get(
       params.push(f.community_id);
       where.push(`EXISTS (SELECT 1 FROM agent_communities x WHERE x.agent_id = a.id AND x.community_id = $${params.length})`);
     }
-    params.push(req.customer.agent_id ?? 0);
     const rows = await many(
       `SELECT a.id, a.full_name, a.agency_name, a.city, a.phone, a.agent_code,
+              ${liveClientsSql('a.id')} AS live_clients,
               COALESCE(json_agg(json_build_object('id', c.id, 'name', c.name) ORDER BY c.sort_order, c.name)
                        FILTER (WHERE c.id IS NOT NULL), '[]') AS communities
          FROM agents a
@@ -807,11 +993,67 @@ customerRouter.get(
          LEFT JOIN communities c ON c.id = ac.community_id
         WHERE ${where.join(' AND ')}
         GROUP BY a.id
-        ORDER BY (a.id = $${params.length}) DESC, a.full_name, a.id`,
+        ORDER BY (a.id = $2) DESC, live_clients DESC, a.full_name, a.id`,
       params,
     );
     res.json({
       agents: rows.map((a) => ({ ...agentDirectory(a, a.communities), is_current: a.id === req.customer.agent_id })),
+    });
+  }),
+);
+
+// GET /api/customer/agents/recommended — agents for my profile (SPEC §9.23 C):
+// approved, active agents of my world who serve my profile's community; same
+// city first, then same state, then the rest; most live clients first. Uses my
+// profile's community even when the family hid it (only the server sees it)
+// and its native place — never the phone's location.
+customerRouter.get(
+  '/agents/recommended',
+  requireNotSuspended,
+  asyncHandler(async (req, res) => {
+    const mine = await one(
+      `SELECT p.community_id, c.name AS community_name, p.city, p.state
+         FROM profiles p JOIN communities c ON c.id = p.community_id
+        WHERE p.customer_id = $1 ORDER BY p.created_at, p.id LIMIT 1`,
+      [req.customer.id],
+    );
+    if (!mine) return res.json({ agents: [], based_on: null });
+    const city = (mine.city || '').trim();
+    const state = (mine.state || '').trim();
+    const rows = await many(
+      `SELECT * FROM (
+         SELECT a.id, a.full_name, a.agency_name, a.city, a.phone, a.agent_code,
+                ${liveClientsSql('a.id')} AS live_clients,
+                CASE
+                  WHEN $3 <> '' AND lower(trim(a.city)) = lower($3) THEN 'city'
+                  WHEN $4 <> '' AND (lower(st.name) = lower($4) OR lower(st.code) = lower($4)
+                                     OR lower(trim(a.city)) = lower($4)) THEN 'state'
+                  ELSE 'community'
+                END AS match,
+                (SELECT COALESCE(json_agg(json_build_object('id', c.id, 'name', c.name) ORDER BY c.sort_order, c.name), '[]')
+                   FROM agent_communities ac JOIN communities c ON c.id = ac.community_id
+                  WHERE ac.agent_id = a.id) AS communities
+           FROM agents a
+           LEFT JOIN states st ON st.id = a.state_id
+          WHERE a.status = 'active' AND a.is_demo = $1 AND ${approvedSql('a')}
+            AND EXISTS (SELECT 1 FROM agent_communities x WHERE x.agent_id = a.id AND x.community_id = $2)
+       ) r
+       ORDER BY CASE r.match WHEN 'city' THEN 0 WHEN 'state' THEN 1 ELSE 2 END,
+                r.live_clients DESC, r.full_name, r.id
+       LIMIT 20`,
+      [Boolean(req.customer.is_demo), mine.community_id, city, state],
+    );
+    res.json({
+      agents: rows.map((a) => ({
+        ...agentDirectory(a, a.communities),
+        is_current: a.id === req.customer.agent_id,
+        match: a.match,
+      })),
+      based_on: {
+        community: { id: mine.community_id, name: mine.community_name },
+        city: city || null,
+        state: state || null,
+      },
     });
   }),
 );
@@ -846,11 +1088,13 @@ customerRouter.post(
     if (!['guest', 'pending', 'rejected'].includes(status)) {
       throw conflict('wrong_status', status === 'active' ? 'Use Change agent instead' : `Your account is ${status}`);
     }
+    // Only agents of my own world can be found (SPEC §9.21).
+    const world = Boolean(req.customer.is_demo);
     const agent = body.agent_id
-      ? await one('SELECT id, status FROM agents WHERE id = $1', [body.agent_id])
+      ? await one('SELECT id, status FROM agents WHERE id = $1 AND is_demo = $2', [body.agent_id, world])
       : body.agent_code
-        ? await one('SELECT id, status FROM agents WHERE agent_code = $1', [body.agent_code])
-        : await one('SELECT id, status FROM agents WHERE phone = $1', [body.agent_phone]);
+        ? await one('SELECT id, status FROM agents WHERE agent_code = $1 AND is_demo = $2', [body.agent_code, world])
+        : await one('SELECT id, status FROM agents WHERE phone = $1 AND is_demo = $2', [body.agent_phone, world]);
     if (!agent) {
       throw notFound(
         'agent_not_found',
@@ -899,7 +1143,10 @@ customerRouter.post(
     const body = parse(changeSchema, req.body ?? {});
     if (body.to_agent_id === req.customer.agent_id) throw badRequest('same_agent', 'That is already your agent');
 
-    const target = await one('SELECT id, status FROM agents WHERE id = $1', [body.to_agent_id]);
+    const target = await one('SELECT id, status FROM agents WHERE id = $1 AND is_demo = $2', [
+      body.to_agent_id,
+      Boolean(req.customer.is_demo),
+    ]);
     if (!target) throw notFound('agent_not_found', 'Agent not found');
     if (target.status !== 'active') throw badRequest('agent_not_active', 'That agent is not active');
 

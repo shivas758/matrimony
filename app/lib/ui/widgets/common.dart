@@ -103,8 +103,25 @@ class AuthedPhoto extends StatelessWidget {
   final double? height;
   final String? placeholderInitials;
 
+  /// Test seam (the Play Store screenshot generator): when set, a photo URL
+  /// is drawn from this provider instead of the network. Never set in the app.
+  @visibleForTesting
+  static ImageProvider Function(String url)? debugImageOverride;
+
   @override
   Widget build(BuildContext context) {
+    final override = debugImageOverride;
+    if (override != null && url != null) {
+      return Image(
+        image: override(url!),
+        fit: fit,
+        alignment: alignment,
+        width: width,
+        height: height,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => _placeholder(context),
+      );
+    }
     final token = api.tokenSync;
     if (url == null || token == null) return _placeholder(context);
     return CachedNetworkImage(

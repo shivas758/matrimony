@@ -11,9 +11,18 @@
 
 BEGIN;
 
-ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_status_check;
-ALTER TABLE payments ADD CONSTRAINT payments_status_check
-  CHECK (status IN ('created','paid','failed','refund_due'));
+-- deploy/update.sh re-runs every migration: only widen the check while it lacks
+-- 'refund_due' — never narrow a later one (012 adds 'submitted').
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'payments_status_check'
+                    AND pg_get_constraintdef(oid) LIKE '%refund_due%') THEN
+    ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_status_check;
+    ALTER TABLE payments ADD CONSTRAINT payments_status_check
+      CHECK (status IN ('created','paid','failed','refund_due'));
+  END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_razorpay_order ON payments(provider_order_id)
   WHERE provider = 'razorpay';

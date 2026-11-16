@@ -210,6 +210,48 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     }
   }
 
+  /// Spends a gift code on an unpaid profile (SPEC §9.23 B): the profile is
+  /// paid and goes live at once. The server takes the client's agent's oldest
+  /// unused code; `409 no_gift_codes` comes back as its own message.
+  Future<void> _useGiftCode(ProfileSummary p) async {
+    final c = _client;
+    if (c == null) return;
+    final auth = context.read<AuthState>();
+    final isAdmin = auth.agent?.isAdmin ?? false;
+    var left = auth.agent?.giftCodes?.unused ?? 0;
+    if (!isAdmin && left == 0) {
+      // The admin may have added codes since /auth/me was read.
+      await auth.refreshAgent();
+      if (!mounted) return;
+      left = auth.agent?.giftCodes?.unused ?? 0;
+      if (left == 0) {
+        showSnack(context, S.noGiftCodesLeft, error: true);
+        return;
+      }
+    }
+    final ok = await confirmAction(
+      context,
+      title: S.useGiftCode,
+      body: isAdmin ? S.useGiftCodeConfirmAdmin : S.useGiftCodeConfirm(left),
+      confirmLabel: S.useGiftCodeConfirmLabel,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busyProfileId = p.id);
+    try {
+      await context.read<ClientsService>().useGiftCode(c.id, p.id);
+      if (!mounted) return;
+      showSnack(context, S.giftCodeApplied);
+      // My code count and live clients (maybe approval) changed.
+      auth.refreshAgent();
+      await _load();
+    } on ApiException catch (e) {
+      // no_gift_codes / already_paid / payment_under_review — the server says it.
+      if (mounted) showSnack(context, e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busyProfileId = null);
+    }
+  }
+
   Future<void> _decideDelete(ProfileDeleteRequest r, String action) async {
     setState(() => _busyDeleteId = r.id);
     final changed = await decideDeleteRequest(context, r, action);
@@ -551,36 +593,63 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
   Widget _profileRow(ProfileSummary p) {
     final theme = Theme.of(context);
+    // Gift codes need a server that knows them (SPEC §9.23 B).
+    final giftCodes = context.select<AuthState, bool>((a) => a.agent?.knowsGiftCodes ?? false);
     final tile = ProfileSummaryTile(
       profile: p,
       padding: const EdgeInsets.symmetric(vertical: 6),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (p.paid != null)
-                StatusChip(
-                  label: p.paid! ? S.feePaid : S.feeNotPaid,
-                  color: p.paid! ? AppColors.success : AppColors.warning,
-                  icon: p.paid! ? Icons.check_circle_outline_rounded : Icons.currency_rupee_rounded,
-                ),
-              if (p.status != null) ...[
-                const SizedBox(height: 4),
-                StatusChip(
-                  label: p.status == 'on_hold' ? S.onHold : p.status!,
-                  color: StatusColors.forProfileStatus(p.status!, theme.colorScheme),
-                ),
-              ],
-            ],
-          ),
+          if (p.status != null)
+            StatusChip(
+              label: p.status == 'on_hold' ? S.onHold : p.status!,
+              color: StatusColors.forProfileStatus(p.status!, theme.colorScheme),
+            ),
           Icon(Icons.chevron_right_rounded, color: theme.colorScheme.outline),
         ],
       ),
     );
-    if (!p.isUnpaid && p.deleteRequestId == null) return tile;
+    // Under the tile, wrapping on a narrow phone: the fee state ("Paid ·
+    // gift code", SPEC §9.23 B), a delete request, and for an unpaid profile
+    // Mark paid (cash) and Use a gift code.
+    final extras = <Widget>[
+      if (p.paid != null)
+        StatusChip(
+          label: p.paid! ? S.paidVia(p.paidVia) : S.feeNotPaid,
+          color: p.paid! ? AppColors.success : AppColors.warning,
+          icon: p.paid! ? Icons.check_circle_outline_rounded : Icons.currency_rupee_rounded,
+        ),
+      if (p.deleteRequestId != null)
+        StatusChip(
+          label: S.wantsToDelete,
+          color: theme.colorScheme.error,
+          icon: Icons.delete_outline_rounded,
+        ),
+      if (p.isUnpaid)
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            visualDensity: VisualDensity.compact,
+          ),
+          onPressed: _busyProfileId == p.id ? null : () => _markPaid(p),
+          icon: const Icon(Icons.payments_outlined, size: 18),
+          label: const Text(S.markPaidCash),
+        ),
+      if (p.isUnpaid && giftCodes)
+        OutlinedButton.icon(
+          key: ValueKey('gift-code-${p.id}'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            visualDensity: VisualDensity.compact,
+            foregroundColor: AppColors.goldDark,
+          ),
+          onPressed: _busyProfileId == p.id ? null : () => _useGiftCode(p),
+          icon: const Icon(Icons.card_giftcard_rounded, size: 18),
+          label: const Text(S.useGiftCode),
+        ),
+    ];
+    if (extras.isEmpty) return tile;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -591,24 +660,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
             spacing: 8,
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (p.deleteRequestId != null)
-                StatusChip(
-                  label: S.wantsToDelete,
-                  color: theme.colorScheme.error,
-                  icon: Icons.delete_outline_rounded,
-                ),
-              if (p.isUnpaid)
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 36),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  onPressed: _busyProfileId == p.id ? null : () => _markPaid(p),
-                  icon: const Icon(Icons.payments_outlined, size: 18),
-                  label: const Text(S.markPaidCash),
-                ),
-            ],
+            children: extras,
           ),
         ),
       ],

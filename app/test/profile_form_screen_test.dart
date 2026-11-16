@@ -18,6 +18,7 @@ import 'package:matrimony_agents/ui/screens/profiles/profile_form_screen.dart';
 import 'package:matrimony_agents/ui/strings.dart';
 import 'package:matrimony_agents/ui/theme.dart';
 import 'package:matrimony_agents/ui/widgets/common.dart';
+import 'package:matrimony_agents/ui/widgets/searchable_lists.dart';
 import 'package:matrimony_agents/ui/widgets/step_header.dart';
 import 'package:provider/provider.dart';
 
@@ -705,6 +706,137 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       }
+    });
+  });
+
+  group('Profile form — searchable long lists (SPEC §9.23 E)', () {
+    const tenCommunities = [
+      'Reddy', 'Kamma', 'Kapu', 'Brahmin', 'Vysya', 'Velama', 'Yadava', 'Goud', 'Padmasali',
+      'Rajaka',
+    ];
+    const tenLanguages = [
+      'Telugu', 'English', 'Hindi', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali',
+      'Gujarati', 'Odia',
+    ];
+    MasterData longMasters() {
+      final base = Map<String, dynamic>.of({
+        'communities': [
+          for (var i = 0; i < tenCommunities.length; i++) {'id': i + 1, 'name': tenCommunities[i]},
+        ],
+        'languages': [
+          for (var i = 0; i < tenLanguages.length; i++) {'id': i + 1, 'name': tenLanguages[i]},
+        ],
+        'subcastes': [],
+        'professions': [
+          {'id': 1, 'name': 'Software Engineer'},
+        ],
+        'educations': [],
+        'marital_statuses': [
+          {'id': 1, 'name': 'Never married'},
+        ],
+        'countries': [
+          for (var i = 1; i <= 12; i++) {'id': i, 'name': i == 1 ? 'India' : 'Country $i'},
+        ],
+        'zodiac_signs': [
+          for (var i = 1; i <= 12; i++)
+            {'id': i, 'english_name': 'Sign $i', 'indian_name': 'Rasi $i'},
+        ],
+        'nakshatrams': [
+          {'id': 1, 'name': 'Ashwini'},
+        ],
+        'privacy_fields': _privacyFields,
+        'privacy_always_visible': ['Main photo', 'Age', 'Gender'],
+      });
+      return MasterData.fromJson(base);
+    }
+
+    testWidgets('community, languages known, rasi: picker sheets with search; short lists '
+        'keep the dropdown; long audience chips get a search field', (tester) async {
+      final h = await _openForm(
+        tester,
+        masters: longMasters(),
+        agent: _agent(communities: [1], admin: true),
+        size: const Size(360, 900),
+      );
+
+      // Short list (1 marital status): still the plain dropdown.
+      expect(find.byType(DropdownButtonFormField<int>), findsWidgets);
+      expect(find.byType(MasterSelectField), findsWidgets);
+
+      await tester.enterText(find.widgetWithText(TextFormField, 'Full name *'), 'Sravani Reddy');
+      await _tap(tester, _field('Date of birth *'));
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      // Community (10 for an admin): the sheet, searched, picked.
+      await _tap(tester, _field('Community *'));
+      expect(find.byType(PickerSheet), findsOneWidget);
+      await tester.enterText(
+        find.descendant(of: find.byType(PickerSheet), matching: find.byType(TextField)),
+        'pad',
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('pick-9')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pick-1')), findsNothing);
+      await _tap(tester, find.byKey(const ValueKey('pick-9')));
+      expect(find.byType(PickerSheet), findsNothing);
+      expect(find.text('Padmasali'), findsOneWidget);
+
+      // Languages known (10): the multi picker instead of chips.
+      await _tap(tester, _field(S.knownLanguages));
+      expect(find.byType(CheckboxListTile), findsWidgets);
+      await tester.enterText(
+        find.descendant(of: find.byType(PickerSheet), matching: find.byType(TextField)),
+        'tel',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('pick-1')));
+      await tester.pump();
+      await tester.enterText(
+        find.descendant(of: find.byType(PickerSheet), matching: find.byType(TextField)),
+        'eng',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('pick-2')));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, S.done));
+      await tester.pumpAndSettle();
+      expect(find.text('Telugu, English'), findsOneWidget);
+
+      // Step 3: rasi (12 signs) through the picker.
+      await tester.tap(_button('Next'));
+      await tester.pumpAndSettle();
+      await tester.tap(_button('Next'));
+      await tester.pumpAndSettle();
+      expect(find.text(_stepLine(3)), findsOneWidget);
+      await _tap(tester, _field(S.rasi));
+      await tester.enterText(
+        find.descendant(of: find.byType(PickerSheet), matching: find.byType(TextField)),
+        'sign 5',
+      );
+      await tester.pump();
+      await _tap(tester, find.byKey(const ValueKey('pick-5')));
+      expect(find.text('Rasi 5 / Sign 5'), findsOneWidget);
+
+      // Step 4: the audience communities (9 others) get a search field.
+      await tester.tap(_button('Next'));
+      await tester.pumpAndSettle();
+      await _tap(tester, find.byKey(const ValueKey('audience-selected')));
+      final audience = find.byKey(const ValueKey('audience-communities'));
+      expect(find.descendant(of: audience, matching: find.byType(TextField)), findsOneWidget);
+      await tester.enterText(find.descendant(of: audience, matching: find.byType(TextField)), 'red');
+      await tester.pump();
+      expect(find.descendant(of: audience, matching: find.byType(FilterChip)), findsOneWidget);
+      await _tap(tester, find.widgetWithText(FilterChip, 'Reddy'));
+
+      await tester.tap(_button('Save'));
+      await tester.pumpAndSettle();
+      final sent = h.profiles.created!;
+      expect(sent['community_id'], 9);
+      expect(sent['known_language_ids'], '1,2');
+      expect(sent['zodiac_id'], 5);
+      expect(sent['audience_community_ids'], '[1]');
+      expect(tester.takeException(), isNull);
     });
   });
 

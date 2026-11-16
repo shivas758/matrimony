@@ -30,6 +30,8 @@ import {
 } from '../lib/customers.js';
 import { deleteProfile } from '../lib/profiles.js';
 import { recordCashPayment } from '../lib/payments.js';
+import { applyGiftCodeForClient } from '../lib/giftCodes.js';
+import { refreshAgentApproval } from '../lib/agentApproval.js';
 
 export const clientsRouter = Router();
 export const interestsRouter = Router();
@@ -196,6 +198,28 @@ clientsRouter.post(
     if (!Number.isInteger(profileId) || profileId <= 0) throw notFound('profile_not_found', 'Profile not found');
     const body = parse(markPaidSchema, req.body ?? {});
     await recordCashPayment({ profileId, customerId: id, agentId: req.agent.id, note: body.note });
+    res.json({ client: clientRow(await loadClient(id), { admin: req.agent.is_admin }) });
+  }),
+);
+
+// POST /api/clients/:id/profiles/:profileId/gift-code {code?} — spends one of the
+// client's agent's gift codes (the given one, or the oldest unused): the client
+// is approved and the profile goes live free (SPEC §9.23 B).
+const clientGiftSchema = z.object({
+  code: z.preprocess((v) => (v === '' || v === null ? undefined : v), z.string().trim().max(20).optional()),
+});
+clientsRouter.post(
+  '/:id/profiles/:profileId/gift-code',
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    await loadClientFor(id, req.agent);
+    const profileId = Number(req.params.profileId);
+    if (!Number.isInteger(profileId) || profileId <= 0) throw notFound('profile_not_found', 'Profile not found');
+    const body = parse(clientGiftSchema, req.body ?? {});
+    const { agentId } = await tx((client) =>
+      applyGiftCodeForClient(client, { customerId: id, profileId, codeText: body.code ?? null }),
+    );
+    await refreshAgentApproval(agentId);
     res.json({ client: clientRow(await loadClient(id), { admin: req.agent.is_admin }) });
   }),
 );

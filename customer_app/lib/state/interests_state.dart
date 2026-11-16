@@ -66,6 +66,14 @@ class InterestsState extends ChangeNotifier {
     }
   }
 
+  /// A profile I just blocked (SPEC §9.22 B): its rows go at once; the
+  /// caller reloads to get the server's view (pending ones are withdrawn).
+  void removeProfile(int profileId) {
+    final before = _interests.length;
+    _interests = _interests.where((i) => i.profile?.id != profileId).toList();
+    if (_interests.length != before) notifyListeners();
+  }
+
   /// Withdraws a pending interest and replaces the row in place. Throws
   /// [ApiException] so the screen can show the message.
   Future<Interest> withdraw(int interestId) async {

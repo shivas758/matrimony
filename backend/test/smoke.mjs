@@ -244,7 +244,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- rule 2
-  step('3. Signup creates a PENDING agent (rule 2) — after the OTP round trip (SPEC §9.1)');
+  step('3. Signup creates an ACTIVE agent who is NOT approved yet (rule 2, SPEC §9.23 A) — after the OTP round trip (SPEC §9.1)');
   const aPhone = randomPhone('9');
   const signupA = await signupAgent({
     full_name: 'Agent A',
@@ -254,27 +254,29 @@ async function main() {
     community_ids: [COMM_A],
   });
   check('signup 201', 201, signupA.status);
-  check('new agent is pending', 'pending', signupA.body?.agent?.status);
+  check('new agent is active (no admin step)', 'active', signupA.body?.agent?.status);
+  check('… but not approved yet', false, signupA.body?.agent?.approved);
+  check('… with 0 live clients of 10', '0/10', `${signupA.body?.agent?.live_clients}/${signupA.body?.agent?.approval_clients}`);
+  check('… and 10 free gift codes', 10, signupA.body?.agent?.gift_codes?.unused);
   const A = signupA.body?.token;
+  check('a not-approved agent CAN list profiles (own work only)', 200, (await api('GET', '/api/profiles', A)).status);
+  check('/auth/me 200', 200, (await api('GET', '/api/auth/me', A)).status);
 
-  const blocked = await api('GET', '/api/profiles', A);
-  check('pending agent blocked from profiles', 403, blocked.status);
-  check('error code is account_pending', 'account_pending', blocked.body?.error);
-  const meWhilePending = await api('GET', '/api/auth/me', A);
-  check('pending agent CAN read /auth/me (waiting screen)', 200, meWhilePending.status);
-
-  step('4. Admin activates agent A');
-  const pendingList = await api('GET', '/api/admin/agents?status=pending', ADMIN);
-  const aRow = pendingList.body?.agents?.find((x) => x.phone === aPhone);
-  assertTrue('agent A appears in the pending list', Boolean(aRow));
+  step('4. Admin approves agent A by hand (SPEC §9.23 A)');
+  const unapprovedList = await api('GET', '/api/admin/agents?approved=false', ADMIN);
+  const aRow = unapprovedList.body?.agents?.find((x) => x.phone === aPhone);
+  assertTrue('agent A appears in the not-approved list', Boolean(aRow));
   if (!aRow) {
     console.log(red('\nCannot continue without the new agent. Is the admin list route working?'));
     process.exit(1);
   }
-  const activated = await api('POST', `/api/admin/agents/${aRow.id}/activate`, ADMIN);
-  check('activate 200', 200, activated.status);
-  check('status now active', 'active', activated.body?.agent?.status);
-  check('agent A can now list profiles', 200, (await api('GET', '/api/profiles', A)).status);
+  check('row says not approved, 10 unused codes', 'false|10', `${aRow.approved}|${aRow.gift_codes_unused}`);
+  const approvedA = await api('POST', `/api/admin/agents/${aRow.id}/approve`, ADMIN);
+  check('approve 200', 200, approvedA.status);
+  check('agent now approved', true, approvedA.body?.agent?.approved);
+  check('approving twice 409 already_approved', 'already_approved', (await api('POST', `/api/admin/agents/${aRow.id}/approve`, ADMIN)).body?.error);
+  check('/auth/me says approved', true, (await api('GET', '/api/auth/me', A)).body?.agent?.approved);
+  check('agent A can list profiles', 200, (await api('GET', '/api/profiles', A)).status);
 
   // ---------------------------------------------------------------- other agents
   step('5. Agent B in a DIFFERENT community, agent C in the same one');
@@ -284,7 +286,7 @@ async function main() {
   });
   const B = signupB.body?.token;
   const B_ID = signupB.body?.agent?.id;
-  check('activate B', 200, (await api('POST', `/api/admin/agents/${B_ID}/activate`, ADMIN)).status);
+  check('approve B', 200, (await api('POST', `/api/admin/agents/${B_ID}/approve`, ADMIN)).status);
 
   const cPhone = randomPhone('7');
   const signupC = await signupAgent({
@@ -292,7 +294,7 @@ async function main() {
   });
   const C = signupC.body?.token;
   const C_ID = signupC.body?.agent?.id;
-  check('activate C', 200, (await api('POST', `/api/admin/agents/${C_ID}/activate`, ADMIN)).status);
+  check('approve C', 200, (await api('POST', `/api/admin/agents/${C_ID}/approve`, ADMIN)).status);
 
   // ---------------------------------------------------------------- upload
   step('6. Agent A uploads a profile with a photo');
@@ -867,7 +869,7 @@ async function main() {
   const signupD = await signupAgent({
     full_name: 'Agent D', phone: dPhone, password: 'secret123', agency_name: 'D Bureau', community_ids: [COMM_A],
   });
-  await api('POST', `/api/admin/agents/${signupD.body?.agent?.id}/activate`, ADMIN);
+  await api('POST', `/api/admin/agents/${signupD.body?.agent?.id}/approve`, ADMIN);
   const D = signupD.body?.token;
   const D_ID = signupD.body?.agent?.id;
   check('another agent in the community cannot see the held profile', 404, await seen(D));
@@ -1060,8 +1062,10 @@ async function main() {
     full_name: 'Agent X', phone: xPhone, password: 'secret123', agency_name: 'X Bureau', community_ids: [COMM_A], phone_verification_token: X_TOKEN,
   });
   check('signup with the proof 201', 201, signupX.status);
-  check('agent X is pending (rule 2)', 'pending', signupX.body?.agent?.status);
-  const X_ID = signupX.body?.agent?.id; // stays pending: the "inactive agent" fixture below
+  check('agent X is active at once (rule 2, SPEC §9.23 A)', 'active', signupX.body?.agent?.status);
+  const X_ID = signupX.body?.agent?.id;
+  // Suspended: the "inactive agent" fixture below (signups are never pending any more).
+  check('admin suspends X', 'suspended', (await api('POST', `/api/admin/agents/${X_ID}/suspend`, ADMIN)).body?.agent?.status);
   check('same proof again 409 phone_taken', 409, (await api('POST', '/api/auth/signup', null, {
     full_name: 'Agent X', phone: xPhone, password: 'secret123', community_ids: [COMM_A], phone_verification_token: X_TOKEN,
   })).status);
@@ -1962,7 +1966,7 @@ async function main() {
   });
   check('agent E signup 201', 201, signupE.status);
   const E = signupE.body?.token;
-  check('admin activates E', 200, (await api('POST', `/api/admin/agents/${signupE.body?.agent?.id}/activate`, ADMIN)).status);
+  check('admin approves E', 200, (await api('POST', `/api/admin/agents/${signupE.body?.agent?.id}/approve`, ADMIN)).status);
   const mPhone = randomPhone('6');
   const signupM = await signupCustomer({ full_name: 'Meena Customer', phone: mPhone, agent_phone: ePhone });
   check('customer M signup 201', 201, signupM.status);
@@ -2070,10 +2074,17 @@ async function main() {
   check('… as a JPEG', 'image/jpeg', tpPrimary.headers.get('content-type'));
   check('guest cannot load the second photo', 403, (await raw(`${BASE}/api/customer/photos/${TP.photos[1].id}`, { token: G })).status);
 
-  // Profiles need an agent first.
-  const gNoAgent = await apiForm('POST', '/api/customer/my-profiles', G, { full_name: 'Too Early', gender: 'groom', dob: '1994-01-01', community_id: COMM_A });
-  check('register before choosing an agent 403', 403, gNoAgent.status);
-  check('… agent_required', 'agent_required', gNoAgent.body?.error);
+  // SPEC §9.23 C: the whole profile first, the agent at publish time.
+  const gNoAgent = await apiForm('POST', '/api/customer/my-profiles', G, { full_name: 'Too Early', gender: 'groom', dob: '1994-01-01', community_id: COMM_A, status: 'active' });
+  check('a guest registers a profile before choosing an agent 201', 201, gNoAgent.status);
+  check('… hidden', 'hidden', gNoAgent.body?.profile?.status);
+  check('… no ID without an agent', null, gNoAgent.body?.profile?.profile_code);
+  check('… payment_pending', 'payment_pending', gNoAgent.body?.profile?.visibility);
+  check('a guest edits it 200', 'Draft', (await api('PATCH', `/api/customer/my-profiles/${gNoAgent.body?.profile?.id}`, G, { about: 'Draft' })).body?.profile?.about);
+  check('paying needs an agent first 403', 'agent_required', (await api('POST', `/api/customer/my-profiles/${gNoAgent.body?.profile?.id}/payment`, G)).body?.error);
+  check('… nobody\'s upload: agents cannot open it', 404, (await api('GET', `/api/profiles/${gNoAgent.body?.profile?.id}`, C)).status);
+  check('… admins see it (hidden, no uploader)', null, (await api('GET', `/api/profiles/${gNoAgent.body?.profile?.id}`, ADMIN)).body?.profile?.uploaded_by);
+  check('delete the draft 200', 200, (await api('DELETE', `/api/customer/my-profiles/${gNoAgent.body?.profile?.id}`, G)).status);
 
   // Directory is open to guests; linking an agent.
   const gDir = await api('GET', '/api/customer/agents', G);
@@ -2399,7 +2410,7 @@ async function main() {
   const W1 = w1.body?.token;
   const W1_ID = w1.body?.agent?.id;
   const W1_CODE = w1.body?.agent?.agent_code;
-  assertTrue('a new (still pending) agent already has a code of their state', /^SK\d{1,3}[A-Z]+$/.test(W1_CODE || ''), `got ${W1_CODE}`);
+  assertTrue('a new agent already has a code of their state', /^SK\d{1,3}[A-Z]+$/.test(W1_CODE || ''), `got ${W1_CODE}`);
   check('… and the state on the agent object', 'Sikkim', w1.body?.agent?.state?.name);
   const w2Phone = randomPhone('9');
   const w2 = await signupAgent({ full_name: 'Wed Two', phone: w2Phone, password: 'secret123', agency_name: 'Two Bureau', community_ids: [COMM_A], state_id: SK });
@@ -2414,8 +2425,7 @@ async function main() {
   const badState = await signupAgent({ full_name: 'No Such State', phone: randomPhone('9'), password: 'secret123', community_ids: [COMM_A], state_id: 999999 });
   check('unknown state 400', 400, badState.status);
   check('… invalid_state', 'invalid_state', badState.body?.error);
-  check('a pending agent cannot use /my/state', 403, (await api('POST', '/api/my/state', W1, { state_id: TN })).status);
-  for (const id of [W1_ID, W2_ID, W3_ID]) await api('POST', `/api/admin/agents/${id}/activate`, ADMIN);
+  for (const id of [W1_ID, W2_ID, W3_ID]) await api('POST', `/api/admin/agents/${id}/approve`, ADMIN);
   check('login returns the code', W1_CODE, (await api('POST', '/api/auth/login', null, { phone: w1Phone, password: 'secret123' })).body?.agent?.agent_code);
   check('/auth/me returns the code', W1_CODE, (await api('GET', '/api/auth/me', W1)).body?.agent?.agent_code);
   const w1Again = await api('POST', '/api/my/state', W1, { state_id: TN });
@@ -2826,6 +2836,195 @@ async function main() {
   const newClientNote = (await api('GET', '/api/notifications', W1)).body?.items?.find((i) => i.type === 'client_pending' && i.customer_id === CG_ID);
   assertTrue('notifications name the Wedbook Matrimony app', (await api('GET', '/api/notifications', W2)).body?.items?.concat(newClientNote ?? []).every((i) => !/MILI|Mediator|Gandharva/.test(`${i.title} ${i.body}`)));
 
+  // ---------------------------------------------------------------- SPEC §9.23
+  {
+  step('47. Gift codes, approved agents at 10 live clients, publish last, recommendations, preview (SPEC §9.23)');
+  // A brand-new agent N: active at once, not approved, ten free codes.
+  const nPhone = randomPhone('9');
+  const signupN = await signupAgent({
+    full_name: 'Nanda Newcomer', phone: nPhone, password: 'secret123', agency_name: 'N Bureau', community_ids: [COMM_A], state_id: SK,
+  });
+  check('agent N signup 201', 201, signupN.status);
+  const N = signupN.body?.token;
+  const N_ID = signupN.body?.agent?.id;
+  const N_CODE = signupN.body?.agent?.agent_code;
+  check('N is active, not approved', 'active|false', `${signupN.body?.agent?.status}|${signupN.body?.agent?.approved}`);
+  check('N can set their city', 200, (await api('PATCH', '/api/my/account', N, { city: 'Mysuru' })).status);
+  const nCodes = await api('GET', '/api/my/gift-codes', N);
+  check('gift codes 200', 200, nCodes.status);
+  check('… 10 unused of 10', '10|0|10', `${nCodes.body?.unused}|${nCodes.body?.used}|${nCodes.body?.total}`);
+  assertTrue('… codes look like WB-XXXXXX (no 0/O/1/I)', nCodes.body?.gift_codes?.every((g) => /^WB-[2-9A-HJ-NP-Z]{6}$/.test(g.code)));
+  assertTrue('… the share text names the code and the agent code', nCodes.body?.gift_codes?.[0]?.share_text?.includes(nCodes.body?.gift_codes?.[0]?.code) && nCodes.body?.gift_codes?.[0]?.share_text?.includes(N_CODE));
+  const giftQueue = (nCodes.body?.gift_codes ?? []).map((g) => g.code);
+  check('/auth/me agrees', 10, (await api('GET', '/api/auth/me', N)).body?.agent?.gift_codes?.unused);
+
+  // Not approved: only own work. A's new bride is visible to C (approved), not to N.
+  const elsewhere = await apiForm('POST', '/api/profiles', A, {
+    full_name: 'Elsewhere Bride', gender: 'bride', dob: '1997-05-05', community_id: COMM_A, status: 'active',
+  }, [{ buffer: TINY_JPEG, name: 'e.jpg', type: 'image/jpeg' }]);
+  const EB = elsewhere.body?.profile?.id;
+  check('A uploads a bride in community A 201', 201, elsewhere.status);
+  check('approved C sees it', 200, (await api('GET', `/api/profiles/${EB}`, C)).status);
+  check('not-approved N does not', 404, (await api('GET', `/api/profiles/${EB}`, N)).status);
+  check('… nor in the list', 0, (await api('GET', '/api/profiles?q=Elsewhere', N)).body?.profiles?.length);
+  check('… nor its photo', 404, (await raw(`${BASE}/api/photos/${elsewhere.body?.profile?.photos?.[0]?.id}`, { token: N })).status);
+  check('… nor a contact request', 404, (await api('POST', `/api/profiles/${EB}/contact-request`, N, {})).status);
+  const nOwn = await apiForm('POST', '/api/profiles', N, { full_name: 'N Own Groom', gender: 'groom', dob: '1993-03-03', community_id: COMM_A, status: 'active' });
+  check('N uploads their own 201', 201, nOwn.status);
+  check('… and sees it', 1, (await api('GET', '/api/profiles?mine=true', N)).body?.profiles?.length);
+
+  // A guest fills in everything first (with a native place), then looks for an agent.
+  const g1Phone = randomPhone('6');
+  const g1 = await signupCustomer({ full_name: 'Gift One', phone: g1Phone });
+  const G1 = g1.body?.token;
+  check('guest G1 201', 'guest', g1.body?.customer?.status);
+  check('no profile → no recommendations', 0, (await api('GET', '/api/customer/agents/recommended', G1)).body?.agents?.length);
+  const g1p = await apiForm('POST', '/api/customer/my-profiles', G1, {
+    full_name: 'Gift One Groom', gender: 'groom', dob: '1993-09-09', community_id: COMM_A, city: 'Mysuru', state: 'Karnataka', father_name: 'Gift Father',
+  }, [{ buffer: TINY_JPEG, name: 'g.jpg', type: 'image/jpeg' }]);
+  check('a guest registers the whole profile 201', 201, g1p.status);
+  const G1P = g1p.body?.profile?.id;
+  const rec1 = await api('GET', '/api/customer/agents/recommended', G1);
+  check('recommended 200', 200, rec1.status);
+  check('… based on my community', COMM_A, rec1.body?.based_on?.community?.id);
+  check('… and my native place', 'Mysuru|Karnataka', `${rec1.body?.based_on?.city}|${rec1.body?.based_on?.state}`);
+  assertTrue('… only agents serving my community', rec1.body?.agents?.length > 0 && rec1.body.agents.every((a) => a.communities.some((c) => c.id === COMM_A)));
+  assertTrue('… each with live_clients and a match', rec1.body?.agents?.every((a) => typeof a.live_clients === 'number' && ['city', 'state', 'community'].includes(a.match)));
+  check('… never a not-approved agent', false, rec1.body?.agents?.some((a) => a.id === N_ID));
+  check('the directory skips N too', false, (await api('GET', '/api/customer/agents', G1)).body?.agents?.some((a) => a.id === N_ID));
+  assertTrue('directory rows carry live_clients', (await api('GET', '/api/customer/agents', G1)).body?.agents?.every((a) => typeof a.live_clients === 'number'));
+
+  // Preview: before / after an accepted interest.
+  check('hide my name 200', 200, (await api('PATCH', `/api/customer/my-profiles/${G1P}`, G1, { hidden_fields: ['name'] })).status);
+  const pvBefore = (await api('GET', `/api/customer/my-profiles/${G1P}/preview`, G1)).body?.profile;
+  check('preview (before) masks the name', `Profile ${G1P}`, pvBefore?.full_name);
+  check('… lists it as masked', true, pvBefore?.masked_fields?.includes('name'));
+  check('… no on-request fields', false, 'father_name' in (pvBefore ?? {}));
+  check('… no ID, not mine, flagged preview', 'false|false|true', `${'profile_code' in (pvBefore ?? {})}|${pvBefore?.is_mine}|${pvBefore?.preview}`);
+  check('… contact_access none', 'none', pvBefore?.contact_access);
+  const pvAfter = (await api('GET', `/api/customer/my-profiles/${G1P}/preview?as=after`, G1)).body?.profile;
+  check('preview (after) shows the name', 'Gift One Groom', pvAfter?.full_name);
+  check('… and the on-request fields', 'Gift Father|Mysuru', `${pvAfter?.father_name}|${pvAfter?.city}`);
+  check('… as an accepted interest', 'granted|accepted', `${pvAfter?.contact_access}|${pvAfter?.interest?.status}`);
+  check('… still no ID', false, 'profile_code' in (pvAfter ?? {}));
+  check('bad preview mode 400', 400, (await api('GET', `/api/customer/my-profiles/${G1P}/preview?as=sideways`, G1)).status);
+  check('someone else\'s profile 404', 404, (await api('GET', `/api/customer/my-profiles/${G1P}/preview`, K1)).status);
+  check('show my name again', 200, (await api('PATCH', `/api/customer/my-profiles/${G1P}`, G1, { hidden_fields: [] })).status);
+
+  // Redeem N's code: linked to N, approved, live, free.
+  check('a wrong code 404', 'gift_code_not_found', (await api('POST', `/api/customer/my-profiles/${G1P}/gift-code`, G1, { code: 'WB-222222' })).body?.error);
+  check('garbage 404', 'gift_code_not_found', (await api('POST', `/api/customer/my-profiles/${G1P}/gift-code`, G1, { code: 'hello' })).body?.error);
+  check('no code 400', 400, (await api('POST', `/api/customer/my-profiles/${G1P}/gift-code`, G1, {})).status);
+  const code1 = giftQueue.shift();
+  const typed = code1.slice(3).toLowerCase().split('').join(' '); // "k 7 m 2 q x": case, spaces, no prefix
+  const red1 = await api('POST', `/api/customer/my-profiles/${G1P}/gift-code`, G1, { code: typed });
+  check('redeem 200 (any case, spaces, no prefix)', 200, red1.status);
+  check('… linked to N', N_ID, red1.body?.customer?.agent?.id);
+  check('… approved at once', 'active', red1.body?.customer?.status);
+  check('… full access', 'full', red1.body?.customer?.access);
+  check('… live', 'live|active', `${red1.body?.profile?.visibility}|${red1.body?.profile?.status}`);
+  check('… paid by gift code', 'true|gift', `${red1.body?.profile?.paid}|${red1.body?.profile?.paid_via}`);
+  assertTrue('… the ID comes from N', new RegExp(`^GN-${N_CODE}-[A-Z]\\d{3}$`).test(red1.body?.profile?.profile_code || ''), `got ${red1.body?.profile?.profile_code}`);
+  check('… N\'s directory card shows 1 client', 1, red1.body?.customer?.agent?.live_clients);
+  check('a paid profile needs no code 409', 'already_paid', (await api('POST', `/api/customer/my-profiles/${G1P}/gift-code`, G1, { code: code1 })).body?.error);
+  const nAfter1 = await api('GET', '/api/my/gift-codes', N);
+  check('N: 9 unused, 1 used', '9|1', `${nAfter1.body?.unused}|${nAfter1.body?.used}`);
+  const usedRow = nAfter1.body?.gift_codes?.find((g) => g.code === code1);
+  check('… the used one names the customer', 'used|Gift One', `${usedRow?.status}|${usedRow?.customer?.full_name}`);
+  check('N\'s client list has G1 active', 'active', (await api('GET', '/api/clients', N)).body?.clients?.find((c) => c.phone === g1Phone)?.status);
+  check('… the client row says gift', 'gift', (await api('GET', '/api/clients', N)).body?.clients?.find((c) => c.phone === g1Phone)?.profiles?.[0]?.paid_via);
+  check('N: 1 live client, still not approved', '1|false', await api('GET', '/api/auth/me', N).then((r) => `${r.body?.agent?.live_clients}|${r.body?.agent?.approved}`));
+  assertTrue('N is told the code was used', (await api('GET', '/api/notifications', N)).body?.items?.some((i) => i.type === 'gift_code_used' && i.body.includes(code1)));
+  const g1Notes = (await api('GET', '/api/customer/notifications', G1)).body?.items;
+  assertTrue('G1 sees "Gift code applied", never ₹0', g1Notes?.some((i) => i.title === 'Gift code applied') && !JSON.stringify(g1Notes).includes('₹0'));
+
+  // A not-approved agent follows their own clients' interests.
+  check('G1 is interested in A\'s bride', 201, (await api('POST', `/api/customer/profiles/${EB}/interest`, G1, {})).status);
+  check('… now N may open that profile', 200, (await api('GET', `/api/profiles/${EB}`, N)).status);
+  check('… and A sees G1\'s profile (who is asking)', 200, (await api('GET', `/api/profiles/${G1P}`, A)).status);
+
+  // An active customer of another agent cannot use N's code; their own agent applies one.
+  const h2Phone = randomPhone('7');
+  const h2 = await signupCustomer({ full_name: 'Hari Two', phone: h2Phone, agent_phone: cPhone });
+  const H2 = h2.body?.token;
+  const H2_ID = h2.body?.customer?.id;
+  check('C approves H2', 200, (await api('POST', `/api/clients/${H2_ID}/approve`, C)).status);
+  const h2p = await apiForm('POST', '/api/customer/my-profiles', H2, { full_name: 'Hari Two Bride', gender: 'bride', dob: '1998-08-08', community_id: COMM_A });
+  const H2P = h2p.body?.profile?.id;
+  check('another agent\'s code 409', 'gift_code_other_agent', (await api('POST', `/api/customer/my-profiles/${H2P}/gift-code`, H2, { code: giftQueue[0] })).body?.error);
+  check('a code that is not C\'s 404', 'gift_code_not_found', (await api('POST', `/api/clients/${H2_ID}/profiles/${H2P}/gift-code`, C, { code: giftQueue[0] })).body?.error);
+  check('B cannot touch C\'s client', 403, (await api('POST', `/api/clients/${H2_ID}/profiles/${H2P}/gift-code`, B, {})).status);
+  const cGift = await api('POST', `/api/clients/${H2_ID}/profiles/${H2P}/gift-code`, C, {});
+  check('C applies one of their codes 200', 200, cGift.status);
+  check('… the profile is paid by gift', 'gift', cGift.body?.client?.profiles?.[0]?.paid_via);
+  check('… and live', 'live', cGift.body?.client?.profiles?.[0]?.visibility);
+  check('… twice 409 already_paid', 'already_paid', (await api('POST', `/api/clients/${H2_ID}/profiles/${H2P}/gift-code`, C, {})).body?.error);
+  check('C has 9 left', 9, (await api('GET', '/api/my/gift-codes', C)).body?.unused);
+
+  // A pending customer of B switches to N by redeeming N's code.
+  const h3Phone = randomPhone('8');
+  const h3 = await signupCustomer({ full_name: 'Hema Three', phone: h3Phone, agent_phone: bPhone });
+  const H3 = h3.body?.token;
+  check('H3 pending with B', 'pending', h3.body?.customer?.status);
+  const h3p = await apiForm('POST', '/api/customer/my-profiles', H3, { full_name: 'Hema Three Bride', gender: 'bride', dob: '1998-01-01', community_id: COMM_A });
+  check('a used code 409', 'gift_code_used', (await api('POST', `/api/customer/my-profiles/${h3p.body?.profile?.id}/gift-code`, H3, { code: code1 })).body?.error);
+  check('… and H3 stays with B', bPhone, (await api('GET', '/api/customer/auth/me', H3)).body?.customer?.agent?.phone);
+  const red3 = await api('POST', `/api/customer/my-profiles/${h3p.body?.profile?.id}/gift-code`, H3, { code: giftQueue.shift() });
+  check('a pending customer moves to the code\'s agent', `${N_ID}|active`, `${red3.body?.customer?.agent?.id}|${red3.body?.customer?.status}`);
+  check('B no longer lists H3', 0, (await api('GET', `/api/clients?q=${h3Phone}`, B)).body?.clients?.length);
+
+  // Eight more families → N's ten → approved automatically.
+  let lastRedeem = null;
+  for (let i = 0; i < 8; i++) {
+    const ph = randomPhone('6');
+    const cu = await signupCustomer({ full_name: `Batch ${i}`, phone: ph });
+    const pr = await apiForm('POST', '/api/customer/my-profiles', cu.body?.token, { full_name: `Batch Bride ${i}`, gender: 'bride', dob: '1998-02-02', community_id: COMM_A });
+    lastRedeem = await api('POST', `/api/customer/my-profiles/${pr.body?.profile?.id}/gift-code`, cu.body?.token, { code: giftQueue.shift() });
+    if (i === 6) check('9 live clients: not approved yet', '9|false', await api('GET', '/api/auth/me', N).then((r) => `${r.body?.agent?.live_clients}|${r.body?.agent?.approved}`));
+  }
+  check('the tenth redeem 200', 200, lastRedeem?.status);
+  const nMe = (await api('GET', '/api/auth/me', N)).body?.agent;
+  check('10 live clients → approved automatically', '10|true', `${nMe?.live_clients}|${nMe?.approved}`);
+  assertTrue('… stamped now', nMe?.approved_at && Date.now() - Date.parse(nMe.approved_at) < 120000);
+  check('… all ten codes used', '0|10', `${nMe?.gift_codes?.unused}|${nMe?.gift_codes?.used}`);
+  check('N now sees A\'s bride', 200, (await api('GET', `/api/profiles/${EB}`, N)).status);
+  assertTrue('… and in the list', (await api('GET', '/api/profiles?q=Elsewhere', N)).body?.profiles?.some((p) => p.id === EB));
+  assertTrue('N is told', (await api('GET', '/api/notifications', N)).body?.items?.some((i) => i.type === 'agent_approved'));
+  const dirN = (await api('GET', '/api/customer/agents', G1)).body?.agents?.find((a) => a.id === N_ID);
+  check('N is in the directory with 10 clients', 10, dirN?.live_clients);
+  const g2 = await signupCustomer({ full_name: 'Gift Two', phone: randomPhone('6') });
+  await apiForm('POST', '/api/customer/my-profiles', g2.body?.token, { full_name: 'Gift Two Groom', gender: 'groom', dob: '1992-02-02', community_id: COMM_A, city: ' mysuru ', state: 'Karnataka' });
+  const rec2 = (await api('GET', '/api/customer/agents/recommended', g2.body?.token)).body?.agents;
+  check('recommended: N as a same-city match', 'city', rec2?.find((a) => a.id === N_ID)?.match);
+  const firstOther = rec2?.findIndex((a) => a.match !== 'city') ?? -1;
+  assertTrue('… same city first, then state, then the rest', rec2?.every((a, i) => i === 0 || ['city', 'state', 'community'].indexOf(rec2[i - 1].match) <= ['city', 'state', 'community'].indexOf(a.match)) && (firstOther === -1 || rec2.findIndex((a) => a.id === N_ID) < firstOther));
+  const admRow = (await api('GET', `/api/admin/agents?q=${nPhone}`, ADMIN)).body?.agents?.[0];
+  check('admin row: approved, 10 clients, 0 codes left', 'true|10|0', `${admRow?.approved}|${admRow?.live_clients}|${admRow?.gift_codes_unused}`);
+  check('?approved=true lists N', true, (await api('GET', '/api/admin/agents?approved=true', ADMIN)).body?.agents?.some((a) => a.id === N_ID));
+  check('?approved=false does not', false, (await api('GET', '/api/admin/agents?approved=false', ADMIN)).body?.agents?.some((a) => a.id === N_ID));
+  assertTrue('stats count not-approved agents', typeof (await api('GET', '/api/admin/stats', ADMIN)).body?.stats?.unapproved_agents === 'number');
+  check('already approved 409', 'already_approved', (await api('POST', `/api/admin/agents/${N_ID}/approve`, ADMIN)).body?.error);
+
+  // Once approved, always approved; out of codes → the admin adds more.
+  check('N hides one client profile', 200, (await api('PATCH', `/api/profiles/${G1P}`, N, { status: 'hidden' })).status);
+  check('… 9 live, still approved', '9|true', await api('GET', '/api/auth/me', N).then((r) => `${r.body?.agent?.live_clients}|${r.body?.agent?.approved}`));
+  const h11 = await signupCustomer({ full_name: 'Late Client', phone: randomPhone('7'), agent_phone: nPhone });
+  const H11_ID = h11.body?.customer?.id;
+  const h11p = await apiForm('POST', '/api/customer/my-profiles', h11.body?.token, { full_name: 'Late Bride', gender: 'bride', dob: '1999-09-09', community_id: COMM_A });
+  check('no codes left 409', 'no_gift_codes', (await api('POST', `/api/clients/${H11_ID}/profiles/${h11p.body?.profile?.id}/gift-code`, N, {})).body?.error);
+  check('only admins add codes', 403, (await api('POST', `/api/admin/agents/${N_ID}/gift-codes`, N, { count: 5 })).status);
+  check('count 0 400', 400, (await api('POST', `/api/admin/agents/${N_ID}/gift-codes`, ADMIN, { count: 0 })).status);
+  const more = await api('POST', `/api/admin/agents/${N_ID}/gift-codes`, ADMIN, { count: 5 });
+  check('admin adds 5 → 201', '201|5', `${more.status}|${more.body?.gift_codes?.unused}`);
+  check('N applies one for the pending client', 'live', (await api('POST', `/api/clients/${H11_ID}/profiles/${h11p.body?.profile?.id}/gift-code`, N, {})).body?.client?.profiles?.[0]?.visibility);
+
+  // Wrong codes are rate-limited per customer.
+  const z = await signupCustomer({ full_name: 'Guessing Guest', phone: randomPhone('6') });
+  const zp = await apiForm('POST', '/api/customer/my-profiles', z.body?.token, { full_name: 'Guess Groom', gender: 'groom', dob: '1990-01-01', community_id: COMM_A });
+  for (let i = 0; i < 10; i++) await api('POST', `/api/customer/my-profiles/${zp.body?.profile?.id}/gift-code`, z.body?.token, { code: 'WB-ZZZZZZ' });
+  check('the 11th wrong code 429', 'too_many_attempts', (await api('POST', `/api/customer/my-profiles/${zp.body?.profile?.id}/gift-code`, z.body?.token, { code: 'WB-ZZZZZZ' })).body?.error);
+
+  }
   // ---------------------------------------------------------------- summary
   const total = pass + failures.length;
   console.log(`\n${bold(`====== ${pass}/${total} passed ======`)}`);

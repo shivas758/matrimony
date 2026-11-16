@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../state/auth_state.dart';
 import '../../../state/profile_filters.dart';
 import '../../../state/profiles_state.dart';
 import '../../strings.dart';
+import '../../widgets/approval_banner.dart';
 import '../../widgets/common.dart';
 import 'filter_sheet.dart';
 import 'profile_card.dart';
@@ -23,6 +25,10 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
   final _scroll = ScrollController();
   final _search = TextEditingController();
   bool _searching = false;
+
+  /// Last seen "not approved yet" state (SPEC §9.23 A): when it flips to
+  /// approved, the list widens to every profile of my communities.
+  bool? _wasNotApproved;
 
   @override
   void initState() {
@@ -63,6 +69,13 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
     final state = context.watch<ProfilesState>();
     final theme = Theme.of(context);
     final activeCount = state.filters.activeCount;
+    final notApproved = context.select<AuthState, bool>((a) => showsApprovalBanner(a.agent));
+    if (_wasNotApproved == true && !notApproved) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<ProfilesState>().refresh();
+      });
+    }
+    _wasNotApproved = notApproved;
 
     return Scaffold(
       appBar: AppBar(
@@ -118,6 +131,9 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
             onSavePreset: activeCount == 0 ? null : () => _promptSavePreset(context),
             onDeletePreset: (name) => context.read<ProfilesState>().deletePreset(name),
           ),
+          // SPEC §9.23 F: until 10 clients are live, only my own work shows.
+          if (notApproved)
+            const ApprovalBanner(margin: EdgeInsets.fromLTRB(12, 0, 12, 4)),
           Expanded(child: _body(state, theme)),
         ],
       ),

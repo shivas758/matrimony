@@ -33,7 +33,7 @@ customerNotificationsRouter.get(
 export async function customerFeed(me) {
   {
 
-    const [account, unpaid, expiring, interests, payments, changes, deletes] = await Promise.all([
+    const [account, unpaid, expiring, interests, payments, changes, deletes, rejectedPays] = await Promise.all([
       one(
         `SELECT cu.status, cu.approved_at, cu.updated_at, a.full_name AS agent_name
            FROM customers cu LEFT JOIN agents a ON a.id = cu.agent_id WHERE cu.id = $1`,
@@ -83,6 +83,14 @@ export async function customerFeed(me) {
         `SELECT id, profile_id, profile_name, status, decided_at FROM profile_delete_requests
           WHERE customer_id = $1 AND status IN ('approved','rejected') AND decided_at IS NOT NULL
           ORDER BY decided_at DESC LIMIT $2`,
+        [me, HISTORY_LIMIT],
+      ),
+      // UPI claims an admin could not verify (SPEC §9.20 B).
+      many(
+        `SELECT id, profile_id, utr, reject_reason, verified_at FROM payments
+          WHERE customer_id = $1 AND provider = 'upi' AND status = 'failed'
+            AND reject_reason IS NOT NULL AND verified_at IS NOT NULL
+          ORDER BY verified_at DESC LIMIT $2`,
         [me, HISTORY_LIMIT],
       ),
     ]);
@@ -151,10 +159,14 @@ export async function customerFeed(me) {
         type: 'payment_received',
         id: r.id,
         my_profile_id: r.profile_id ?? undefined,
-        title: 'Payment received',
-        body: `₹${r.amount_paise / 100} ${r.provider === 'cash' ? 'received in cash by your agent' : 'paid'}${
-          r.full_name ? ` for ${r.full_name}` : ''
-        }`,
+        // A gift code (SPEC §9.23 B) moves no money.
+        title: r.provider === 'gift' ? 'Gift code applied' : 'Payment received',
+        body:
+          r.provider === 'gift'
+            ? `Your agent's gift code published ${r.full_name ? `${r.full_name}'s profile` : 'your profile'} free`
+            : `₹${r.amount_paise / 100} ${r.provider === 'cash' ? 'received in cash by your agent' : 'paid'}${
+                r.full_name ? ` for ${r.full_name}` : ''
+              }`,
         at: r.paid_at,
       })),
       ...changes.map((r) => ({
@@ -166,6 +178,14 @@ export async function customerFeed(me) {
             ? `${r.to_agent_name} is now your agent`
             : `Your request to move to ${r.to_agent_name} was declined`,
         at: r.decided_at,
+      })),
+      ...rejectedPays.map((r) => ({
+        type: 'payment_rejected',
+        id: r.id,
+        my_profile_id: r.profile_id ?? undefined,
+        title: 'Payment not verified',
+        body: `${r.reject_reason} — check the UPI reference (UTR) and submit it again`,
+        at: r.verified_at,
       })),
       ...deletes.map((r) => ({
         type: `delete_request_${r.status}`,

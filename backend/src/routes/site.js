@@ -3,11 +3,14 @@
 // terms, privacy, refunds, shipping. No login, no tracking, no data from the
 // database — only the fee and the business identity from config.
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../lib/config.js';
 import { escapeXml as esc } from '../lib/photos.js';
+import { phoneSchema } from '../lib/validate.js';
+import { createDeletionRequest } from '../lib/accountDeletion.js';
 
 export const siteRouter = Router();
 
@@ -16,7 +19,7 @@ const DOWNLOADS = {
   'wedbook-matrimony.apk': 'Wedbook Matrimony',
   'wedbook-agent.apk': 'Wedbook Agent',
 };
-const UPDATED = '11 November 2026';
+const UPDATED = '13 November 2026';
 
 const fee = () => config.payments.profileFeeInr;
 const rupees = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
@@ -36,6 +39,7 @@ const POLICIES = [
   ['/privacy', 'Privacy Policy'],
   ['/refunds', 'Refund & Cancellation'],
   ['/shipping', 'Shipping & Delivery'],
+  ['/delete-account', 'Delete account'],
 ];
 
 /** Contact lines that are configured, as HTML list items. */
@@ -221,7 +225,8 @@ siteRouter.get('/terms', send('/terms', 'Terms & Conditions', () => `
 <p class="updated">Last updated: ${UPDATED}</p>
 <section class="card">
   <p>These terms apply to the Wedbook Matrimony and Wedbook Agent apps and this website, operated by
-  <b>${esc(biz())}</b> ("we", "us"). By using them you agree to these terms.</p>
+  <b>${esc(biz())}</b> ("we", "us"). You accept them when you sign up (the apps ask you to tick a box), and by using
+  the apps.</p>
   <h3>1. The service</h3>
   <p>Wedbook lets families create matrimony profiles through marriage bureau agents, browse other profiles,
   and express interest. Agents are independent marriage bureaus approved by our admins.</p>
@@ -241,55 +246,200 @@ siteRouter.get('/terms', send('/terms', 'Terms & Conditions', () => `
   <h3>6. Respectful use</h3>
   <p>Use other members' details only to consider a marriage proposal. Harassment, spam, collecting data,
   or sharing contact details outside the purpose of matchmaking is not allowed.</p>
-  <h3>7. No guarantee</h3>
+  <h3>7. Objectionable content — not allowed</h3>
+  <p>You must not post, upload or send anything that is:</p>
+  <ul>
+    <li>nudity, sexual or sexually suggestive content;</li>
+    <li>hateful, discriminatory or abusive towards any person or group (including by caste, religion, gender or
+    origin), or threatening, harassing or bullying;</li>
+    <li>a fake profile, or impersonates someone, or uses another person's photos or details without their consent;</li>
+    <li>about a person below the legal marriageable age;</li>
+    <li>a scam, fraud, request for money, or advertising;</li>
+    <li>violent, illegal, or encouraging illegal activity.</li>
+  </ul>
+  <p>We remove such content and may suspend or close the accounts involved, and report illegal content to the
+  authorities.</p>
+  <h3>8. Reporting and blocking</h3>
+  <p>On any profile, tap <b>⋮ → Report profile</b> to tell us about a problem, or <b>⋮ → Block</b> to stop seeing it
+  (in Wedbook Matrimony the other family also stops seeing yours). Blocked profiles can be unblocked from the app's
+  settings. Our admins review reports promptly — we aim to act within 24 hours — and may hide the profile or suspend
+  the account. You can also <a href="/contact">contact us</a>.</p>
+  <h3>9. No guarantee</h3>
   <p>We do not guarantee a match or marriage, and we do not verify every statement in a profile. Please make
   your own enquiries before any commitment.</p>
-  <h3>8. Liability</h3>
+  <h3>10. Liability</h3>
   <p>The service is provided "as is". To the extent the law allows, our liability for any claim is limited
   to the fee you paid us for the profile concerned.</p>
-  <h3>9. Changes and law</h3>
+  <h3>11. Changes and law</h3>
   <p>We may update these terms; the date above shows the latest version. These terms are governed by the laws
   of India, and the courts at the place of our registered address have jurisdiction.</p>
-  <h3>10. Contact</h3>
+  <h3>12. Contact</h3>
   <ul class="plain">${contactItems()}</ul>
 </section>`));
 
+// ---- privacy policies, one per app (SPEC §9.21) ------------------------------------
+
+const POLICY_DATE = '13 November 2026';
+
+const POLICY = {
+  matrimony: {
+    app: 'Wedbook Matrimony',
+    pkg: 'com.matrimonyagents.gandharva',
+    who: 'families looking for a life partner',
+    deletion: '/delete-account/matrimony',
+    collect: `
+    <ul>
+      <li><b>Account:</b> your mobile number and name. You sign in with a one-time code (OTP); there is no password.</li>
+      <li><b>Your matrimony profile</b> (entered by you or your marriage bureau agent): name, gender, date and time of
+      birth, height, complexion, marital status, religion, community and sub-caste, gothram, star and raasi, education,
+      profession and income, work country, native place, family details (parents, siblings, property), contact
+      numbers, an "about" text and photos.</li>
+      <li><b>Your choices:</b> which details others may see, which communities may see your profile, interests you send
+      and receive.</li>
+      <li><b>Payments:</b> the amount, date and status of your registration fee, and the UPI reference number (UTR) you
+      type after paying. We never see your UPI PIN, card or bank details.</li>
+      <li><b>Device:</b> a notification token if you allow notifications.</li>
+      <li><b>Technical logs:</b> IP address and time of requests, kept for security.</li>
+    </ul>`,
+    seen: `
+    <ul>
+      <li><b>Everyone browsing</b> sees only your main photo (watermarked), age and gender, plus the details you choose
+      to show in <i>Privacy settings</i>.</li>
+      <li><b>Phone numbers, parents' and family details, native place, exact work place and property</b> are shown to
+      another family only after your agent accepts their interest, and only for 15 days.</li>
+      <li>Your profile is shown only to the communities you choose.</li>
+      <li><b>Your agent</b> and our <b>admins</b> see your full profile to manage it. Other families never learn which
+      agent manages your profile, and your profile ID is shown only to you, your agent and our admins.</li>
+      <li>Profiles shared as links or PDFs never contain contact details.</li>
+    </ul>`,
+  },
+  agent: {
+    app: 'Wedbook Agent',
+    pkg: 'com.matrimonyagents.matrimony_agents',
+    who: 'marriage bureau agents',
+    deletion: '/delete-account/agent',
+    collect: `
+    <ul>
+      <li><b>Your agent account:</b> name, mobile number (verified by OTP), password (stored only as a one-way hash),
+      agency name, city, State, your agent code and the communities you work with.</li>
+      <li><b>Profiles you add for families:</b> the same matrimony details and photos the families give you (name, date
+      and time of birth, community, education, work, income, family and contact details, photos). <b>You must have the
+      family's consent</b> before adding their profile.</li>
+      <li><b>Your activity:</b> contact requests, approvals, holds, shortlists, shares (every share is logged) and
+      decisions on your clients.</li>
+      <li><b>Payments:</b> amount, date and status of community fees, and the UPI reference number (UTR) you type. We
+      never see your UPI PIN, card or bank details.</li>
+      <li><b>Device:</b> a notification token if you allow notifications.</li>
+      <li><b>Technical logs:</b> IP address and time of requests, kept for security.</li>
+    </ul>`,
+    seen: `
+    <ul>
+      <li><b>Other agents</b> see profiles shown to their communities — but phone numbers, parents' and family details,
+      native place, exact work place and property only after the profile's own agent approves a contact request, and
+      only for 15 days. Details a family has switched off stay hidden the same way.</li>
+      <li><b>Families</b> using Wedbook Matrimony never see which agent manages a profile. When two agents handle an
+      interest, they see each other's name, agency, phone and agent code so they can talk.</li>
+      <li><b>Shared links, PDFs and photo cards</b> never contain contact details, the uploading agent or the profile ID.</li>
+      <li>Our <b>admins</b> see everything in order to activate agents and resolve problems.</li>
+    </ul>`,
+  },
+};
+
+function privacyPolicy(key) {
+  const p = POLICY[key];
+  const name = esc(biz());
+  return `
+<h1>${p.app} — Privacy Policy</h1>
+<p class="updated">Effective: ${POLICY_DATE}. App: ${p.app} (${p.pkg}) on Android.</p>
+<section class="card">
+  <h3>Who we are</h3>
+  <p>${p.app} is a service for ${p.who}, run by <b>${name}</b> ("we", "us"). Under India's Digital Personal Data
+  Protection Act, 2023, we are the <i>Data Fiduciary</i> for the personal data in the app. Contact details are at the
+  end of this policy.</p>
+
+  <h3>What we collect</h3>
+  ${p.collect}
+
+  <h3>Why we use it</h3>
+  <ul>
+    <li>To create and secure your account, and verify your mobile number with a one-time code.</li>
+    <li>To show profiles to the right people, with the privacy choices that apply.</li>
+    <li>To handle interests, contact requests and approvals, and to notify you about them.</li>
+    <li>To confirm payments and keep the records the law requires.</li>
+    <li>To keep the service safe: stop misuse, investigate complaints and fix problems.</li>
+  </ul>
+  <p>We use your data only with your consent, given when you sign up and when you add details. We do not sell personal
+  data, and the app has no advertising or third-party analytics.</p>
+
+  <h3>Who can see your data</h3>
+  ${p.seen}
+
+  <h3>Service providers we use</h3>
+  <ul>
+    <li><b>StartMessaging</b> (startmessaging.com) sends the one-time SMS codes — it receives your mobile number and the
+    code.</li>
+    <li><b>Oracle Cloud Infrastructure</b> hosts our servers, database and photos.</li>
+    <li><b>Google Firebase Cloud Messaging</b> delivers app notifications when they are turned on — it receives a device
+    token and the notification text.</li>
+    <li><b>Your UPI app and bank</b> process UPI payments under their own terms; we only receive the reference number
+    and amount. If you pay through Google Play, Google processes the payment under its own privacy policy.</li>
+  </ul>
+  <p>They may use the data only to provide their service to us. We share data with authorities only when Indian law
+  requires it.</p>
+
+  <h3>How long we keep it</h3>
+  <ul>
+    <li>Account and profile data: while your account exists.</li>
+    <li>After you ask us to delete your account and we confirm it is you: deleted within <b>7 days</b>, and removed from
+    our backups within a further <b>14 days</b>.</li>
+    <li>One-time codes: stored only as a one-way hash and valid for 5 minutes. Contact approvals end after 15 days.</li>
+    <li>Payment records (amount, date, reference): as long as Indian tax and accounting laws require.</li>
+    <li>Technical logs: for a limited time, for security.</li>
+  </ul>
+
+  <h3>Deleting your account</h3>
+  <p>In the app: <i>More → Delete my account</i>. On the web: <a href="${p.deletion}">${p.app} account deletion</a>.
+  We call or WhatsApp your registered number to confirm, then delete your account and its data as described above.</p>
+
+  <h3>Your rights</h3>
+  <p>Under the DPDP Act, 2023 you can ask for a summary of your personal data and who it was shared with; correct or
+  update it (in the app or through your agent); have it erased; withdraw your consent (by deleting your account); and
+  nominate someone to exercise these rights if you cannot. Write to us using the contact details below. If you are
+  not satisfied with our answer you can complain to the Data Protection Board of India.</p>
+
+  <h3>Children</h3>
+  <p>${p.app} is only for adults. Profiles may only be created for people of legal marriageable age under Indian law,
+  by themselves or by a parent or guardian with their consent. We do not knowingly collect data from children.</p>
+
+  <h3>Security</h3>
+  <p>All traffic is encrypted (HTTPS). Passwords are stored only as one-way hashes, photos are served only to
+  signed-in users (public copies are watermarked), new agents are activated by an admin, and every share and contact
+  approval is logged.</p>
+
+  <h3>Changes</h3>
+  <p>We will update this page when our practices change and show the new effective date above; important changes are
+  also announced in the app.</p>
+
+  <h3>Contact and grievance officer</h3>
+  <p>For privacy questions, corrections, deletion or complaints (Grievance Officer, ${name}):</p>
+  <ul class="plain">${contactItems()}</ul>
+  <p>We reply as soon as possible and within the time Indian law requires.</p>
+</section>`;
+}
+
 siteRouter.get('/privacy', send('/privacy', 'Privacy Policy', () => `
 <h1>Privacy Policy</h1>
-<p class="updated">Last updated: ${UPDATED}</p>
 <section class="card">
-  <p>This policy explains what <b>${esc(biz())}</b> collects in the Wedbook apps and how it is used.</p>
-  <h3>What we collect</h3>
+  <p>Wedbook has two Android apps. Each has its own privacy policy:</p>
   <ul>
-    <li>Your mobile number (to sign you in with a one-time code).</li>
-    <li>Profile details you or your agent enter: name, date of birth, community, education, work, income,
-    horoscope, family details, contact numbers and photos.</li>
-    <li>Payment status of your registration fee. Card, UPI and bank details are handled by Razorpay — we never
-    see or store them.</li>
-    <li>If you allow notifications, a device token to send them.</li>
+    <li><a href="/privacy/matrimony"><b>Wedbook Matrimony</b> — for families</a></li>
+    <li><a href="/privacy/agent"><b>Wedbook Agent</b> — for marriage bureau agents</a></li>
   </ul>
-  <h3>Who sees your profile</h3>
-  <ul>
-    <li>Always shown: your main photo (watermarked), age and gender.</li>
-    <li>Other details: shown according to the privacy switches you choose in the app.</li>
-    <li>Contact numbers, parents' and family details, native place, exact work place and property are shared
-    only when your agent accepts another member's interest or an agent's contact request — and only for 15 days.</li>
-    <li>Profiles are shown only to the communities you choose. Who uploaded a profile is never shown to other families.</li>
-    <li>Shared links and downloads never contain contact details.</li>
-  </ul>
-  <h3>Service providers</h3>
-  <p>We use an SMS provider to deliver one-time codes, Razorpay for payments, a cloud hosting provider to run
-  the service, and Google Firebase to deliver app notifications. They receive only what they need for that job.
-  We do not sell your data.</p>
-  <h3>Keeping and deleting data</h3>
-  <p>We keep your data while your account is in use. You can delete an unpaid profile in the app; a paid profile
-  is deleted with your agent's approval. To delete your account, contact your agent or us (below).</p>
-  <h3>Security</h3>
-  <p>All traffic is encrypted (HTTPS), photos are served only to signed-in users (public copies are watermarked),
-  and passwords are stored hashed.</p>
-  <h3>Contact</h3>
-  <ul class="plain">${contactItems()}</ul>
+  <p>To delete an account: <a href="/delete-account/matrimony">Wedbook Matrimony</a> ·
+  <a href="/delete-account/agent">Wedbook Agent</a>.</p>
 </section>`));
+siteRouter.get('/privacy/matrimony', send('/privacy', 'Wedbook Matrimony Privacy Policy', () => privacyPolicy('matrimony')));
+siteRouter.get('/privacy/agent', send('/privacy', 'Wedbook Agent Privacy Policy', () => privacyPolicy('agent')));
 
 siteRouter.get('/refunds', send('/refunds', 'Refund & Cancellation', () => `
 <h1>Refund &amp; Cancellation Policy</h1>
@@ -350,4 +500,106 @@ siteRouter.get('/download/:file', (req, res) => {
   res.set('Cache-Control', 'no-cache');
   res.type('application/vnd.android.package-archive');
   res.download(file, name);
+});
+
+// ---- account deletion (SPEC §9.20 F, Google Play rule) ---------------------------
+
+const APPS = { customer: 'Wedbook Matrimony', agent: 'Wedbook Agent' };
+
+function deleteForm({ app = 'customer', phone = '', error = '', only = false } = {}) {
+  const radio = (value) =>
+    `<label style="display:block;margin:6px 0"><input type="radio" name="app" value="${value}"${
+      app === value ? ' checked' : ''
+    }> ${APPS[value]}</label>`;
+  // An app's own page names the app and fixes the choice.
+  const which = only
+    ? `<input type="hidden" name="app" value="${app}"><p><b>App:</b> ${APPS[app]}</p>`
+    : `<h3>Which app?</h3>${radio('customer')}${radio('agent')}`;
+  return `
+<h1>Delete your ${only ? `${APPS[app]} ` : ''}account</h1>
+<section class="card">
+  <p>Ask us to delete your <b>Wedbook Matrimony</b> or <b>Wedbook Agent</b> account and its data. We will call or
+  WhatsApp the registered mobile number to confirm it is really you, then delete the account within <b>7 days</b>.</p>
+  <h3>What is deleted</h3>
+  <ul>
+    <li>Your account, mobile number and name.</li>
+    <li>Your matrimony profile, its photos and details, your interests and requests.</li>
+    <li>For agents: your personal details and communities (profiles you manage for families are handed to another
+    agent or deleted with the families' consent first).</li>
+  </ul>
+  <h3>What is kept</h3>
+  <p>Payment records (amount, date, reference) are kept as long as tax and accounting law requires. Nothing else.
+  Deleted data also leaves our backups within 14 days. Details: <a href="/privacy">Privacy Policy</a>.</p>
+  ${error ? `<p style="color:#B3261E"><b>${esc(error)}</b></p>` : ''}
+  <form method="post" action="/delete-account">
+    ${which}
+    <h3>Registered mobile number</h3>
+    <input name="phone" value="${esc(phone)}" inputmode="numeric" maxlength="13" required
+      style="width:100%;padding:12px;border:1px solid #D8CFC6;border-radius:12px;font-size:1rem">
+    <h3>Your name (optional)</h3>
+    <input name="full_name" maxlength="120"
+      style="width:100%;padding:12px;border:1px solid #D8CFC6;border-radius:12px;font-size:1rem">
+    <h3>Reason (optional)</h3>
+    <textarea name="reason" maxlength="500" rows="3"
+      style="width:100%;padding:12px;border:1px solid #D8CFC6;border-radius:12px;font-size:1rem"></textarea>
+    <p><button class="btn primary" type="submit" style="border:0;cursor:pointer">Request deletion</button></p>
+  </form>
+  <p class="note">You can also delete an unpaid profile yourself in the app, or ask your agent.</p>
+</section>`;
+}
+
+siteRouter.get('/delete-account', (req, res) => {
+  const app = req.query.app === 'agent' ? 'agent' : 'customer';
+  res.type('html').send(layout('/delete-account', 'Delete account', deleteForm({ app })));
+});
+// One page per app for the Play listings (SPEC §9.21).
+siteRouter.get('/delete-account/matrimony', (_req, res) => {
+  res.type('html').send(layout('/delete-account', 'Delete your Wedbook Matrimony account', deleteForm({ app: 'customer', only: true })));
+});
+siteRouter.get('/delete-account/agent', (_req, res) => {
+  res.type('html').send(layout('/delete-account', 'Delete your Wedbook Agent account', deleteForm({ app: 'agent', only: true })));
+});
+
+// 10 requests per hour per address — the form is public.
+const deleteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) =>
+    res
+      .status(429)
+      .type('html')
+      .send(layout('/delete-account', 'Delete account', '<h1>Too many requests</h1><section class="card"><p>Please try again in an hour, or <a href="/contact">contact us</a>.</p></section>')),
+});
+
+siteRouter.post('/delete-account', deleteLimiter, async (req, res, next) => {
+  try {
+    const app = req.body?.app === 'agent' ? 'agent' : 'customer';
+    const parsed = phoneSchema.safeParse(String(req.body?.phone ?? ''));
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .type('html')
+        .send(layout('/delete-account', 'Delete account', deleteForm({ app, phone: req.body?.phone ?? '', error: 'Enter your 10-digit mobile number' })));
+    }
+    const clip = (v, n) => (String(v ?? '').trim().slice(0, n) || null);
+    await createDeletionRequest({
+      app,
+      phone: parsed.data,
+      fullName: clip(req.body?.full_name, 120),
+      reason: clip(req.body?.reason, 500),
+    });
+    res.type('html').send(
+      layout(
+        '/delete-account',
+        'Delete account',
+        `<h1>Request received</h1><section class="card"><p>We have your request to delete the ${esc(APPS[app])} account
+        for <b>+91 ${esc(parsed.data)}</b>. We will contact this number to confirm, then delete the account and its
+        data within 7 days.</p><p><a href="/">Back to home</a></p></section>`,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
 });

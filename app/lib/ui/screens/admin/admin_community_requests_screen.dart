@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../models/payment.dart';
 import '../../../services/admin_service.dart';
 import '../../../services/api_client.dart';
 import '../../../state/auth_state.dart';
@@ -8,6 +9,9 @@ import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 
+/// Agents' requests to join more communities. Beyond the free ones a request
+/// carries a one-time fee (SPEC §9.20 C): its row shows the payment state, and
+/// approving needs the payment submitted (`409 payment_not_submitted`).
 class AdminCommunityRequestsScreen extends StatefulWidget {
   const AdminCommunityRequestsScreen({super.key});
 
@@ -118,12 +122,18 @@ class _AdminCommunityRequestsScreenState extends State<AdminCommunityRequestsScr
                                   children: [
                                     const Icon(Icons.groups_rounded, size: 16),
                                     const SizedBox(width: 6),
-                                    Text(
-                                      'Wants access to ${r.communityName}',
-                                      style: theme.textTheme.bodyMedium,
+                                    Expanded(
+                                      child: Text(
+                                        'Wants access to ${r.communityName}',
+                                        style: theme.textTheme.bodyMedium,
+                                      ),
                                     ),
                                   ],
                                 ),
+                                if (r.hasFee) ...[
+                                  const SizedBox(height: 6),
+                                  CommunityFeeLine(request: r),
+                                ],
                                 if (r.isPending) ...[
                                   const SizedBox(height: 12),
                                   Row(
@@ -154,6 +164,39 @@ class _AdminCommunityRequestsScreenState extends State<AdminCommunityRequestsScr
                         },
                       ),
                     ),
+    );
+  }
+}
+
+/// "Fee ₹1000 · payment submitted (UTR …)" / "Fee ₹1000 · awaiting payment"
+/// on an admin's community-request row.
+class CommunityFeeLine extends StatelessWidget {
+  const CommunityFeeLine({super.key, required this.request});
+
+  final CommunityRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = request.feePaymentStatus;
+    final color = switch (status) {
+      PaymentStatus.submitted => AppColors.warning,
+      PaymentStatus.paid => AppColors.success,
+      PaymentStatus.failed || PaymentStatus.refundDue => theme.colorScheme.error,
+      _ => theme.colorScheme.outline,
+    };
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.currency_rupee_rounded, size: 16, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            S.feeState(request.feeInr, status, request.feeUtr),
+            style: theme.textTheme.bodyMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
     );
   }
 }

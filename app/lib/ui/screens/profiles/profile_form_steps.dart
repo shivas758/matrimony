@@ -163,6 +163,11 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         onToggle: (id) => _set(() {
           _languageIds.contains(id) ? _languageIds.remove(id) : _languageIds.add(id);
         }),
+        onReplace: (next) => _set(() {
+          _languageIds
+            ..clear()
+            ..addAll(next);
+        }),
       ),
       const SizedBox(height: 16),
       Row(
@@ -415,23 +420,13 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         onChanged: (v) => _set(() => _nakshatramId = v),
       ),
       const SizedBox(height: 16),
-      DropdownButtonFormField<int>(
-        initialValue: masters.zodiacSigns.any((z) => z.id == _zodiacId) ? _zodiacId : null,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: S.rasi,
-          prefixIcon: const Icon(Icons.brightness_5_rounded),
-          helperText: _helper('zodiac'),
-          helperMaxLines: 2,
-        ),
-        items: [
-          const DropdownMenuItem(value: null, child: Text('—')),
-          for (final z in masters.zodiacSigns)
-            DropdownMenuItem(
-              value: z.id,
-              child: Text(z.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-        ],
+      // Twelve signs: searchable like every long master list (SPEC §9.23 E).
+      _MasterDropdown(
+        label: S.rasi,
+        icon: Icons.brightness_5_rounded,
+        items: [for (final z in masters.zodiacSigns) MasterItem(id: z.id, name: z.label)],
+        value: _zodiacId,
+        helper: _hint('zodiac'),
         onChanged: (v) => _set(() => _zodiacId = v),
       ),
       const SizedBox(height: 16),

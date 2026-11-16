@@ -115,24 +115,40 @@ void main() {
   });
   final active = Customer.fromJson(activeMeJson());
 
-  testWidgets('Get started — guest: step 1 open with the number-or-code field (SPEC §9.18)', (tester) async {
+  testWidgets('Get started — guest: 1 Create your profile (open), 2 the number-or-code field (SPEC §9.23 F)',
+      (tester) async {
     await _render(tester, guest, const GetStartedScreen());
-    expect(find.text(S.step1Title), findsOneWidget);
-    expect(find.text(S.agentPhoneOrCode), findsOneWidget);
+    // Step 1 is the profile — and its button works without an agent.
+    expect(find.text(S.step1Title), findsNWidgets(2), reason: 'step title + button');
     expect(find.text(S.step1Body), findsOneWidget);
-    expect(S.step1Body, contains('agent code'));
+    final create = tester.widget<ButtonStyleButton>(
+      find.ancestor(of: find.text(S.step1Title).last, matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)),
+    );
+    expect(create.onPressed, isNotNull, reason: 'a guest may create the profile before choosing an agent');
+    // Step 2 is the agent.
+    expect(find.text(S.step2Title), findsOneWidget);
+    expect(find.text(S.agentPhoneOrCode), findsOneWidget);
+    expect(S.step2Body, contains('agent code'));
     expect(find.text(S.agentPhoneLink), findsOneWidget);
     expect(find.text(S.pickFromDirectory), findsOneWidget);
-    expect(find.text(S.needAgentFirst), findsOneWidget);
+    await tester.scrollUntilVisible(find.text(S.needProfileFirst), 300, scrollable: find.byType(Scrollable).first);
+    expect(find.text(S.step3Title(150)), findsOneWidget);
+    expect(find.text(S.needProfileFirst), findsOneWidget, reason: 'step 3 waits for the profile');
+    expect(find.text(S.useGiftCode), findsNothing, reason: 'no profile to apply a gift code to yet');
     expect(tester.takeException(), isNull);
     await _dispose(tester);
   });
 
-  testWidgets('Get started — pending with an unpaid profile: agent + Change + Pay', (tester) async {
+  testWidgets('Get started — pending with an unpaid profile: Publish my profile, agent + Change + Pay', (tester) async {
     await _render(tester, pendingUnpaid, const GetStartedScreen());
+    expect(find.text(S.publishReadyTitle), findsOneWidget);
+    expect(find.text(S.publishMyProfile), findsOneWidget);
     expect(find.text('Agent A'), findsWidgets);
     expect(find.text(S.change), findsOneWidget);
-    expect(find.text(S.payFee(150)), findsNWidgets(2), reason: 'step title + button');
+    await tester.scrollUntilVisible(find.text(S.payFee(150)), 300, scrollable: find.byType(Scrollable).first);
+    expect(find.text(S.step3Title(150)), findsOneWidget);
+    expect(find.text(S.payFee(150)), findsOneWidget, reason: 'the button');
+    expect(find.text(S.useGiftCode), findsOneWidget);
     // Step 4 sits below the fold of the lazily built list.
     await tester.scrollUntilVisible(find.text(S.step4Waiting('Agent A')), 300,
         scrollable: find.byType(Scrollable).first);
@@ -166,14 +182,14 @@ void main() {
     await _dispose(tester);
   });
 
-  testWidgets('My profile — guest: empty state, Create profile disabled with a hint', (tester) async {
+  testWidgets('My profile — guest: empty state, Create profile open without an agent (SPEC §9.23 C)',
+      (tester) async {
     await _render(tester, guest, const MyProfilesScreen());
     expect(find.text(S.noProfilesYetTitle), findsOneWidget);
-    expect(find.text(S.addProfileNeedsAgent), findsWidgets);
     final add = tester.widget<ButtonStyleButton>(
       find.ancestor(of: find.text(S.addProfile), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)),
     );
-    expect(add.onPressed, isNull);
+    expect(add.onPressed, isNotNull);
     expect(tester.takeException(), isNull);
   });
 

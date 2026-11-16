@@ -6,8 +6,11 @@ import '../../state/auth_state.dart';
 import '../strings.dart';
 import '../theme.dart';
 import '../widgets/app_logo.dart';
+import '../widgets/approval_banner.dart';
 import '../widgets/common.dart';
+import '../widgets/delete_account.dart';
 import 'admin/admin_home_screen.dart';
+import 'gift_codes_screen.dart';
 import 'profiles/my_uploads_screen.dart';
 import 'settings_screen.dart';
 import 'notifications_screen.dart';
@@ -106,6 +109,8 @@ class MoreScreen extends StatelessWidget {
               ],
             ),
           ),
+          // SPEC §9.23 F: below 10 live clients — what that means, and the codes.
+          const ApprovalBanner(margin: EdgeInsets.only(top: 16)),
           const SizedBox(height: 16),
           SurfaceCard(
             padding: EdgeInsets.zero,
@@ -118,6 +123,20 @@ class MoreScreen extends StatelessWidget {
                     MaterialPageRoute(builder: (_) => const MyUploadsScreen()),
                   ),
                 ),
+                // SPEC §9.23 B: free codes for families (not on an older server).
+                if (agent != null && agent.knowsGiftCodes) ...[
+                  const Divider(height: 1, indent: 56),
+                  _Item(
+                    icon: Icons.card_giftcard_rounded,
+                    title: S.giftCodes,
+                    subtitle: agent.giftCodes == null
+                        ? null
+                        : S.unusedCount(agent.giftCodes!.unused),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const GiftCodesScreen()),
+                    ),
+                  ),
+                ],
                 if (agent?.isAdmin ?? false) ...[
                   const Divider(height: 1, indent: 56),
                   _Item(
@@ -129,6 +148,12 @@ class MoreScreen extends StatelessWidget {
                               '${auth.notifications.pendingAgents} agents awaiting approval',
                             if (auth.notifications.pendingPasswordResets > 0)
                               '${auth.notifications.pendingPasswordResets} password resets',
+                            if (auth.notifications.paymentsToVerify > 0)
+                              S.paymentsToVerifyCount(auth.notifications.paymentsToVerify),
+                            if (auth.notifications.deletionRequests > 0)
+                              S.deletionRequestsCount(auth.notifications.deletionRequests),
+                            if (auth.notifications.reportsOpen > 0)
+                              S.reportsCount(auth.notifications.reportsOpen),
                           ].join(' · ')
                         : null,
                     badge: auth.notifications.adminPending,
@@ -151,26 +176,17 @@ class MoreScreen extends StatelessWidget {
           const SizedBox(height: 16),
           SurfaceCard(
             padding: EdgeInsets.zero,
-            child: _Item(
-              icon: Icons.logout_rounded,
-              title: S.logout,
-              color: theme.colorScheme.error,
-              onTap: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text(S.logout),
-                    content: const Text('You will need your mobile number and password to log in again.'),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(ctx, false), child: const Text(S.cancel)),
-                      FilledButton(
-                          onPressed: () => Navigator.pop(ctx, true), child: const Text(S.logout)),
-                    ],
-                  ),
-                );
-                if (ok == true && context.mounted) context.read<AuthState>().logout();
-              },
+            child: Column(
+              children: [
+                _Item(
+                  icon: Icons.person_remove_outlined,
+                  title: S.deleteMyAccount,
+                  subtitle: S.deleteMyAccountSubtitle,
+                  onTap: () => confirmDeleteAccount(context),
+                ),
+                const Divider(height: 1, indent: 56),
+                _logout(context, theme),
+              ],
             ),
           ),
           const SizedBox(height: 36),
@@ -186,6 +202,29 @@ class MoreScreen extends StatelessWidget {
       ),
     );
   }
+
+  /// Logout, after a confirmation.
+  Widget _logout(BuildContext context, ThemeData theme) => _Item(
+        icon: Icons.logout_rounded,
+        title: S.logout,
+        color: theme.colorScheme.error,
+        onTap: () async {
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text(S.logout),
+              content: const Text('You will need your mobile number and password to log in again.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false), child: const Text(S.cancel)),
+                FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true), child: const Text(S.logout)),
+              ],
+            ),
+          );
+          if (ok == true && context.mounted) context.read<AuthState>().logout();
+        },
+      );
 }
 
 class _Item extends StatelessWidget {

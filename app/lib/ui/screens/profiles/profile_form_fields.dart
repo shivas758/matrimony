@@ -404,6 +404,8 @@ class _PhotoStrip extends StatelessWidget {
   }
 }
 
+/// A master field of the form: the plain dropdown for a short list, the
+/// searchable picker sheet for a long one (SPEC §9.23 E).
 class _MasterDropdown extends StatelessWidget {
   const _MasterDropdown({
     required this.label,
@@ -432,54 +434,65 @@ class _MasterDropdown extends StatelessWidget {
   final FormFieldValidator<int>? validator;
 
   @override
-  Widget build(BuildContext context) {
-    // Guard against a stale id that is no longer in the list (deactivated row).
-    final safeValue = items.any((i) => i.id == value) ? value : null;
-    return DropdownButtonFormField<int>(
-      initialValue: safeValue,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon),
+  Widget build(BuildContext context) => MasterSelectField(
+        label: label,
+        icon: icon,
+        options: masterOptions(items),
+        value: value,
         helperText: helper == null ? helperText : '${S.aiUnmatchedPrefix}$helper',
-        helperMaxLines: 2,
-      ),
-      items: [
-        const DropdownMenuItem(value: null, child: Text('—')),
-        for (final item in items)
-          DropdownMenuItem(
-            value: item.id,
-            child: Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-      ],
-      validator: validator,
-      onChanged: onChanged,
-    );
-  }
+        validator: validator,
+        onChanged: onChanged,
+      );
 }
 
-/// Multi-select chips for the languages a person knows.
+/// The languages a person knows: chips for a short list, the searchable
+/// multi picker for a long one (SPEC §9.23 E).
 class _LanguageChips extends StatelessWidget {
   const _LanguageChips({
     required this.items,
     required this.selected,
     required this.onToggle,
+    required this.onReplace,
     this.helper,
   });
 
   final List<MasterItem> items;
   final Set<int> selected;
   final ValueChanged<int> onToggle;
+
+  /// Long list: the picker's whole new selection.
+  final ValueChanged<Set<int>> onReplace;
   final String? helper;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final helperText = helper == null ? null : '${S.aiUnmatchedPrefix}$helper';
+    if (isLongList(items.length)) {
+      return MultiPickerField(
+        label: S.knownLanguages,
+        icon: Icons.translate_rounded,
+        helperText: helperText,
+        selectedLabels: [
+          for (final item in items)
+            if (selected.contains(item.id)) item.name,
+        ],
+        onTap: () async {
+          final next = await showMultiPickerSheet(
+            context,
+            title: S.knownLanguages,
+            options: masterOptions(items),
+            selected: selected,
+          );
+          if (next != null) onReplace(next);
+        },
+      );
+    }
     return InputDecorator(
       decoration: InputDecoration(
         labelText: S.knownLanguages,
         prefixIcon: const Icon(Icons.translate_rounded),
-        helperText: helper == null ? null : '${S.aiUnmatchedPrefix}$helper',
+        helperText: helperText,
         helperMaxLines: 2,
         contentPadding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
       ),
@@ -586,7 +599,6 @@ class _EducationLevelRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final safeValue = countries.any((c) => c.id == countryId) ? countryId : null;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -606,18 +618,11 @@ class _EducationLevelRow extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           flex: 2,
-          child: DropdownButtonFormField<int>(
-            initialValue: safeValue,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: S.country),
-            items: [
-              const DropdownMenuItem(value: null, child: Text('—')),
-              for (final c in countries)
-                DropdownMenuItem(
-                  value: c.id,
-                  child: Text(c.name, overflow: TextOverflow.ellipsis),
-                ),
-            ],
+          // Countries are a long list: the searchable picker (SPEC §9.23 E).
+          child: MasterSelectField(
+            label: S.country,
+            options: masterOptions(countries),
+            value: countryId,
             onChanged: onCountryChanged,
           ),
         ),

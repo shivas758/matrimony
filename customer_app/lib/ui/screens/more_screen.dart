@@ -8,13 +8,16 @@ import '../strings.dart';
 import '../theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/common.dart';
+import '../widgets/delete_account.dart';
 import '../widgets/notification_bell.dart';
 import 'agent/change_agent_screen.dart';
+import 'blocks/blocked_profiles_screen.dart';
 import 'get_started/get_started_screen.dart';
 
 /// More: who I am (with my ID once I have one, tap to copy), my agent (with
 /// their agent code and Call) — or *Choose your agent* → Get started while I
-/// have none —, Change agent (active accounts only), Logout, version (SPEC
+/// have none —, Change agent (active accounts only), Blocked profiles
+/// (SPEC §9.22 B), Delete my account (SPEC §9.20 F), Logout, version (SPEC
 /// §9.11 Gandharva 6 / §9.12 / §9.18).
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
@@ -100,6 +103,21 @@ class MoreScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
             ],
+            // Profiles I blocked, with Unblock (SPEC §9.22 B).
+            SurfaceCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.block_rounded, color: AppColors.wineLight),
+                title: const Text(S.blockedProfiles, style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text(S.blockedProfilesSubtitle),
+                trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+                onTap: () => BlockedProfilesScreen.open(context),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Every signed-in customer can ask for deletion (SPEC §9.20 F).
+            const DeleteAccountTile(),
+            const SizedBox(height: 16),
             SurfaceCard(
               padding: EdgeInsets.zero,
               child: ListTile(
@@ -280,8 +298,8 @@ class _IdPill extends StatelessWidget {
   }
 }
 
-/// "My agent": name, agency, city, agent code (tap to copy), community
-/// chips, phone + Call.
+/// "My agent": name, agency, city, "N clients", agent code (tap to copy),
+/// community chips, phone + Call.
 class _MyAgentCard extends StatelessWidget {
   const _MyAgentCard({required this.agent});
 
@@ -338,6 +356,8 @@ class _MyAgentCard extends StatelessWidget {
                           ),
                         ],
                       ),
+                    // Live clients (SPEC §9.23 C) — nothing when the server did not say.
+                    if (agent.liveClients != null) ClientsCount(count: agent.liveClients!),
                   ],
                 ),
               ),

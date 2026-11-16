@@ -111,6 +111,7 @@ class AuthService {
     required String phoneVerificationToken,
     String? agencyName,
     int? stateId,
+    bool acceptedTerms = false,
   }) async {
     final json = await _api.post('/auth/signup', body: {
       'full_name': fullName,
@@ -122,6 +123,8 @@ class AuthService {
       // SPEC §9.18 B: the state decides the agent code, issued with the
       // account (`400 invalid_state`). Left out against an older server.
       'state_id': ?stateId,
+      // SPEC §9.22 C: the Terms & Privacy checkbox (stamps the time).
+      if (acceptedTerms) 'accepted_terms': true,
     });
     return _store(json);
   }

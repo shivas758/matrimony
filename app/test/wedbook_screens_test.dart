@@ -66,6 +66,7 @@ class _FakeAuth extends AuthState {
     required String phoneVerificationToken,
     String? agencyName,
     int? stateId,
+    bool acceptedTerms = false,
   }) async {
     signedUp = {
       'full_name': fullName,
@@ -84,7 +85,7 @@ class _FakeAdmin extends AdminService {
   final queries = <String?>[];
 
   @override
-  Future<List<AdminAgent>> agents({String? status, String? q}) async {
+  Future<List<AdminAgent>> agents({String? status, String? q, bool? approved}) async {
     queries.add(q);
     final needle = (q ?? '').toLowerCase();
     return rows
@@ -196,15 +197,15 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('More: the agent code chip and "Wedbook Agent · v3.1.0"', (tester) async {
+    testWidgets('More: the agent code chip and "Wedbook Agent · v3.4.0"', (tester) async {
       _phone(tester);
       await tester.pumpWidget(_World().app(const MoreScreen()));
       await tester.pump();
 
       expect(find.text('KA1A'), findsOneWidget);
       expect(find.byType(AgentCodeChip), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Wedbook Agent · v3.1.0'), 200);
-      expect(find.text('Wedbook Agent · v3.1.0'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Wedbook Agent · v3.4.0'), 200);
+      expect(find.text('Wedbook Agent · v3.4.0'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
@@ -223,6 +224,7 @@ void main() {
       await tester.enterText(find.widgetWithText(TextFormField, S.password), 'secret1');
       await tester.enterText(find.widgetWithText(TextFormField, S.confirmPassword), 'secret1');
       await _tap(tester, find.widgetWithText(FilterChip, 'Reddy'));
+      await _tap(tester, find.byType(Checkbox)); // the terms (SPEC §9.22 C)
     }
 
     testWidgets('the state is required and travels as state_id', (tester) async {

@@ -71,6 +71,11 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="https"/>
         </intent>
+        <!-- url_launcher: paying a fee with any UPI app (upi://pay, SPEC §9.20) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="upi"/>
+        </intent>
         <!-- url_launcher: calling an approved contact number -->
         <intent>
             <action android:name="android.intent.action.DIAL"/>

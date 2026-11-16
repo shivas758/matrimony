@@ -45,13 +45,13 @@ npm run dev
 ## Testing
 
 ```bash
-npm run smoke        # 1525 end-to-end checks (46 steps) against a running API
-DATABASE_URL=... npm run test:providers   # 137 checks: Firebase OTP, Fast2SMS, StartMessaging, Razorpay, reviewer login, website
+npm run smoke        # 1637 end-to-end checks (47 steps) against a running API
+DATABASE_URL=... npm run test:providers   # 262 checks: OTP providers, Razorpay, UPI + admin verification, paid communities, account deletion, demo world, report / block / terms, website
 npm run seed:demo    # 2 communities, 3 agents (codes TS… / AP… / KA…), 12 profiles with photos, 6 customers
 ```
 
-`npm run smoke` asserts every rule in `CLAUDE.md`: community visibility, pending-agent
-gating, omitted contact fields, the 15-day approval window, revocation, masked shares and
+`npm run smoke` asserts every rule in `CLAUDE.md`: community visibility, approved-agent
+gating (10 live clients, gift codes — step 47), omitted contact fields, the 15-day approval window, revocation, masked shares and
 public pages, share logging, and admin-only access. Point it elsewhere with
 `BASE=https://your-domain npm run smoke`.
 
@@ -80,6 +80,8 @@ After seeding, log in as `9000000001` / `demo1234` (agent) or `9999999999` /
 | `BCRYPT_ROUNDS` | Default 10 |
 | `ANTHROPIC_API_KEY` | Optional. Enables `POST /profiles/parse` (AI import). Unset → 503 and the app hides the button |
 | `CLAUDE_MODEL` | Extraction model, default `claude-opus-5`; `claude-haiku-4-5` is ~5× cheaper |
+| `APPROVAL_CLIENTS` | Live clients that approve an agent automatically, default 10 (SPEC §9.23 A) |
+| `GIFT_CODES_PER_AGENT` | Free gift codes every agent gets once, default 10 (SPEC §9.23 B) |
 
 ## Migrations
 
@@ -95,7 +97,7 @@ docker compose exec -T db psql -U matrimony -d matrimony -v ON_ERROR_STOP=1 < db
 |---|---|
 | `001_subcastes.sql` | `subcastes` master + `profiles.subcaste_id` |
 | `002_profile_fields_password_reset.sql` | `complexions` + `countries` masters; gothram, work place, education/profession details, weight, complexion, NRI (country + place), father/mother name + phone on `profiles`; `agents.must_change_password` + `password_reset_requests` for the forgot-password flow |
-| `003` … `010` | see `db/migrations/README.md` — `010_wedbook_codes_privacy.sql` is the newest (states, agent codes, profile IDs, privacy toggles, community audience) |
+| `003` … `015` | see `db/migrations/README.md` — `015_gift_codes_agent_approval.sql` is the newest (gift codes, approved agents, profiles without an agent) |
 
 Keep `schema.sql` in sync so a fresh install and a migrated one match. `deploy/update.sh`
 re-runs every migration on each deploy, which is why they must stay idempotent.
@@ -107,7 +109,8 @@ src/
   server.js            route mounting, rate limiting, expiry job
   lib/       config, db, auth, errors, validation, photos, card, pdf, profiles,
              profileQuery, profileWrite, customers, payments, otp, push,
-             codes (agent codes + profile IDs), privacy (the toggles)
+             codes (agent codes + profile IDs), privacy (the toggles),
+             agentApproval (approved at 10 live clients), giftCodes
   middleware/          requireAuth / requireActive / requireAdmin, requireCustomer, error handler
   routes/    auth, masters, profiles, photos, contactRequests, holdRequests, share,
              publicPage, shortlists, notifications, me, admin, clients,

@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../../../config.dart';
 import '../../../models/customer.dart';
 import '../../../models/master_data.dart';
+import '../../../models/payment.dart';
 import '../../../models/privacy_settings.dart';
 import '../../../models/profile.dart';
 import '../../../services/api_client.dart';
+import '../../../services/payment_service.dart';
 import '../../../services/profile_service.dart';
 import '../../../state/auth_state.dart';
 import '../../../state/masters_state.dart';
@@ -18,14 +20,20 @@ import '../../widgets/photo_picker.dart';
 import '../../widgets/photo_viewer.dart';
 import '../../widgets/profile_sections.dart';
 import '../payment/checkout_screen.dart';
+import '../payment/upi_checkout.dart';
+import '../publish/publish_screen.dart';
 import 'my_profiles_screen.dart';
 import 'privacy_screen.dart';
 import 'profile_form_screen.dart';
+import 'profile_preview_screen.dart';
 
-/// My profile (SPEC §9.11 Gandharva 5 / §9.12 / §9.17 / §9.18): **Your ID**
-/// (tap to copy) once it is assigned, where the profile stands with the fee
-/// and approval (with *Pay* while unpaid), *Privacy settings* with a one-line
-/// summary, the same cards as the detail screen plus the on-request block (it
+/// My profile (SPEC §9.11 Gandharva 5 / §9.12 / §9.17 / §9.18 / §9.23): **Your
+/// ID** (tap to copy) once it is assigned, where the profile stands with the
+/// fee and approval — while it is not live, *Publish my profile* opens
+/// [PublishScreen] (agent → pay or gift code → approval; a UPI fee being
+/// verified / not verified keeps its own button to the checkout) —,
+/// *Privacy settings* with a one-line summary, *View as others see it*
+/// ([ProfilePreviewScreen]), the same cards as the detail screen plus the on-request block (it
 /// is mine), Edit, photo management, and *Delete* while it is still unpaid. A PAID profile can
 /// only be deleted by the agent: *Request deletion* → banner with *Cancel
 /// request* while it waits (SPEC §9.13). If the agent approved meanwhile
@@ -111,10 +119,19 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     if (updated != null && mounted) setState(() => _profile = updated);
   }
 
+  /// Agent → pay or gift code → approval (SPEC §9.23 F); this page follows.
+  Future<void> _publish(Profile profile) async {
+    await PublishScreen.open(context, profileId: profile.id);
+    if (!mounted) return;
+    await _load();
+    if (mounted) await context.read<AuthState>().refresh();
+  }
+
   Future<void> _pay(Profile profile) async {
     final paid = await CheckoutScreen.open(context, profileId: profile.id, profileName: profile.fullName);
     if (!mounted) return;
-    if (paid) await _load();
+    // UPI: a UTR submitted there changes this profile's `payment` (SPEC §9.20 B).
+    if (paid || context.read<AuthState>().customer?.paymentProvider == 'upi') await _load();
     if (mounted) await context.read<AuthState>().refresh();
   }
 
@@ -321,8 +338,13 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final profile = _profile;
-    final fee = profile?.profileFeeInr ?? context.watch<AuthState>().customer?.profileFeeInr;
+    final customer = context.watch<AuthState>().customer;
+    final fee = profile?.profileFeeInr ?? customer?.profileFeeInr;
     final unpaid = profile != null && !profile.paid;
+    // The Play build offers no UPI / Razorpay: no Pay / Fix button, no UPI states (SPEC §9.20 G).
+    final payable = Provider.of<PaymentService>(context, listen: false)
+        .offersPayment(customer?.paymentProvider ?? 'mock');
+    final upi = profile == null || !payable ? null : upiStateOf(profile, customer);
 
     return Scaffold(
       appBar: AppBar(
@@ -350,30 +372,45 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             ),
         ],
       ),
-      body: _body(profile, fee),
-      bottomNavigationBar: unpaid
-          ? Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: AppColors.rule)),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                  child: FilledButton.icon(
-                    onPressed: _busy ? null : () => _pay(profile),
-                    icon: const Icon(Icons.lock_rounded),
-                    label: Text(S.payFee(fee)),
-                  ),
-                ),
-              ),
-            )
-          : null,
+      body: _body(profile, fee, upi, payable: payable),
+      bottomNavigationBar: _bottomAction(profile, upi),
     );
   }
 
-  Widget _body(Profile? profile, num? fee) {
+  /// Not live yet → *Publish my profile* (SPEC §9.23 F) — also in the Play
+  /// build, where a gift code still works. A UPI fee being verified / not
+  /// verified keeps its direct way to the checkout (SPEC §9.20 B).
+  Widget? _bottomAction(Profile? profile, ProfilePayment? upi) {
+    if (profile == null) return null;
+    final Widget button;
+    if (upi != null) {
+      button = FilledButton.icon(
+        onPressed: _busy ? null : () => _pay(profile),
+        icon: Icon(upi.isSubmitted ? Icons.hourglass_top_rounded : Icons.error_outline_rounded),
+        label: Text(upi.isSubmitted ? S.viewPaymentStatus : S.fixPayment),
+      );
+    } else if (profile.needsPublishing) {
+      button = FilledButton.icon(
+        onPressed: _busy ? null : () => _publish(profile),
+        icon: const Icon(Icons.publish_rounded),
+        label: const Text(S.publishMyProfile),
+      );
+    } else {
+      return null;
+    }
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: AppColors.rule)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 10), child: button),
+      ),
+    );
+  }
+
+  Widget _body(Profile? profile, num? fee, ProfilePayment? upi, {required bool payable}) {
     if (_loading && profile == null) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -415,20 +452,50 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             ),
             const SizedBox(height: 12),
           ],
-          NoticeCard(
-            icon: icon,
-            title: S.visibilityTitle(visibility?.apiValue),
-            body: S.visibilityNote(visibility?.apiValue),
-            tint: tint,
-          ),
+          // A UPI fee being verified / not verified replaces "not paid" (SPEC §9.20 B).
+          if (upi != null && upi.isSubmitted)
+            UpiUnderReviewCard(utr: upi.utr)
+          else if (upi != null)
+            NoticeCard(
+              icon: Icons.error_outline_rounded,
+              title: S.upiNotVerified(upi.rejectReason),
+              body: S.upiNotVerifiedBody,
+              tint: theme.colorScheme.error,
+            )
+          else
+            NoticeCard(
+              icon: icon,
+              title: S.visibilityTitle(visibility?.apiValue),
+              body: !payable && !profile.paid ? S.paymentUnavailable : S.visibilityNote(visibility?.apiValue),
+              tint: tint,
+            ),
+          // How the fee was settled (SPEC §9.23 B) — e.g. a gift code.
+          if (profile.paid && profile.paidVia != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+              child: Text(
+                S.paidViaLine(profile.paidVia!),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+              ),
+            ),
           // Only a server that knows the toggles (v2.8+) gets the entry.
           if (masters.hasPrivacy) ...[
             const SizedBox(height: 12),
-            _PrivacyEntry(
+            _EntryCard(
+              icon: Icons.shield_outlined,
+              title: S.privacyTitle,
               summary: _privacySummary(profile, masters),
               onTap: () => _openPrivacy(profile),
             ),
           ],
+          // My profile as other families see it, before / after (SPEC §9.23 D).
+          const SizedBox(height: 12),
+          _EntryCard(
+            icon: Icons.visibility_outlined,
+            title: S.viewAsOthers,
+            summary: S.viewAsOthersHint,
+            onTap: () => ProfilePreviewScreen.open(context, profile.id),
+          ),
           const SizedBox(height: 16),
           SectionHeader(
             S.photos,
@@ -447,7 +514,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
           const SizedBox(height: 16),
           ProfileChipRow(
             profile: profile,
-            trailing: [VisibilityChip(visibility: visibility, fee: fee)],
+            trailing: [VisibilityChip(visibility: visibility, fee: fee, payment: upi, payable: payable)],
           ),
           const SizedBox(height: 16),
           ProfileFactGrid(profile: profile),
@@ -486,6 +553,15 @@ String? _idOf(Profile profile, Customer? customer) {
   return null;
 }
 
+/// An unpaid profile's UPI fee that is being verified or was not verified
+/// (SPEC §9.20 B) — from the profile itself, else from the same profile in
+/// the account's `profiles[]`; null when paid or nothing to say.
+ProfilePayment? upiStateOf(Profile profile, Customer? customer) {
+  if (profile.paid) return null;
+  final payment = profile.payment ?? customer?.myProfile(profile.id)?.payment;
+  return payment != null && (payment.isSubmitted || payment.isRejected) ? payment : null;
+}
+
 /// "3 details hidden · shown to all communities".
 String _privacySummary(Profile profile, MasterData masters) {
   final settings = PrivacySettings.fromProfile(profile);
@@ -496,10 +572,13 @@ String _privacySummary(Profile profile, MasterData masters) {
   );
 }
 
-/// The *Privacy settings* card on My profile: what it is, how it is set now.
-class _PrivacyEntry extends StatelessWidget {
-  const _PrivacyEntry({required this.summary, required this.onTap});
+/// A tappable card on My profile: *Privacy settings* (what it is, how it is
+/// set now) and *View as others see it*.
+class _EntryCard extends StatelessWidget {
+  const _EntryCard({required this.icon, required this.title, required this.summary, required this.onTap});
 
+  final IconData icon;
+  final String title;
   final String summary;
   final VoidCallback onTap;
 
@@ -518,14 +597,14 @@ class _PrivacyEntry extends StatelessWidget {
                 height: 38,
                 decoration: BoxDecoration(color: AppColors.goldLight, borderRadius: BorderRadius.circular(12)),
                 alignment: Alignment.center,
-                child: const Icon(Icons.shield_outlined, size: 20, color: AppColors.wine),
+                child: Icon(icon, size: 20, color: AppColors.wine),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(S.privacyTitle, style: theme.textTheme.titleSmall?.copyWith(color: AppColors.wine)),
+                    Text(title, style: theme.textTheme.titleSmall?.copyWith(color: AppColors.wine)),
                     const SizedBox(height: 2),
                     Text(
                       summary,

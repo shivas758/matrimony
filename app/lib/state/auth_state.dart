@@ -99,6 +99,7 @@ class AuthState extends ChangeNotifier {
     required String phoneVerificationToken,
     String? agencyName,
     int? stateId,
+    bool acceptedTerms = false,
   }) async {
     final result = await _auth.signup(
       fullName: fullName,
@@ -108,6 +109,7 @@ class AuthState extends ChangeNotifier {
       phoneVerificationToken: phoneVerificationToken,
       agencyName: agencyName,
       stateId: stateId,
+      acceptedTerms: acceptedTerms,
     );
     _set(AuthPhase.loggedIn, result.agent);
     _startPolling();
@@ -145,7 +147,8 @@ class AuthState extends ChangeNotifier {
     _set(AuthPhase.loggedOut, null);
   }
 
-  /// Re-reads the agent — used by the pending screen to poll for activation.
+  /// Re-reads the agent — used by the pending screen to poll for activation,
+  /// and after a gift code changed my counts (SPEC §9.23).
   Future<void> refreshAgent() async {
     try {
       final agent = await _auth.me();
@@ -165,6 +168,21 @@ class AuthState extends ChangeNotifier {
       notifyListeners();
     } on ApiException {
       // Badge refresh is best-effort.
+    }
+    // SPEC §9.23 A: the server approves an agent by itself at 10 live
+    // clients — while not approved yet, keep the banner's count current.
+    if (_agent?.needsApproval ?? false) await _refreshAgentQuietly();
+  }
+
+  /// Re-reads /auth/me without touching polling or push.
+  Future<void> _refreshAgentQuietly() async {
+    try {
+      final agent = await _auth.me();
+      if (_phase != AuthPhase.loggedIn) return;
+      _agent = agent;
+      notifyListeners();
+    } on ApiException {
+      // Best-effort, like the badge.
     }
   }
 

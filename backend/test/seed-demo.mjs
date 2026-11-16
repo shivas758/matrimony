@@ -174,7 +174,9 @@ async function main() {
       console.warn(`  could not create ${spec.full_name}: ${res.status} ${JSON.stringify(res.body)}`);
       continue;
     }
-    await api('POST', `/api/admin/agents/${res.body.agent.id}/activate`, admin);
+    // Signups are active at once (SPEC §9.23 A); approve so the seed agents see each other's
+    // profiles and appear in the customers' directory (409 already_approved on a re-run).
+    await api('POST', `/api/admin/agents/${res.body.agent.id}/approve`, admin);
     // A demo agent seeded before v2.8 has no code yet: choose the state now.
     if (!res.body.agent.agent_code && spec.state) await api('POST', '/api/my/state', res.body.token, { state_id: spec.state });
     await api('PATCH', '/api/my/account', res.body.token, { city: pick(['Hyderabad', 'Vijayawada', 'Guntur'], tokens.length) });

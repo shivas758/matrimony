@@ -8,11 +8,13 @@ import '../../../services/profile_service.dart';
 import '../../../state/auth_state.dart';
 import '../../../state/browse_state.dart';
 import '../../../state/interests_state.dart';
+import '../../../state/notifications_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/photo_viewer.dart';
 import '../../widgets/profile_sections.dart';
+import '../../widgets/report_sheet.dart';
 import '../get_started/get_started_screen.dart';
 
 /// Another family's profile (SPEC §9.11 Gandharva 3): photo carousel, chips,
@@ -23,7 +25,7 @@ import '../get_started/get_started_screen.dart';
 /// send it). Details the family switched off (SPEC §9.18 D) arrive empty —
 /// a hidden name as "Profile 1042", a single photo — and the page says so
 /// with a lock note; they come with the on-request block once the interest
-/// is accepted.
+/// is accepted. ⋮ → *Report profile* / *Block* (SPEC §9.22).
 class ProfileDetailScreen extends StatefulWidget {
   const ProfileDetailScreen({super.key, required this.profileId});
 
@@ -41,7 +43,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   bool _locked = false;
   bool _loading = true;
   bool _busy = false;
-  int _photoIndex = 0;
 
   @override
   void initState() {
@@ -207,6 +208,55 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     });
   }
 
+  // ------------------------------------------------------------ report / block (SPEC §9.22)
+
+  Future<void> _report() async {
+    final sent = await showReportSheet(context, profileId: widget.profileId);
+    if (sent && mounted) showSnack(context, S.reportThanks);
+  }
+
+  /// Confirm → block → back to where I came from, the profile gone from my lists.
+  Future<void> _block() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(S.blockTitle),
+        content: const Text(S.blockBody),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text(S.cancel)),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(S.block),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _run(() async {
+      await context.read<ProfileService>().blockProfile(widget.profileId);
+      if (!mounted) return;
+      _forgetBlocked();
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).pop();
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text(S.profileBlocked)));
+    });
+  }
+
+  /// The blocked profile leaves Browse and Interested now; the server's view
+  /// (pending interests withdrawn) follows with a reload.
+  void _forgetBlocked() {
+    final id = widget.profileId;
+    context.read<BrowseState?>()?.removeProfile(id);
+    final interests = context.read<InterestsState?>();
+    interests?.removeProfile(id);
+    final customer = context.read<AuthState>().customer;
+    if (interests != null && customer != null) interests.load(customer.id, force: true);
+    context.read<NotificationsState?>()?.refresh();
+  }
+
   // ------------------------------------------------------------------ build
 
   @override
@@ -237,62 +287,37 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     final interest = p.interest;
 
     return Scaffold(
-      body: RefreshIndicator(
+      body: ProfileDetailView(
+        profile: p,
         onRefresh: _load,
-        child: CustomScrollView(
-          slivers: [
-            SliverAppBar(
-              expandedHeight: 400,
-              pinned: true,
-              backgroundColor: AppColors.wine,
-              foregroundColor: Colors.white,
-              systemOverlayStyle: SystemUiOverlayStyle.light,
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: const EdgeInsetsDirectional.only(start: 56, end: 24, bottom: 14),
-                expandedTitleScale: 1.5,
-                title: Text(
-                  p.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontFamily: AppTheme.displayFont,
-                    fontWeight: FontWeight.w600,
-                    fontVariations: [FontVariation('wght', 600)],
-                    color: Colors.white,
-                    fontSize: 18,
-                    shadows: [Shadow(color: Color(0x99000000), blurRadius: 12)],
+        // Report / Block another family's profile (SPEC §9.22 D).
+        actions: [
+          if (!p.isMine)
+            PopupMenuButton<_SafetyAction>(
+              tooltip: S.moreOptions,
+              icon: const Icon(Icons.more_vert_rounded),
+              enabled: !_busy,
+              onSelected: (action) => switch (action) {
+                _SafetyAction.report => _report(),
+                _SafetyAction.block => _block(),
+              },
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(
+                  value: _SafetyAction.report,
+                  child: _MenuRow(icon: Icons.flag_outlined, label: S.reportProfile),
+                ),
+                PopupMenuItem(
+                  value: _SafetyAction.block,
+                  child: _MenuRow(
+                    icon: Icons.block_rounded,
+                    label: S.block,
+                    color: Theme.of(ctx).colorScheme.error,
                   ),
                 ),
-                background: _PhotoCarousel(
-                  profile: p,
-                  index: _photoIndex,
-                  onIndexChanged: (i) => setState(() => _photoIndex = i),
-                ),
-              ),
+              ],
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ProfileChipRow(profile: p),
-                    // Some details are kept back until the family approves.
-                    if (p.hasMaskedFields) ...[
-                      const SizedBox(height: 12),
-                      const LockNote(text: S.someDetailsHidden),
-                    ],
-                    const SizedBox(height: 16),
-                    ProfileFactGrid(profile: p),
-                    const SizedBox(height: 20),
-                    ProfilePublicCards(profile: p),
-                    _InterestBlock(profile: p, interest: interest),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+        ],
+        footer: InterestBlock(profile: p, interest: interest),
       ),
       bottomNavigationBar: _ActionBar(
         interest: interest,
@@ -304,9 +329,136 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   }
 }
 
-/// The state card at the bottom of the page (SPEC §9.11 Gandharva 3).
-class _InterestBlock extends StatelessWidget {
-  const _InterestBlock({required this.profile, required this.interest});
+/// The profile page itself, without anything that acts on it: the photo
+/// carousel under a collapsing title, the chips, the "some details are
+/// hidden" note, the at-a-glance tiles, the public cards and then [footer].
+/// [ProfileDetailScreen] adds the ⋮ menu, the interest block and the action
+/// bar; the "View as others see it" preview (SPEC §9.23 D) shows it as is.
+class ProfileDetailView extends StatefulWidget {
+  const ProfileDetailView({
+    super.key,
+    required this.profile,
+    this.actions = const [],
+    this.footer,
+    this.onRefresh,
+    this.showBackButton = true,
+    this.expandedHeight = 400,
+  });
+
+  final Profile profile;
+
+  /// App bar actions (the ⋮ menu).
+  final List<Widget> actions;
+
+  /// Below the public cards (the interest block, a note, the shared details).
+  final Widget? footer;
+
+  /// Pull to refresh, when set.
+  final Future<void> Function()? onRefresh;
+
+  /// A page of its own (back arrow, pinned title) — false inside a tab.
+  final bool showBackButton;
+  final double expandedHeight;
+
+  @override
+  State<ProfileDetailView> createState() => _ProfileDetailViewState();
+}
+
+class _ProfileDetailViewState extends State<ProfileDetailView> {
+  int _photoIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.profile;
+    final scroll = CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          expandedHeight: widget.expandedHeight,
+          pinned: widget.showBackButton,
+          automaticallyImplyLeading: widget.showBackButton,
+          backgroundColor: AppColors.wine,
+          foregroundColor: Colors.white,
+          // The theme's wine icons would vanish on the wine bar / dark photo scrim.
+          iconTheme: const IconThemeData(color: Colors.white),
+          actionsIconTheme: const IconThemeData(color: Colors.white),
+          systemOverlayStyle: SystemUiOverlayStyle.light,
+          actions: widget.actions,
+          flexibleSpace: FlexibleSpaceBar(
+            titlePadding: EdgeInsetsDirectional.only(start: widget.showBackButton ? 56 : 16, end: 24, bottom: 14),
+            expandedTitleScale: 1.5,
+            title: Text(
+              p.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontFamily: AppTheme.displayFont,
+                fontWeight: FontWeight.w600,
+                fontVariations: [FontVariation('wght', 600)],
+                color: Colors.white,
+                fontSize: 18,
+                shadows: [Shadow(color: Color(0x99000000), blurRadius: 12)],
+              ),
+            ),
+            background: _PhotoCarousel(
+              profile: p,
+              index: _photoIndex,
+              onIndexChanged: (i) => setState(() => _photoIndex = i),
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ProfileChipRow(profile: p),
+                // Some details are kept back until the family approves.
+                if (p.hasMaskedFields) ...[
+                  const SizedBox(height: 12),
+                  const LockNote(text: S.someDetailsHidden),
+                ],
+                const SizedBox(height: 16),
+                ProfileFactGrid(profile: p),
+                const SizedBox(height: 20),
+                ProfilePublicCards(profile: p),
+                ?widget.footer,
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+    final refresh = widget.onRefresh;
+    return refresh == null ? scroll : RefreshIndicator(onRefresh: refresh, child: scroll);
+  }
+}
+
+enum _SafetyAction { report, block }
+
+/// Icon + label in the ⋮ menu.
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({required this.icon, required this.label, this.color});
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Icon(icon, size: 20, color: color ?? AppColors.wine),
+          const SizedBox(width: 12),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+        ],
+      );
+}
+
+/// The state card at the bottom of the page (SPEC §9.11 Gandharva 3) — with
+/// the shared details while an accepted interest is live. Also the "after
+/// interest is accepted" part of the preview (SPEC §9.23 D).
+class InterestBlock extends StatelessWidget {
+  const InterestBlock({super.key, required this.profile, required this.interest});
 
   final Profile profile;
   final Interest? interest;

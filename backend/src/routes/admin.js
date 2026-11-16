@@ -8,6 +8,14 @@ import { intQuery, parse, passwordSchema } from '../lib/validate.js';
 import { deleteProfile } from '../lib/profiles.js';
 import { hashPassword } from '../lib/auth.js';
 import { CLIENT_SELECT, clientRow, loadClient, reassignCustomer, transitionCustomer } from '../lib/customers.js';
+import {
+  approveUpiPayment, listUpiPayments, paymentPublic, rejectUpiPayment, settleCommunityFeeDecision,
+} from '../lib/payments.js';
+import { completeDeletionRequest, listDeletionRequests, rejectDeletionRequest } from '../lib/accountDeletion.js';
+import { dismissReport, hideReportedProfile, listReports, suspendReportedAccount } from '../lib/moderation.js';
+import { approvedSql, liveClientsSql } from '../lib/agentApproval.js';
+import { addGiftCodes, giftCodeCounts } from '../lib/giftCodes.js';
+import { config } from '../lib/config.js';
 
 export const adminRouter = Router();
 
@@ -22,6 +30,8 @@ const rethrowUnique = (message) => (err) => {
 const agentListSchema = z.object({
   status: z.enum(['pending', 'active', 'suspended']).optional(),
   q: z.string().trim().max(80).optional(),
+  // SPEC §9.23 A: approved (10 live clients, or by an admin) or not yet.
+  approved: z.enum(['true', 'false']).optional(),
 });
 
 // GET /api/admin/agents?status=pending|active|suspended
@@ -42,6 +52,7 @@ adminRouter.get(
         `(a.full_name ILIKE $${params.length} OR a.phone ILIKE $${params.length} OR a.agent_code ILIKE $${params.length})`,
       );
     }
+    if (f.approved) where.push(f.approved === 'true' ? approvedSql('a') : `NOT ${approvedSql('a')}`);
 
     const rows = await many(
       `SELECT a.id, a.full_name, a.phone, a.agency_name, a.role, a.status, a.must_change_password, a.created_at,
@@ -50,7 +61,12 @@ adminRouter.get(
                    ELSE json_build_object('id', st.id, 'name', st.name, 'code', st.code) END AS state,
               COALESCE(json_agg(json_build_object('id', c.id, 'name', c.name)
                        ORDER BY c.sort_order) FILTER (WHERE c.id IS NOT NULL), '[]') AS communities,
-              (SELECT count(*)::int FROM profiles p WHERE p.uploaded_by = a.id) AS profile_count
+              (SELECT count(*)::int FROM profiles p WHERE p.uploaded_by = a.id) AS profile_count,
+              -- SPEC §9.23: approval, live clients, gift codes.
+              ${approvedSql('a')} AS approved, a.approved_at,
+              ${liveClientsSql('a.id')} AS live_clients,
+              (SELECT count(*)::int FROM gift_codes g WHERE g.agent_id = a.id AND g.status = 'unused') AS gift_codes_unused,
+              (SELECT count(*)::int FROM gift_codes g WHERE g.agent_id = a.id AND g.status = 'used') AS gift_codes_used
          FROM agents a
          LEFT JOIN states st ON st.id = a.state_id
          LEFT JOIN agent_communities ac ON ac.agent_id = a.id
@@ -60,7 +76,43 @@ adminRouter.get(
         ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END, a.created_at DESC`,
       params,
     );
-    res.json({ agents: rows });
+    res.json({ agents: rows, approval_clients: config.agents.approvalClients });
+  }),
+);
+
+// POST /api/admin/agents/:id/approve — approves an agent by hand (SPEC §9.23 A),
+// e.g. one who worked before v2.13. 409 already_approved.
+adminRouter.post(
+  '/agents/:id/approve',
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw notFound('agent_not_found', 'Agent not found');
+    const agent = await one('SELECT id, role, approved_at FROM agents WHERE id = $1', [id]);
+    if (!agent) throw notFound('agent_not_found', 'Agent not found');
+    if (agent.role === 'admin' || agent.approved_at) throw conflict('already_approved', 'This agent is already approved');
+    const row = await one(
+      `UPDATE agents SET approved_at = now(), approved_by = $2 WHERE id = $1
+       RETURNING id, full_name, phone, agency_name, role, status, created_at, agent_code, approved_at, approved_by`,
+      [id, req.agent.id],
+    );
+    res.json({ agent: { ...row, approved: true } });
+  }),
+);
+
+// POST /api/admin/agents/:id/gift-codes {count} — more gift codes for an agent (SPEC §9.23 B).
+const giftGrantSchema = z.object({
+  count: z.coerce.number().int().min(1, 'Add at least 1 code').max(50, 'Add at most 50 codes at a time'),
+});
+adminRouter.post(
+  '/agents/:id/gift-codes',
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw notFound('agent_not_found', 'Agent not found');
+    const { count } = parse(giftGrantSchema, req.body ?? {});
+    const agent = await one('SELECT id FROM agents WHERE id = $1', [id]);
+    if (!agent) throw notFound('agent_not_found', 'Agent not found');
+    await addGiftCodes(null, id, count, req.agent.id);
+    res.status(201).json({ gift_codes: await giftCodeCounts(id) });
   }),
 );
 
@@ -289,6 +341,100 @@ adminRouter.patch(
   }),
 );
 
+// ---------------------------------------------------------------- UPI payments (SPEC §9.20 D)
+
+const paymentStatusSchema = z.object({
+  status: z.enum(['submitted', 'paid', 'failed', 'all']).default('submitted'),
+});
+const rejectSchema = z.object({
+  reason: z.string().trim().min(3, 'Give a short reason').max(200),
+});
+
+// GET /api/admin/payments?status=submitted|paid|failed|all
+adminRouter.get(
+  '/payments',
+  asyncHandler(async (req, res) => {
+    const { status } = parse(paymentStatusSchema, req.query);
+    res.json({ payments: await listUpiPayments(status) });
+  }),
+);
+
+// POST /api/admin/payments/:id/approve — the admin found the UTR and amount in the bank.
+adminRouter.post(
+  '/payments/:id/approve',
+  asyncHandler(async (req, res) => {
+    res.json({ payment: paymentPublic(await approveUpiPayment(Number(req.params.id), req.agent.id)) });
+  }),
+);
+
+// POST /api/admin/payments/:id/reject {reason}
+adminRouter.post(
+  '/payments/:id/reject',
+  asyncHandler(async (req, res) => {
+    const { reason } = parse(rejectSchema, req.body ?? {});
+    res.json({ payment: paymentPublic(await rejectUpiPayment(Number(req.params.id), req.agent.id, reason)) });
+  }),
+);
+
+// ---------------------------------------------------------------- reports (SPEC §9.22 A)
+
+const reportStatusSchema = z.object({ status: z.enum(['open', 'actioned', 'dismissed', 'all']).default('open') });
+const reportNoteSchema = z.object({
+  note: z.string().trim().max(200).optional().nullable().transform((v) => (v ? v : null)),
+});
+
+adminRouter.get(
+  '/reports',
+  asyncHandler(async (req, res) => {
+    const { status } = parse(reportStatusSchema, req.query);
+    res.json({ reports: await listReports(status) });
+  }),
+);
+for (const [path, fn] of [
+  ['dismiss', dismissReport],
+  ['hide-profile', hideReportedProfile],
+  ['suspend-account', suspendReportedAccount],
+]) {
+  adminRouter.post(
+    `/reports/:id/${path}`,
+    asyncHandler(async (req, res) => {
+      const { note } = parse(reportNoteSchema, req.body ?? {});
+      res.json({ report: await fn(Number(req.params.id), req.agent.id, note) });
+    }),
+  );
+}
+
+// ---------------------------------------------------------------- account deletion (SPEC §9.20 F)
+
+const deletionStatusSchema = z.object({ status: z.enum(['pending', 'done', 'rejected', 'all']).default('pending') });
+const deletionNoteSchema = z.object({ note: z.string().trim().min(3, 'Give a short note').max(200) });
+
+// GET /api/admin/deletion-requests?status=pending|done|rejected|all
+adminRouter.get(
+  '/deletion-requests',
+  asyncHandler(async (req, res) => {
+    const { status } = parse(deletionStatusSchema, req.query);
+    res.json({ deletion_requests: await listDeletionRequests(status) });
+  }),
+);
+
+// POST /api/admin/deletion-requests/:id/complete — after confirming with the person.
+adminRouter.post(
+  '/deletion-requests/:id/complete',
+  asyncHandler(async (req, res) => {
+    res.json({ deletion_request: await completeDeletionRequest(Number(req.params.id), req.agent.id) });
+  }),
+);
+
+// POST /api/admin/deletion-requests/:id/reject {note}
+adminRouter.post(
+  '/deletion-requests/:id/reject',
+  asyncHandler(async (req, res) => {
+    const { note } = parse(deletionNoteSchema, req.body ?? {});
+    res.json({ deletion_request: await rejectDeletionRequest(Number(req.params.id), req.agent.id, note) });
+  }),
+);
+
 // ---------------------------------------------------------------- community change requests
 
 // GET /api/admin/community-requests
@@ -297,17 +443,24 @@ adminRouter.get(
   asyncHandler(async (req, res) => {
     const status = ['pending', 'approved', 'rejected'].includes(req.query.status) ? req.query.status : null;
     const rows = await many(
-      `SELECT ccr.id, ccr.status, ccr.created_at, ccr.decided_at,
+      `SELECT ccr.id, ccr.status, ccr.created_at, ccr.decided_at, ccr.fee_paise,
               a.id AS agent_id, a.full_name AS agent_name, a.phone AS agent_phone, a.agency_name,
-              c.id AS community_id, c.name AS community_name
+              c.id AS community_id, c.name AS community_name,
+              pay.id AS payment_id, pay.status AS payment_status, pay.utr
          FROM community_change_requests ccr
          JOIN agents a ON a.id = ccr.agent_id
          JOIN communities c ON c.id = ccr.community_id
+         LEFT JOIN LATERAL (SELECT id, status, utr FROM payments
+                             WHERE community_request_id = ccr.id AND purpose = 'extra_community'
+                             ORDER BY id DESC LIMIT 1) pay ON TRUE
         ${status ? 'WHERE ccr.status = $1' : ''}
         ORDER BY CASE WHEN ccr.status = 'pending' THEN 0 ELSE 1 END, ccr.created_at DESC`,
       status ? [status] : [],
     );
-    res.json({ community_requests: rows });
+    // The fee in rupees (SPEC §9.20 C); 0 = a free request.
+    res.json({
+      community_requests: rows.map(({ fee_paise: feePaise, ...r }) => ({ ...r, fee_inr: (feePaise ?? 0) / 100 })),
+    });
   }),
 );
 
@@ -317,6 +470,8 @@ async function decideCommunityRequest(id, decision, adminId) {
   if (row.status !== 'pending') throw conflict('already_decided', `This request is already ${row.status}`);
 
   return tx(async (client) => {
+    // A paid request (SPEC §9.20 C): approve needs the agent's payment; reject refunds / cancels it.
+    if (row.fee_paise > 0) await settleCommunityFeeDecision(client, row, decision, adminId);
     const { rows } = await client.query(
       `UPDATE community_change_requests SET status = $2, decided_by = $3, decided_at = now()
         WHERE id = $1 RETURNING *`,
@@ -609,6 +764,7 @@ adminRouter.get(
     const stats = await one(`
       SELECT (SELECT count(*)::int FROM agents WHERE status = 'active')  AS active_agents,
              (SELECT count(*)::int FROM agents WHERE status = 'pending') AS pending_agents,
+             (SELECT count(*)::int FROM agents a WHERE a.status = 'active' AND NOT ${approvedSql('a')}) AS unapproved_agents,
              (SELECT count(*)::int FROM profiles WHERE status = 'active') AS active_profiles,
              (SELECT count(*)::int FROM profiles) AS total_profiles,
              (SELECT count(*)::int FROM contact_requests WHERE status = 'pending') AS pending_contact_requests,
@@ -623,6 +779,9 @@ adminRouter.get(
              (SELECT count(*)::int FROM customers WHERE status = 'guest') AS guest_customers,
              (SELECT count(*)::int FROM payments WHERE status = 'paid' AND provider <> 'waived') AS paid_registrations,
              (SELECT count(*)::int FROM payments WHERE status = 'refund_due') AS refunds_due,
+             (SELECT count(*)::int FROM payments WHERE status = 'submitted') AS payments_to_verify,
+             (SELECT count(*)::int FROM account_deletion_requests WHERE status = 'pending') AS deletion_requests,
+             (SELECT count(*)::int FROM reports WHERE status = 'open') AS reports_open,
              (SELECT count(*)::int FROM customer_interests WHERE status = 'pending') AS pending_interests,
              (SELECT count(*)::int FROM agent_change_requests WHERE status = 'pending') AS pending_agent_changes`);
     res.json({ stats });

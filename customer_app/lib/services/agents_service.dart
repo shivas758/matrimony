@@ -61,9 +61,25 @@ class AgentsService {
 
   final ApiClient _api;
 
+  /// GET /customer/agents/recommended → {agents, based_on} (SPEC §9.23 C):
+  /// approved agents with my profile's community — same city first, then
+  /// same state, then the rest; most live clients first inside each group.
+  /// Empty (`based_on: null`) while I have no profile. A server older than
+  /// v2.13 has no such route (404): no recommendations then.
+  Future<RecommendedAgents> recommended() async {
+    try {
+      return RecommendedAgents.fromJson(await _api.get('/customer/agents/recommended'));
+    } on ApiException catch (e) {
+      if (e.status == 404 && e.code != 'agent_not_found') return RecommendedAgents.empty;
+      rethrow;
+    }
+  }
+
   /// GET /customer/agents?q=&community_id=&city= → {agents: [...]}; the
   /// current agent comes first with `is_current: true`. `q` matches the
-  /// name, the agency and the agent code (SPEC §9.18 B).
+  /// name, the agency and the agent code (SPEC §9.18 B). Since v2.13 only
+  /// approved agents are listed, most live clients first, and each row
+  /// carries `live_clients` (SPEC §9.23 C).
   Future<List<AgentCard>> directory({String? q, int? communityId, String? city}) async {
     final json = await _api.get('/customer/agents', query: {
       'q': ?_clean(q),
@@ -78,7 +94,8 @@ class AgentsService {
   /// POST /customer/agent {agent_phone | agent_code | agent_id} → {customer}
   /// (SPEC §9.12, agent code: §9.18 B). Allowed while guest / pending /
   /// rejected; the account becomes pending with that agent and my profile
-  /// moves to them. 404 `agent_not_found`, 400 `agent_not_active`, 400
+  /// moves to them (and gets its ID — SPEC §9.23 C: a profile may be filled
+  /// in before any agent). 404 `agent_not_found`, 400 `agent_not_active`, 400
   /// `agent_has_no_communities`, 400 `same_agent`, 409 `wrong_status`.
   Future<Customer> linkAgent({String? agentPhone, String? agentCode, int? agentId}) async {
     final json = await _api.post('/customer/agent', body: {

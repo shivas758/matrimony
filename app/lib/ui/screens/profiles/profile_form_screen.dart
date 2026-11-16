@@ -21,6 +21,7 @@ import '../../theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/photo_picker.dart';
 import '../../widgets/privacy_card.dart';
+import '../../widgets/searchable_lists.dart';
 import '../../widgets/step_header.dart';
 
 part 'profile_form_fields.dart';

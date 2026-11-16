@@ -5,6 +5,13 @@ import { asyncHandler, badRequest, conflict } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
 import { AGENT_SELECT, agentPublic } from '../lib/serialize.js';
 import { findState, issueAgentCode, issueMissingProfileCodes } from '../lib/codes.js';
+import { config } from '../lib/config.js';
+import { ApiError } from '../lib/errors.js';
+import { listBlocks, unblockProfile } from '../lib/moderation.js';
+import { ensureInitialGiftCodes, giftCodeCounts, listGiftCodes } from '../lib/giftCodes.js';
+import {
+  createCommunityFeePayment, paymentPublic, submitUpiPayment, upiReady,
+} from '../lib/payments.js';
 
 // Mounted at /api/my — agent self-service (SPEC §5 screen 10).
 export const meRouter = Router();
@@ -80,24 +87,56 @@ meRouter.post(
   }),
 );
 
-// GET /api/my/communities — current communities plus any pending join requests.
+/** The latest fee payment of each of the agent's requests, by request id. */
+async function requestPayments(agentId) {
+  const rows = await many(
+    `SELECT DISTINCT ON (community_request_id) *
+       FROM payments WHERE agent_id = $1 AND purpose = 'extra_community'
+      ORDER BY community_request_id, id DESC`,
+    [agentId],
+  );
+  return new Map(rows.map((r) => [r.community_request_id, r]));
+}
+
+/** A request as the app sees it: fee in rupees and its payment (SPEC §9.20 C). */
+function requestPublic(row, payment) {
+  const { fee_paise: feePaise, ...rest } = row;
+  return {
+    ...rest,
+    fee_inr: (feePaise ?? 0) / 100,
+    payment: payment
+      ? (({ id, status, utr, submitted_at, reject_reason, upi }) => ({ id, status, utr, submitted_at, reject_reason, upi }))(
+          paymentPublic(payment),
+        )
+      : null,
+  };
+}
+
+// GET /api/my/communities — current communities plus join requests (with any fee).
 meRouter.get(
   '/communities',
   asyncHandler(async (req, res) => {
-    const [communities, requests] = await Promise.all([
+    const [communities, requests, payments] = await Promise.all([
       many(
         `SELECT c.id, c.name FROM agent_communities ac JOIN communities c ON c.id = ac.community_id
           WHERE ac.agent_id = $1 ORDER BY c.sort_order, c.name`,
         [req.agent.id],
       ),
       many(
-        `SELECT ccr.id, ccr.status, ccr.created_at, ccr.decided_at, c.id AS community_id, c.name AS community_name
+        `SELECT ccr.id, ccr.status, ccr.created_at, ccr.decided_at, ccr.fee_paise,
+                c.id AS community_id, c.name AS community_name
            FROM community_change_requests ccr JOIN communities c ON c.id = ccr.community_id
           WHERE ccr.agent_id = $1 ORDER BY ccr.created_at DESC`,
         [req.agent.id],
       ),
+      requestPayments(req.agent.id),
     ]);
-    res.json({ communities, requests });
+    res.json({
+      communities,
+      requests: requests.map((r) => requestPublic(r, payments.get(r.id))),
+      free_limit: config.communities.freeLimit,
+      extra_fee_inr: config.communities.extraFeeInr,
+    });
   }),
 );
 
@@ -125,11 +164,62 @@ meRouter.post(
     );
     if (pending) throw conflict('already_pending', 'You already have a pending request for this community');
 
-    const row = await one(
-      `INSERT INTO community_change_requests (agent_id, community_id)
-       VALUES ($1,$2) RETURNING id, community_id, status, created_at`,
-      [req.agent.id, community_id],
+    // Beyond the free communities each one costs a one-time fee (SPEC §9.20 C).
+    const { n } = await one(
+      `SELECT (SELECT count(*) FROM agent_communities WHERE agent_id = $1)
+            + (SELECT count(*) FROM community_change_requests WHERE agent_id = $1 AND status = 'pending') AS n`,
+      [req.agent.id],
     );
-    res.status(201).json({ community_request: { ...row, community_name: community.name } });
+    const feeInr = config.communities.extraFeeInr;
+    const needsFee = !req.agent.is_admin && Number(n) >= config.communities.freeLimit && feeInr > 0;
+    if (needsFee && !upiReady()) throw new ApiError(503, 'payment_provider_error', 'UPI payments are not set up yet');
+
+    const { row, payment } = await tx(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO community_change_requests (agent_id, community_id, fee_paise)
+         VALUES ($1,$2,$3) RETURNING id, community_id, status, created_at, decided_at, fee_paise`,
+        [req.agent.id, community_id, needsFee ? Math.round(feeInr * 100) : 0],
+      );
+      const pay = needsFee ? await createCommunityFeePayment(client, req.agent.id, rows[0].id) : null;
+      return { row: rows[0], payment: pay };
+    });
+    res.status(201).json({ community_request: requestPublic({ ...row, community_name: community.name }, payment) });
+  }),
+);
+
+// GET /api/my/blocks · DELETE /api/my/blocks/:profileId (SPEC §9.22 B)
+meRouter.get(
+  '/blocks',
+  asyncHandler(async (req, res) => {
+    res.json({ blocks: await listBlocks({ agentId: req.agent.id }) });
+  }),
+);
+meRouter.delete(
+  '/blocks/:profileId',
+  asyncHandler(async (req, res) => {
+    res.json(await unblockProfile({ agentId: req.agent.id, profileId: Number(req.params.profileId) }));
+  }),
+);
+
+// POST /api/my/payments/:id/submit {utr} — the UPI reference of a community fee (SPEC §9.20 C).
+const utrSchema = z.object({
+  utr: z.string().trim().regex(/^\d{12}$/, 'Enter the 12-digit UPI reference (UTR) from your UPI app'),
+});
+meRouter.post(
+  '/payments/:id/submit',
+  asyncHandler(async (req, res) => {
+    const { utr } = parse(utrSchema, req.body ?? {});
+    const payment = await submitUpiPayment(Number(req.params.id), { agentId: req.agent.id }, utr);
+    res.json({ payment: paymentPublic(payment) });
+  }),
+);
+
+// GET /api/my/gift-codes — my free codes (SPEC §9.23 B): unused first, then used.
+meRouter.get(
+  '/gift-codes',
+  asyncHandler(async (req, res) => {
+    await ensureInitialGiftCodes(req.agent.id);
+    const counts = await giftCodeCounts(req.agent.id);
+    res.json({ gift_codes: await listGiftCodes(req.agent), ...counts });
   }),
 );

@@ -210,13 +210,16 @@ CREATE TABLE community_change_requests (
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
   decided_by INT REFERENCES agents(id),
   decided_at TIMESTAMPTZ,
+  -- >0: a community beyond the free three — needs its UPI payment (SPEC §9.20 C)
+  fee_paise INT NOT NULL DEFAULT 0 CHECK (fee_paise >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ===== Profiles =====
 CREATE TABLE profiles (
   id SERIAL PRIMARY KEY,
-  uploaded_by INT NOT NULL REFERENCES agents(id),
+  -- NULL only for a customer's profile before they link an agent (SPEC §9.23 C).
+  uploaded_by INT REFERENCES agents(id),
   full_name TEXT NOT NULL,
   gender TEXT NOT NULL CHECK (gender IN ('bride','groom')),
   dob DATE NOT NULL,
@@ -432,16 +435,30 @@ CREATE TABLE payments (
   id SERIAL PRIMARY KEY,
   customer_id INT REFERENCES customers(id) ON DELETE SET NULL,
   profile_id INT REFERENCES profiles(id) ON DELETE SET NULL,
-  purpose TEXT NOT NULL DEFAULT 'profile_registration' CHECK (purpose IN ('profile_registration')),
+  -- 'extra_community': an agent's fee for a community beyond the free three (SPEC §9.20 C)
+  purpose TEXT NOT NULL DEFAULT 'profile_registration'
+    CONSTRAINT payments_purpose_check CHECK (purpose IN ('profile_registration','extra_community')),
   amount_paise INT NOT NULL CHECK (amount_paise >= 0),
   currency TEXT NOT NULL DEFAULT 'INR',
-  provider TEXT NOT NULL CHECK (provider IN ('mock','razorpay','waived','cash')),
+  -- 'upi': paid straight to the owner's UPI ID, verified by an admin (SPEC §9.20)
+  provider TEXT NOT NULL CONSTRAINT payments_provider_check CHECK (provider IN ('mock','razorpay','waived','cash','upi','gift')),
+  -- 'submitted': UPI payer entered the UTR, waiting for an admin (SPEC §9.20)
   -- 'refund_due': money that arrived for an already-paid / deleted profile (SPEC §9.19 B)
-  status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','paid','failed','refund_due')),
+  status TEXT NOT NULL DEFAULT 'created'
+    CONSTRAINT payments_status_check CHECK (status IN ('created','submitted','paid','failed','refund_due')),
   provider_order_id TEXT,
   provider_payment_id TEXT,
   recorded_by INT REFERENCES agents(id),     -- 'cash': the agent who took it (SPEC §9.13)
   note TEXT,
+  -- extra_community payments belong to an agent and their request (SPEC §9.20 C)
+  agent_id INT REFERENCES agents(id) ON DELETE SET NULL,
+  community_request_id INT REFERENCES community_change_requests(id) ON DELETE SET NULL,
+  -- 'upi': the payer's UPI reference and the admin's verification (SPEC §9.20)
+  utr TEXT,
+  submitted_at TIMESTAMPTZ,
+  verified_by INT REFERENCES agents(id),
+  verified_at TIMESTAMPTZ,
+  reject_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   paid_at TIMESTAMPTZ
 );
@@ -450,6 +467,26 @@ CREATE UNIQUE INDEX uq_payments_profile_paid ON payments(profile_id)
   WHERE status = 'paid' AND purpose = 'profile_registration';
 CREATE UNIQUE INDEX uq_payments_razorpay_order ON payments(provider_order_id)
   WHERE provider = 'razorpay';
+CREATE UNIQUE INDEX uq_payments_utr ON payments(utr)
+  WHERE utr IS NOT NULL AND status IN ('submitted','paid');
+CREATE INDEX idx_payments_status_submitted ON payments(submitted_at) WHERE status = 'submitted';
+CREATE INDEX idx_payments_agent ON payments(agent_id) WHERE agent_id IS NOT NULL;
+
+-- Account deletion requests from the public page /delete-account (SPEC §9.20 F, Google Play rule).
+CREATE TABLE account_deletion_requests (
+  id SERIAL PRIMARY KEY,
+  app TEXT NOT NULL CHECK (app IN ('customer','agent')),
+  phone TEXT NOT NULL,
+  full_name TEXT,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','done','rejected')),
+  handled_by INT REFERENCES agents(id) ON DELETE SET NULL,
+  handled_at TIMESTAMPTZ,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_account_deletion_pending ON account_deletion_requests(created_at)
+  WHERE status = 'pending';
 
 -- ===== Deleting a paid customer profile (SPEC §9.13) =====
 -- The customer asks; their agent (or an admin) approves, which deletes it.
@@ -586,3 +623,98 @@ INSERT INTO communities (name, sort_order) VALUES
 -- Hash below is bcrypt of 'ChangeMe@123' (cost 10). Regenerate if bcrypt version differs.
 INSERT INTO agents (full_name, phone, password_hash, agency_name, role, status) VALUES
  ('Default Admin','9999999999','$2b$10$SYY1xOuL7fY1fxHrASEOQ.jTXDZq0XPt1V091ZUx/f6mcpjhbwWKm','HQ','admin','active');
+
+-- ===== Store-review demo world (SPEC §9.21) =====
+ALTER TABLE agents ADD COLUMN is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE customers ADD COLUMN is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE OR REPLACE FUNCTION profiles_inherit_demo() RETURNS trigger AS $$
+BEGIN
+  -- The uploader's flag, else (no agent yet, SPEC §9.23 C) the customer's.
+  NEW.is_demo := COALESCE((SELECT a.is_demo FROM agents a WHERE a.id = NEW.uploaded_by),
+                          (SELECT cu.is_demo FROM customers cu WHERE cu.id = NEW.customer_id),
+                          FALSE);
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_profiles_demo ON profiles;
+CREATE TRIGGER trg_profiles_demo BEFORE INSERT OR UPDATE OF uploaded_by ON profiles
+  FOR EACH ROW EXECUTE FUNCTION profiles_inherit_demo();
+
+CREATE OR REPLACE FUNCTION agents_propagate_demo() RETURNS trigger AS $$
+BEGIN
+  IF NEW.is_demo IS DISTINCT FROM OLD.is_demo THEN
+    UPDATE profiles SET is_demo = NEW.is_demo WHERE uploaded_by = NEW.id;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_agents_demo ON agents;
+CREATE TRIGGER trg_agents_demo AFTER UPDATE OF is_demo ON agents
+  FOR EACH ROW EXECUTE FUNCTION agents_propagate_demo();
+
+CREATE INDEX idx_profiles_demo ON profiles(id) WHERE is_demo;
+
+-- ===== Report, block, terms consent (SPEC §9.22) =====
+ALTER TABLE customers ADD COLUMN terms_accepted_at TIMESTAMPTZ;
+ALTER TABLE agents ADD COLUMN terms_accepted_at TIMESTAMPTZ;
+
+CREATE TABLE reports (
+  id SERIAL PRIMARY KEY,
+  reporter_agent_id INT REFERENCES agents(id) ON DELETE CASCADE,
+  reporter_customer_id INT REFERENCES customers(id) ON DELETE CASCADE,
+  profile_id INT REFERENCES profiles(id) ON DELETE SET NULL,
+  profile_label TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN
+    ('fake_profile','inappropriate_photo','offensive_content','scam_or_fraud','harassment','other')),
+  details TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','actioned','dismissed')),
+  action TEXT CHECK (action IN ('profile_hidden','account_suspended')),
+  handled_by INT REFERENCES agents(id) ON DELETE SET NULL,
+  handled_at TIMESTAMPTZ,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT reports_one_reporter CHECK ((reporter_agent_id IS NULL) <> (reporter_customer_id IS NULL))
+);
+CREATE INDEX idx_reports_open ON reports(created_at) WHERE status = 'open';
+CREATE INDEX idx_reports_profile ON reports(profile_id);
+
+CREATE TABLE blocks (
+  id SERIAL PRIMARY KEY,
+  blocker_agent_id INT REFERENCES agents(id) ON DELETE CASCADE,
+  blocker_customer_id INT REFERENCES customers(id) ON DELETE CASCADE,
+  profile_id INT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  profile_label TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT blocks_one_blocker CHECK ((blocker_agent_id IS NULL) <> (blocker_customer_id IS NULL))
+);
+CREATE UNIQUE INDEX uq_blocks_agent ON blocks(blocker_agent_id, profile_id) WHERE blocker_agent_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_blocks_customer ON blocks(blocker_customer_id, profile_id) WHERE blocker_customer_id IS NOT NULL;
+CREATE INDEX idx_blocks_profile ON blocks(profile_id);
+
+-- ===== Gift codes, approved agents, profiles without an agent (SPEC §9.23) =====
+-- approved_at: set at 10 live clients (or by an admin, approved_by); NULL = not approved yet.
+ALTER TABLE agents ADD COLUMN approved_at TIMESTAMPTZ;
+ALTER TABLE agents ADD COLUMN approved_by INT REFERENCES agents(id) ON DELETE SET NULL;
+ALTER TABLE agents ADD COLUMN gift_codes_granted_at TIMESTAMPTZ;   -- the free ten were issued
+UPDATE agents SET approved_at = now() WHERE role = 'admin';
+
+ALTER TABLE profiles ADD CONSTRAINT profiles_owner_check
+  CHECK (uploaded_by IS NOT NULL OR customer_id IS NOT NULL);
+
+CREATE TABLE gift_codes (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,                       -- WB-K7M2QX
+  agent_id INT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'unused' CHECK (status IN ('unused','used')),
+  granted_by INT REFERENCES agents(id) ON DELETE SET NULL,   -- admin; NULL = the free ten
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  used_at TIMESTAMPTZ,
+  customer_id INT REFERENCES customers(id) ON DELETE SET NULL,
+  profile_id INT REFERENCES profiles(id) ON DELETE SET NULL,
+  payment_id INT REFERENCES payments(id) ON DELETE SET NULL,
+  customer_name TEXT,                              -- kept after the customer / profile is gone
+  profile_name TEXT
+);
+CREATE INDEX idx_gift_codes_agent ON gift_codes(agent_id, status);

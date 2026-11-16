@@ -12,8 +12,7 @@ A private platform for marriage bureau agents to organise, filter, and share bri
 | Admin | Everything an agent can do across ALL communities + activate/suspend agents, manage master tables, approve/revoke any contact request, deactivate profiles and share links, view logs, manage customers |
 | Customer (Gandharva app, §9) | Attached to one agent; signs up with phone + OTP, waits for the agent's approval, fills their own profile, browses profiles in their agent's communities, marks *interested*, sees a profile's on-request fields once the other side's agent accepts, asks to change agent |
 
-Agent lifecycle: `pending` → (admin activates) → `active` → (admin may) `suspended`.
-Pending agents see only a "Your account is awaiting approval" screen after login.
+Agent lifecycle (since v2.13, §9.23 A): signup → `active` at once → *approved* automatically at 10 live clients (or by an admin) → (admin may) `suspended`. Until approved an agent sees only their own uploads and clients and is not in the customers' agents list. (Before v2.13: `pending` → admin activates → `active`; pending agents saw only a waiting screen.)
 
 ## 2. Database schema
 
@@ -1086,6 +1085,381 @@ Before: 8 agents (none with a code), 22 customers, 20 profiles, 48 photos, 20 pa
 taken just before: `~/backups/db-pre-wipe-20261111-052710.sql.gz` and
 `~/backups/uploads-pre-wipe-20261111-052710.tgz` on the VM. No agent code had been issued yet, so
 the first codes are `KA1A`, `TS1A`, …
+
+### 9.20 Direct UPI payments with manual verification, paid extra communities (v2.10)
+
+Razorpay, Easebuzz (and likely other gateways) refuse matrimony businesses, so the owner chose
+**direct UPI to their own UPI ID, verified by an admin**, for the APK builds; the Play Store
+build will use Google Play Billing later (Play forbids other in-app payment methods for in-app
+features). Agents now pay for communities beyond their first three. Apps: **Wedbook Agent
+3.2.0+14**, **Wedbook Matrimony 3.2.0+9**.
+
+#### A. Provider `upi`
+
+- Env: `PAYMENT_PROVIDER=upi` (customer fee), `UPI_PAYEE_VPA` (e.g. `wedbook@ybl` — a business
+  UPI ID works best: some UPI apps refuse app-initiated payments to personal IDs) and
+  `UPI_PAYEE_NAME`. The agents' community fee (C) always uses UPI, whatever `PAYMENT_PROVIDER`
+  is. No VPA → `503 payment_provider_error` "UPI payments are not set up yet".
+- **UPI block** on every UPI payment (wire): `upi: {vpa, name, amount_inr, note, reference,
+  uri}`; `reference = 'WB' + payment id`; `note = 'Wedbook ' + reference`;
+  `uri = upi://pay?pa=<vpa>&pn=<name>&am=<amount, 2 decimals>&cu=INR&tn=<note>` (URL-encoded;
+  no `tr`, which some apps reject for non-merchant IDs).
+- Payment rows (`payments`, migration 012): provider `upi`; statuses `created` → `submitted`
+  (payer entered the UTR) → `paid` (admin verified) or `failed` (admin rejected — the payer may
+  submit a corrected UTR on the same row); new columns `utr`, `submitted_at`, `verified_by`,
+  `verified_at`, `reject_reason`, `agent_id`, `community_request_id`; purpose
+  `extra_community` next to `profile_registration`. A UTR (12 digits) is accepted once
+  (`409 utr_already_used` while another payment holds it as submitted or paid).
+
+#### B. Customer fee by UPI (Wedbook Matrimony)
+
+- `POST /customer/my-profiles/:id/payment` with provider `upi` → reuses the profile's open UPI
+  payment (`created` or `failed`) or creates one → `{payment}` incl. `upi`, `utr`,
+  `submitted_at`, `reject_reason`. `409 payment_under_review` while one is `submitted`;
+  `409 already_paid` as before.
+- `POST /customer/payments/:id/submit {utr}` (12 digits) → `submitted` →
+  `{payment, profile, customer}`. Only from `created` / `failed`.
+- `POST /customer/payments/:id/confirm` on a UPI payment → `400 wrong_provider`.
+- The customer's own profile rows (`/customer/auth/me` profiles[], `/customer/my-profiles`,
+  `/customer/my-profiles/:id`, `/customer/profile`) gain `payment: {id, status, utr,
+  submitted_at, reject_reason} | null` — the latest UPI payment while the profile is unpaid.
+- Customer notifications: `payment_rejected` ("Payment not verified" — the reason) when an
+  admin rejects; a verified payment shows as the existing "payment received" item.
+
+#### C. Paid extra communities (Wedbook Agent)
+
+- Env: `COMMUNITY_FREE_LIMIT` (default 3), `EXTRA_COMMUNITY_FEE_INR` (default 1000).
+  **One-time** per extra community (owner's choice).
+- Signup: at most 3 `community_ids` → `400 too_many_communities` "Choose up to 3 communities —
+  you can add more later (₹1000 each)". Admins still set any communities directly
+  (`PUT /admin/agents/:id/communities`, no fee).
+- `POST /my/community-requests {community_id}`: when (current communities + pending requests)
+  ≥ the free limit and the requester is not an admin, the request carries `fee_inr: 1000` and a
+  UPI payment (purpose `extra_community`, `created`) → `201 {community_request: {…, fee_inr,
+  payment}}`. Otherwise free, as before.
+- `GET /my/communities` → `{communities, requests, free_limit, extra_fee_inr}`; each request has
+  `fee_inr` (0 = free) and `payment` (null or `{id, status, utr, submitted_at, reject_reason,
+  upi}`).
+- `POST /my/payments/:id/submit {utr}` — the agent's own payment, as in B.
+- Admin approve of a fee request needs its payment `submitted` (approving also verifies it →
+  `paid`) or already `paid`; `409 payment_not_submitted` otherwise. Reject: a `submitted`
+  payment becomes `refund_due` (note "community request rejected — refund it"), a `created` /
+  `failed` one `failed`. Admin request rows gain `fee_inr`, `payment_id`, `payment_status`, `utr`.
+- Agent feed: `payment_rejected` for the agent's own rejected payment.
+
+#### D. Admin verification (Wedbook Agent → admin)
+
+- `GET /api/admin/payments?status=submitted|paid|failed|all` (default `submitted`) →
+  `{payments: [{id, purpose, status, amount_inr, utr, reference, submitted_at, verified_at,
+  reject_reason, customer: {id, full_name, phone} | null, profile: {id, full_name,
+  profile_code} | null, agent: {id, full_name, phone, agent_code} | null, community: {id,
+  name} | null}]}` — the admin compares the UTR and amount with their bank / UPI app.
+- `POST /api/admin/payments/:id/approve` (only `submitted`, else `409 wrong_status`):
+  profile fee → settled like any payment (paid, `profiles.paid_at`, live when the customer is
+  active); extra community → paid + the request approved (community added).
+- `POST /api/admin/payments/:id/reject {reason}` (3–200 chars) → `failed` + `reject_reason`.
+- Admin feed: one `payment_to_verify` item per submitted payment, in the badge and
+  `counts.payments_to_verify`; admin stats `payments_to_verify`.
+
+#### F. Account deletion (Google Play requirement)
+
+- Public page **`/delete-account`** (linked from both apps' settings, the website footer and the
+  Play listing): which app, registered mobile number, optional name and reason → a row in
+  `account_deletion_requests` (`app`, `phone`, `full_name`, `reason`, `status` pending | done |
+  rejected, `handled_by`, `handled_at`, `note`); 10 posts per hour per address. The page says
+  what is deleted, what is kept (payment records, as the law requires) and "within 7 days".
+- The request is unauthenticated, so an admin **confirms with the person first**:
+  `GET /api/admin/deletion-requests?status=pending|done|rejected|all` →
+  `{deletion_requests: [{id, app, phone, full_name, reason, status, note, created_at,
+  handled_at, account_exists}]}`; `POST …/:id/complete` → customer: profile(s) + photos deleted,
+  then the customer row (payments keep the amount only); agent: `409 agent_has_data` while they
+  own profiles or clients, otherwise name / phone / password / agency / communities / devices
+  are scrubbed and the account suspended (the row stays — history and codes point at it);
+  `POST …/:id/reject {note}`. Admin feed `deletion_requested` items + `counts.deletion_requests`;
+  admin stats `deletion_requests`.
+- Apps: a **Delete my account** entry (Settings / More) opens
+  `<API_BASE_URL>/delete-account?app=customer|agent` in the browser; Wedbook Agent admins get an
+  **Account deletion requests** screen (complete / reject with a note).
+
+#### G. Play Store builds
+
+- Both apps are built as **Android App Bundles** signed with a dedicated **upload key** (Play App
+  Signing); the WhatsApp APKs keep the old key, so the Play install is a fresh install once.
+- `--dart-define=STORE=play` builds hide every non-Google payment (UPI, Razorpay) — Play only
+  allows Google Play Billing for in-app features: Wedbook Matrimony's checkout and Wedbook
+  Agent's paid community step show "Online payment isn't available in this version yet" (the
+  agent records the customer fee as cash; the admin adds extra communities). Google Play Billing
+  replaces this before the production release.
+- Target API level 36 (Play requirement for new apps since 31 Aug 2026).
+
+#### E. Apps
+
+- **Wedbook Matrimony 3.2.0** checkout for `upi`: amount card; *Pay with UPI app* (opens the
+  `uri` with any UPI app); a QR code of the same `uri` (pay from another phone) and the UPI ID
+  with a copy button; then "Enter the 12-digit UPI reference (UTR) from your UPI app" + Submit →
+  "Payment under verification — usually within a few hours"; a rejected payment shows the reason
+  and lets them submit again. My profile shows the same states.
+- **Wedbook Agent 3.2.0**: signup allows at most 3 communities ("more later, ₹1000 each");
+  *My communities* → requesting a 4th+ shows the fee and the same UPI pay + UTR step, and the
+  request's payment state; admins get **Payments to verify** (approve / reject with a reason)
+  with a badge, and the community-request list shows fee and payment state.
+
+### 9.21 Store-review demo world, per-app privacy and deletion pages (v2.11)
+
+Google Play reviewers (and pre-launch tests) log in with the "App access" accounts; they must see
+a working app, but never real families — and real users must never see demo content.
+
+- **Demo flag.** `agents.is_demo`, `customers.is_demo`, `profiles.is_demo` (migration 013,
+  default false). A profile's `is_demo` always equals its uploader's (`uploaded_by`) flag —
+  kept by a database trigger on insert / uploader change.
+- **Two worlds.** Every visibility rule adds "the profile's `is_demo` equals the viewer's":
+  agents (`visibilityClause`), customers (full and guest scope). **Admins see real profiles
+  only** — demo content is reached by logging in as a demo account. A customer only finds and
+  links agents of their own world (directory, link by phone / code / id → `404 agent_not_found`
+  otherwise). Demo accounts are flagged by an admin in the database, never from the apps.
+- **Demo content (production).** Demo agent `6000000002` (code GA1A) gets two communities and
+  ~8 demo profiles with generated placeholder photos (no real people); Demo Customer
+  `6000000001` is approved and its profile marked paid (cash), so reviewers can browse, open
+  profiles and send interests. Logins stay in `store/review-logins.txt`.
+- **Per-app policy pages** (website, linked from each Play listing): `/privacy/matrimony`,
+  `/privacy/agent` (full policy: who we are, what is collected, why, who sees it, service
+  providers — StartMessaging for OTP SMS, Google Firebase for notifications, the cloud host —
+  payments, retention, deletion, rights under India's DPDP Act 2023, children, security,
+  grievance contact, changes); `/privacy` lists both. `/delete-account/matrimony` and
+  `/delete-account/agent` are the deletion form with that app preselected and named.
+- **Backups honour deletion.** The nightly photo mirror runs with `--delete`, moving removed files
+  into `uploads-deleted/<date>/`, purged after 14 days like the database dumps (and old
+  `uploads-*.tgz`): deleted data leaves every backup within 14 days, as the policy says.
+
+### 9.22 Report, block, terms consent (v2.12 — Google Play user-generated-content policy)
+
+Play requires apps with user-generated content to let users **report** content and users,
+**block** users, and **accept terms** that define objectionable content before creating any.
+Apps: **Wedbook Agent 3.3.0+15**, **Wedbook Matrimony 3.3.0+10**. Migration 014.
+
+#### A. Reports
+
+- `reports`: `id, reporter_agent_id | reporter_customer_id` (exactly one), `profile_id`
+  (`ON DELETE SET NULL`), `profile_label` (the name as the reporter saw it), `reason`
+  (`fake_profile` | `inappropriate_photo` | `offensive_content` | `scam_or_fraud` | `harassment` |
+  `other`), `details` (≤ 500), `status` (`open` | `actioned` | `dismissed`), `action`
+  (`profile_hidden` | `account_suspended` | null), `handled_by`, `handled_at`, `note`,
+  `created_at`. One open report per reporter and profile (a second one updates it).
+- `POST /api/customer/profiles/:id/report {reason, details?}` and
+  `POST /api/profiles/:id/report {reason, details?}` → `201 {report: {id, status}}`; the profile
+  must be visible to the reporter (`404` otherwise); own profiles / uploads → `400 own_profile`.
+- Admin: `GET /api/admin/reports?status=open|actioned|dismissed|all` (default `open`) →
+  `{reports: [{id, reason, details, status, action, note, created_at, handled_at, reports_on_profile,
+  reporter: {type: 'customer'|'agent', id, full_name, phone}, profile: {id, full_name, profile_code,
+  status} | null, customer: {id, full_name, phone, status} | null, agent: {id, full_name,
+  agent_code, status} | null}]}` (`agent` = the profile's uploader).
+  `POST …/:id/dismiss {note?}`; `POST …/:id/hide-profile {note?}` → the profile becomes `hidden`
+  (invisible to everyone but its owners) and every open report on it `actioned`;
+  `POST …/:id/suspend-account {note?}` → the profile's customer is suspended (or, for an
+  agent-only profile, its uploading agent — never an admin) and the profile hidden; open reports
+  on it `actioned`. Admin feed `report_received` + `counts.reports_open`; stats `reports_open`.
+
+#### B. Blocks
+
+- `blocks`: `id, blocker_agent_id | blocker_customer_id` (exactly one), `profile_id`
+  (`ON DELETE CASCADE`), `profile_label`, `created_at`; unique per blocker and profile.
+- **Customers — both ways:** a profile a customer blocked is gone for them everywhere (browse,
+  detail, photos → `404`); and the blocked profile's own customer no longer sees the blocker's
+  profile either. Pending interests between the two are withdrawn.
+- **Agents:** a blocked profile is gone from that agent's lists and detail (`404`); own uploads
+  can't be blocked.
+- `POST /api/customer/profiles/:id/block`, `DELETE /api/customer/blocks/:profileId`,
+  `GET /api/customer/blocks` → `{blocks: [{profile_id, profile_label, created_at}]}`; agents:
+  `POST /api/profiles/:id/block`, `DELETE /api/my/blocks/:profileId`, `GET /api/my/blocks`.
+
+#### C. Terms consent
+
+- `customers.terms_accepted_at`, `agents.terms_accepted_at`. Signups (`/customer/auth/signup`,
+  `/auth/signup`) accept `accepted_terms: true` and stamp the time; the 3.3.0 apps require the
+  checkbox "I agree to the Terms & Conditions and Privacy Policy" (links to `/terms` and the app's
+  `/privacy/…`) before the signup button works. Older app builds still sign up (no stamp).
+- `/terms` gains **Objectionable content** (what is prohibited: nudity / sexual content, hate,
+  harassment and threats, fake or impersonating profiles, scams and fraud, minors, illegal
+  content, photos of others without consent) and **Reporting and blocking** (how; we review
+  reports promptly — aim: within 24 hours — and remove content / suspend accounts).
+
+#### D. Apps
+
+- **Wedbook Matrimony:** profile detail ⋮ → *Report profile* (reason list + optional details) and
+  *Block* (confirm; the profile disappears); More → *Blocked profiles* (unblock); signup terms
+  checkbox.
+- **Wedbook Agent:** profile detail ⋮ → *Report profile* and *Block* (not on own uploads);
+  Settings → *Blocked profiles*; signup terms checkbox; Admin → **Reports** (badge from
+  `counts.reports_open`; Dismiss / Hide profile / Suspend account, each with a confirm and an
+  optional note; `report_received` routes here).
+
+### 9.23 Gift codes, approved agents (10 live clients), publish last, profile preview, searchable lists (v2.13)
+
+Owner's requests of 2026-11-16 (answered up front). Where earlier sections say otherwise — §1's
+agent lifecycle, §9.2 / §9.12's "creating a profile needs a linked agent", §9.6's directory —
+this wins. Apps: **Wedbook Agent 3.4.0+16**, **Wedbook Matrimony 3.4.0+11**. Migration 015.
+
+#### A. Agents work from signup; "approved" = 10 live clients
+
+- **No admin activation any more.** `POST /auth/signup` creates the agent `active` (phone already
+  verified by OTP). Migration 015 turns every remaining `pending` agent `active`. Admins can still
+  suspend / re-activate; `pending` stays a valid status for old rows only.
+- **Live client** of an agent: a customer with `agent_id` = that agent, `status = 'active'`, whose
+  profile is paid (`paid_at` set — in the app, cash, or a gift code) and not `hidden` (status
+  `active`, `on_hold`, `engaged` or `married`). `live_clients` = how many such customers.
+- **Approved agent**: `agents.approved_at` is set (`approved_by` = the admin who approved by hand,
+  NULL = automatic). It is stamped automatically the first time the agent has
+  `APPROVAL_CLIENTS` (env, default **10**) live clients — checked whenever one of their clients'
+  profiles goes live (payment settled, cash, gift code, customer approved, agent change, admin
+  reassign) and on every request the not-yet-approved agent makes. **Once approved, always
+  approved** (later drops in the count do not undo it; an admin can still suspend). Admins
+  (`role = 'admin'`) count as approved. Migration 015 approves admins, demo agents (§9.21) and
+  agents that already have 10 live clients — nobody else.
+- Admin: `POST /admin/agents/:id/approve` → `{agent}` (stamps it by hand; `409 already_approved`).
+- **Until approved an agent sees only their own work** (owner's choice — otherwise anyone could
+  sign up and browse families): `visibilityClause` for a not-approved agent = their own uploads
+  (which include their clients' profiles) + customer profiles that have a live interest in one of
+  their uploads (§9.4 branch) + the profiles their own clients have a live interest in. Every
+  other profile is invisible (lists, detail `404`, photos, shares, contact / hold requests). They
+  are **not listed** in the customers' agents directory or recommendations (C), but a customer can
+  still link them by mobile number, agent code or gift code. Everything else works: upload, clients,
+  registration link, gift codes, communities.
+- Wire: `agentPublic` (`/auth/me`, login, signup) adds `approved` (bool), `approved_at`,
+  `live_clients`, `approval_clients` (10) and `gift_codes: {unused, used, total}`.
+  `GET /admin/agents` rows add `approved`, `approved_at`, `live_clients`, `gift_codes_unused`,
+  `gift_codes_used`; filter `?approved=true|false`. Admin stats add `unapproved_agents`.
+- Agent feed (`GET /notifications`): `agent_approved` ("You are approved — families can now find
+  you in the agents list", for 30 days after `approved_at`) and `gift_code_used` ("<customer> used
+  gift code WB-XXXXXX — their profile is live", 30 days). Both informational (not in the badge).
+
+#### B. Gift codes
+
+- `gift_codes`: `id, code (unique), agent_id, status ('unused'|'used'), granted_by (admin; NULL =
+  the free ten), created_at, used_at, customer_id, profile_id, payment_id, customer_name,
+  profile_name` (names kept after deletion).
+- **Ten free codes per agent, once** (`GIFT_CODES_PER_AGENT`, default 10): issued at signup and,
+  for existing agents, the first time they load `/auth/me` or `/my/gift-codes`
+  (`agents.gift_codes_granted_at` records it). An admin can add more:
+  `POST /admin/agents/:id/gift-codes {count}` (1–50) → `{gift_codes: {unused, used, total}}`.
+- Code format `WB-` + 6 characters from `23456789ABCDEFGHJKLMNPQRSTUVWXYZ` (no 0/O/1/I), e.g.
+  `WB-K7M2QX`. Input is case-insensitive; spaces, dashes and the `WB` prefix are optional.
+- Agent: `GET /my/gift-codes` → `{gift_codes: [{id, code, status, created_at, used_at, customer:
+  {id, full_name}|null, profile: {id, full_name}|null, share_text}], unused, used, total}` —
+  unused first (oldest first), then used (newest first). `share_text` = "Your free Wedbook
+  Matrimony gift code: WB-K7M2QX. Install Wedbook Matrimony, fill in your profile and enter this
+  code when you publish it — no ₹150 fee. Your agent: <name> (<agent code>)".
+- **Customer redeems** (Wedbook Matrimony, at publish): `POST /customer/my-profiles/:id/gift-code
+  {code}` → `{profile, customer}`. One transaction: the code → `used`; the customer is linked to
+  the code's agent if not already (a guest / pending / rejected customer simply switches — the
+  profile moves and gets its ID); the customer becomes `active` (approved by that agent — the code
+  is the approval); a `payments` row (`provider 'gift'`, `status 'paid'`, amount 0, `note` = the
+  code, `recorded_by` = the agent); the profile is paid and goes live. Errors: `404
+  gift_code_not_found` ("This gift code is not valid — check it with your agent"; also a code of the
+  other world, §9.21), `409 gift_code_used`, `409 already_paid`, `409 payment_under_review` (a UPI
+  payment is being verified), `409 gift_code_other_agent` (an ACTIVE customer and a code of another
+  agent — "This code is from another agent. Ask your agent for a code."), `400 agent_not_active`,
+  `400 agent_has_no_communities`, `403 account_suspended`, `429 too_many_attempts` (10 wrong codes
+  per customer per hour).
+- **Agent applies one** for a client (web-form clients, families without a phone app):
+  `POST /clients/:id/profiles/:profileId/gift-code {code?}` → `{client}` — the given code or the
+  client's agent's oldest unused one (`409 no_gift_codes` "You have no gift codes left — ask the
+  admin for more"); same effect. The client's agent or an admin.
+- Own-profile views and client `profiles[]` rows add `paid_via`: `'upi' | 'cash' | 'gift' |
+  'mock' | 'razorpay' | 'waived' | null`.
+
+#### C. Publish last (Wedbook Matrimony)
+
+The family fills in the whole profile first; the agent and the fee come only when they publish.
+
+- **A profile may exist without an agent.** `profiles.uploaded_by` is nullable for customer
+  profiles (`CHECK (uploaded_by IS NOT NULL OR customer_id IS NOT NULL)`). `POST
+  /customer/my-profiles` (and `/customer/profile`) no longer needs a linked agent: allowed for
+  `guest`, `pending`, `rejected` and `active` customers (also PATCH, photos, privacy). Such a
+  profile is `hidden`, has no ID and is nobody's upload; linking an agent (`POST /customer/agent`,
+  a gift code) makes it that agent's upload and issues its ID (§9.18 C), as before. The demo flag
+  comes from the customer while there is no uploader.
+- **Publishing** = 1 your agent (if none: a gift code, a recommended agent, the directory, or the
+  agent's mobile number / code) → 2 pay ₹150 (or a gift code) → 3 the agent approves (not needed
+  after a gift code) → live. Paying still needs a linked agent (`403 agent_required` "Choose your
+  agent first"). Agent approval and payment may happen in either order, as before.
+- **Recommended agents**: `GET /customer/agents/recommended` → `{agents: [directory row +
+  {live_clients, match: 'city'|'state'|'community'}], based_on: {community: {id, name}|null, city,
+  state} | null}`. Based on the customer's own profile: its community (even when the family hid it —
+  only the server uses it) and its native place (`city`, `state`). Candidates: approved, active
+  agents of the customer's world with at least that community; same city first (case-insensitive,
+  trimmed), then same state (agent's State name or code = profile `state`, or agent's city = profile
+  state), then the rest of the community; inside each group most live clients first, then name; at
+  most 20. No profile yet → `{agents: [], based_on: null}`. No phone location is used (Play
+  data-safety stays "location: No").
+- **Directory** `GET /customer/agents`: approved agents only (plus my current agent, always first);
+  then most live clients, then name. Rows add `live_clients`.
+- `/customer/auth/me` → `customer.agent` adds `live_clients`. The `unlock` checklist is unchanged;
+  the app orders it Register → Agent → Pay → Approval.
+
+#### D. "View as others see it" (Wedbook Matrimony)
+
+- `GET /customer/my-profiles/:id/preview?as=before|after` → `{profile}` in exactly the shape of
+  `GET /customer/profiles/:id` for another family: `before` (default) = what a family with full
+  access sees before their interest is accepted — public fields, the family's switched-off details
+  masked (`masked_fields`, neutral name), no on-request fields, no ID, `contact_access: 'none'`,
+  `interest: null`; `after` = after an accepted interest — switched-off details revealed and the
+  on-request fields added, `contact_access: 'granted'`, `interest: {status: 'accepted', days_left:
+  15}`. Both carry `is_mine: false` and `preview: true`. Works for any own profile, published or
+  not.
+- App: My profile → **View as others see it** → a screen with two tabs, *Before interest is
+  accepted* / *After interest is accepted*, each rendering the normal profile page (photos,
+  sections, the "hidden by the family" note) without the action buttons, under a banner "Preview —
+  this is how other families see your profile".
+
+#### E. Search inside long lists (both apps)
+
+No API change. Every list of master values with more than 8 entries — community, subcaste,
+education, profession, occupation type, mother tongue, religion, countries (nationality / work /
+NRI / birth / education), star, rasi, languages known, audience communities — gets a search box:
+- **Filter sheets** (Wedbook Matrimony Browse, Wedbook Agent Profiles): a search field above the
+  chips; typing keeps only matching chips (case-insensitive, anywhere in the name; a subcaste also
+  matches its community's name); selected ones always stay visible.
+- **Profile forms** (Wedbook Matrimony register / edit, Wedbook Agent add / edit): the dropdown
+  opens a picker sheet with a search field on top and the filtered list below (single choice: tap
+  to pick; multi choice: checkboxes + Done). Short lists (≤ 8) keep the plain dropdown.
+
+#### F. Screens
+
+**Wedbook Matrimony 3.4.0**
+- Get started: 1 **Create your profile** (open to guests) · 2 **Choose your agent** · 3 **Pay ₹150
+  or use a gift code** · 4 **Agent approval**. My profile: an unpublished profile shows **Publish my
+  profile** → the publish screen.
+- **Publish screen** (stepper Agent → Payment → Approval): no agent → "Have a gift code from an
+  agent?" (code field + Apply: links and publishes at once), **Recommended for you** (cards: name,
+  agency, city, agent code, communities, **N clients**, Call, *Choose*; "Based on your community
+  and native place"), *Search all agents* (directory), *Enter your agent's mobile number or code*.
+  With an agent → the agent card (Change while not yet active) → **Pay ₹150** (the UPI checkout)
+  or *Use a gift code* → "Waiting for your agent's approval" with a call button → "Your profile
+  is live".
+- Directory rows and the My agent card show "N clients".
+- My profile → **View as others see it** (D).
+- Searchable lists (E).
+
+**Wedbook Agent 3.4.0**
+- Signup goes straight to Home (no waiting screen for new agents).
+- **Not approved yet** banner (Profiles tab and More): "{n} of 10 clients live. Until you have 10,
+  you see only your own profiles and clients, and families can't find you in the agents list. Give
+  your free gift codes to families to get started." → **Gift codes**.
+- **Gift codes** (More → Gift codes, and from the banner): unused / used counts; unused codes with
+  Copy and Share (WhatsApp, `share_text`); used ones with the customer's name and date.
+- Client detail: an unpaid profile gets **Use a gift code** (confirm: "Use one of your free gift
+  codes ({n} left)? The profile goes live now.") next to *Mark paid (cash)*.
+- Settings: *Approved agent* ✓ or "{n} / 10 clients".
+- Admin → Agents: each row "Approved" or "{n}/10 clients", gift codes left; **Approve now** and
+  **Add gift codes** (count) actions; filter Approved / Not approved.
+- Searchable lists (E).
+
+#### G. Notes
+
+- Existing agents with fewer than 10 live clients become "not approved" when 015 runs; the admin
+  approves the ones to keep by hand (**Approve now**).
+- A gift code is spent on one profile; a customer who later deletes it pays for a new one.
+- Store builds (`STORE=play`): gift codes still work (no money involved).
 
 ## 8. Explicit v2 (do NOT build now)
 iOS build, Telugu/Hindi UI, horoscope matching/compatibility scores, in-app chat, AI import of old WhatsApp chat exports, OTP providers other than mock / msg91 / firebase (§9.19).

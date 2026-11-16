@@ -15,11 +15,13 @@ import 'services/phone_auth_gateway.dart';
 import 'services/profile_service.dart';
 import 'services/push_service.dart';
 import 'services/share_service.dart';
+import 'services/link_launcher.dart';
 import 'state/auth_state.dart';
 import 'state/home_nav.dart';
 import 'state/masters_state.dart';
 import 'state/notification_routes.dart';
 import 'state/profiles_state.dart';
+import 'state/store_config.dart';
 import 'ui/screens/auth/choose_state_screen.dart';
 import 'ui/screens/auth/force_password_screen.dart';
 import 'ui/screens/auth/login_screen.dart';
@@ -115,6 +117,8 @@ class _MediatorAppState extends State<MediatorApp> {
       providers: [
         Provider<ApiClient>.value(value: api),
         Provider<PushService>.value(value: push),
+        // WhatsApp APK or Play Store build (SPEC §9.20 G).
+        Provider<StoreConfig>.value(value: const StoreConfig()),
         ChangeNotifierProvider<HomeNav>.value(value: homeNav),
         Provider<ProfileService>.value(value: profileService),
         Provider<AuthService>(create: (_) => AuthService(api)),
@@ -127,6 +131,8 @@ class _MediatorAppState extends State<MediatorApp> {
         Provider<ShortlistService>(create: (_) => ShortlistService(api)),
         Provider<AdminService>(create: (_) => AdminService(api)),
         Provider<MyAccountService>(create: (_) => MyAccountService(api)),
+        // Opens upi://pay links, the deletion page and tel: (SPEC §9.20) — a seam for tests.
+        Provider<LinkLauncher>(create: (_) => const ExternalLinkLauncher()),
         ChangeNotifierProvider<MastersState>(create: (_) => MastersState(profileService)),
         ChangeNotifierProvider<ProfilesState>(create: (_) => ProfilesState(profileService)),
         ChangeNotifierProvider<AuthState>(

@@ -1,6 +1,8 @@
 import 'dart:ui' show Color;
 
+import '../config.dart';
 import '../models/payment.dart';
+import '../models/publish.dart';
 import 'api_client.dart';
 import 'razorpay_gateway.dart';
 
@@ -19,16 +21,48 @@ class RazorpayAttempt {
 ///   records a failed attempt to exercise the error path ([payMock]).
 /// - `razorpay`: a fresh order → Razorpay Checkout ([openRazorpay]) → the
 ///   checkout's payment id + signature to [confirmRazorpay].
+/// - `upi` (SPEC §9.20 B): the profile's open UPI payment ([openUpi]) — pay
+///   to the UPI ID shown, then [submitUtr]; an admin verifies it. Never
+///   [confirm]ed.
+///
+/// The Play build ([playStore], SPEC §9.20 G) offers neither UPI nor
+/// Razorpay — only Google Play Billing is allowed there; `mock` stays for dev.
 class PaymentService {
-  PaymentService(this._api);
+  PaymentService(this._api, {this.playStore = kPlayStore});
 
   final ApiClient _api;
 
-  /// Providers this build can complete in-app.
-  static bool supportsInApp(String provider) => provider == 'mock' || provider == 'razorpay';
+  /// This is the Google Play build — defaults to [kPlayStore]; tests flip it.
+  final bool playStore;
+
+  /// Providers a build can complete in-app: mock always; razorpay and upi
+  /// only outside the Play build.
+  static bool supportsInApp(String provider, {bool playStore = kPlayStore}) {
+    if (provider == 'mock') return true;
+    if (playStore) return false;
+    return provider == 'razorpay' || provider == 'upi';
+  }
+
+  /// [supportsInApp] for this build.
+  bool canPayInApp(String provider) => supportsInApp(provider, playStore: playStore);
+
+  /// Whether screens may offer *Pay* (and the UPI states) for [provider]:
+  /// always outside the Play build (an unknown provider leads to "coming
+  /// soon" as before); in the Play build only for a provider it can pay.
+  bool offersPayment(String provider) => !playStore || canPayInApp(provider);
+
+  /// A UPI reference (UTR) is exactly 12 digits.
+  static final _utrPattern = RegExp(r'^\d{12}$');
+
+  /// [text] without spaces / dashes (people copy "1234 5678 9012").
+  static String normalizeUtr(String text) => text.replaceAll(RegExp(r'[\s-]'), '');
+
+  static bool isValidUtr(String text) => _utrPattern.hasMatch(normalizeUtr(text));
 
   /// POST /customer/my-profiles/:id/payment → 201 {payment} — a new order
   /// every time (retries after a failure start fresh). 409 `already_paid`.
+  /// UPI reuses the profile's open payment (`created` / `failed`) and answers
+  /// 409 `payment_under_review` while one is `submitted`.
   Future<Payment> createOrder(int profileId) async {
     final json = await _api.post('/customer/my-profiles/$profileId/payment');
     return Payment.fromJson(json['payment'] as Map<String, dynamic>);
@@ -84,6 +118,42 @@ class PaymentService {
   Future<PaymentResult> confirmRazorpay(Payment order, RazorpaySuccess success) =>
       confirm(order, providerPaymentId: success.paymentId, signature: success.signature);
 
+  /// UPI, step 1 (SPEC §9.20 B): the profile's open UPI payment with who to
+  /// pay and the `upi://pay` link. 409 `payment_under_review` while a UTR
+  /// is being verified, 409 `already_paid`, 503 `payment_provider_error`
+  /// when the server has no UPI ID set up.
+  Future<Payment> openUpi(int profileId) async {
+    final order = await createOrder(profileId);
+    if (!order.isUpi) throw _wrongProvider(order.provider);
+    if (order.upi == null && !order.isSubmitted && !order.isPaid) {
+      throw ApiException('payment_provider_error', 'UPI payments are not set up yet', status: 503);
+    }
+    return order;
+  }
+
+  /// POST /customer/my-profiles/:id/gift-code {code} → {profile, customer}
+  /// (SPEC §9.23 B): an agent's free gift code instead of the fee. It also
+  /// links me to that agent if I have none (or am pending / rejected) and
+  /// approves me — the profile goes live at once. Sent as typed (trimmed);
+  /// the server ignores case, spaces, dashes and the `WB` prefix. Works in
+  /// the Play build too (no money involved). Errors: 404
+  /// `gift_code_not_found`, 409 `gift_code_used` / `already_paid` /
+  /// `payment_under_review` / `gift_code_other_agent`, 400
+  /// `agent_not_active` / `agent_has_no_communities`, 403
+  /// `account_suspended`, 429 `too_many_attempts`.
+  Future<GiftCodeResult> redeemGiftCode(int profileId, String code) async {
+    final json = await _api.post('/customer/my-profiles/$profileId/gift-code', body: {'code': code.trim()});
+    return GiftCodeResult.fromJson(json);
+  }
+
+  /// UPI, step 2: POST /customer/payments/:id/submit {utr} → `submitted` →
+  /// {payment, profile, customer}. 409 `utr_already_used`, 409
+  /// `wrong_status`, 400 `validation_failed`.
+  Future<PaymentResult> submitUtr(int paymentId, String utr) async {
+    final json = await _api.post('/customer/payments/$paymentId/submit', body: {'utr': normalizeUtr(utr)});
+    return PaymentResult.fromJson(json);
+  }
+
   /// Razorpay Checkout's options for [order] (SPEC §9.19 B).
   static Map<String, dynamic> razorpayOptions(Payment order, {String? phone, String? themeColor}) {
     final paise = order.amountPaise ?? (order.amountInr * 100).round();
@@ -107,7 +177,7 @@ class PaymentService {
   /// The order came back for another provider than the screen expected (the
   /// server switched): a provider this app handles → "try again" (the screen
   /// re-reads the account); anything else → "coming soon".
-  static ApiException _wrongProvider(String provider) => supportsInApp(provider)
+  ApiException _wrongProvider(String provider) => canPayInApp(provider)
       ? ApiException('payment_provider_changed', 'The payment method has just changed. Please try again.')
       : ApiException('payment_provider_unsupported', 'Online payment is coming soon — contact your agent');
 }

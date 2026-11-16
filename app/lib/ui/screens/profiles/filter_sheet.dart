@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../models/master_data.dart';
 import '../../../models/profile.dart';
 import '../../../state/masters_state.dart';
 import '../../../state/profile_filters.dart';
 import '../../strings.dart';
 import '../../widgets/common.dart';
+import '../../widgets/searchable_lists.dart';
 
-/// Bottom sheet with the age/height sliders and multi-select chips (SPEC §5 screen 3).
+/// Bottom sheet with the age/height sliders and multi-select chips (SPEC §5
+/// screen 3). Long chip lists get a search field and long multi choices open
+/// the searchable picker (SPEC §9.23 E).
 class FilterSheet extends StatefulWidget {
   const FilterSheet({super.key, required this.initial, this.showStatusFilter = false});
 
@@ -144,7 +146,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 const SizedBox(height: 8),
                 _ChipGroup(
                   title: S.community,
-                  items: masters.communities,
+                  options: masterOptions(masters.communities),
                   selected: _f.communityIds,
                   onToggle: (id) => setState(() {
                     final communities = _toggle(_f.communityIds, id);
@@ -161,15 +163,17 @@ class _FilterSheetState extends State<FilterSheet> {
                   }),
                 ),
                 // Subcaste chips appear only for the selected communities (SPEC §5).
+                // A subcaste also matches its community's name in the search.
                 _ChipGroup(
                   title: S.subcaste,
-                  items: [
+                  options: [
                     for (final s in masters.subcastesForAny(_f.communityIds))
-                      MasterItem(
-                        id: s.id,
-                        name: _f.communityIds.length > 1
+                      PickerOption(
+                        s.id,
+                        _f.communityIds.length > 1
                             ? '${masters.communityName(s.communityId) ?? ''} · ${s.name}'
                             : s.name,
+                        keywords: masters.communityName(s.communityId),
                       ),
                   ],
                   selected: _f.subcasteIds,
@@ -179,7 +183,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.education,
-                  items: masters.educations,
+                  options: masterOptions(masters.educations),
                   selected: _f.educationIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         educationIds: _toggle(_f.educationIds, id),
@@ -187,7 +191,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.profession,
-                  items: masters.professions,
+                  options: masterOptions(masters.professions),
                   selected: _f.professionIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         professionIds: _toggle(_f.professionIds, id),
@@ -195,7 +199,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.occupationType,
-                  items: masters.occupationTypes,
+                  options: masterOptions(masters.occupationTypes),
                   selected: _f.occupationTypeIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         occupationTypeIds: _toggle(_f.occupationTypeIds, id),
@@ -206,7 +210,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 // NRI country below.
                 if (masters.countries.isNotEmpty) ...[
                   const SectionHeader(S.worksIn),
-                  _MultiPickerField(
+                  MultiPickerField(
                     icon: Icons.public_rounded,
                     hint: S.anyWorkCountry,
                     selectedLabels: masters.countries
@@ -214,11 +218,11 @@ class _FilterSheetState extends State<FilterSheet> {
                         .map((c) => c.name)
                         .toList(),
                     onTap: () async {
-                      final next = await _MultiPickerDialog.show(
+                      final next = await showMultiPickerSheet(
                         context,
                         title: S.workCountry,
                         options: [
-                          for (final c in masters.countries) (id: c.id, label: c.name),
+                          for (final c in masters.countries) PickerOption(c.id, c.name),
                         ],
                         selected: _f.workCountryIds,
                       );
@@ -229,7 +233,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ],
                 _ChipGroup(
                   title: S.maritalStatus,
-                  items: masters.maritalStatuses,
+                  options: masterOptions(masters.maritalStatuses),
                   selected: _f.maritalStatusIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         maritalStatusIds: _toggle(_f.maritalStatusIds, id),
@@ -237,7 +241,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.complexion,
-                  items: masters.complexions,
+                  options: masterOptions(masters.complexions),
                   selected: _f.complexionIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         complexionIds: _toggle(_f.complexionIds, id),
@@ -245,7 +249,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.religion,
-                  items: masters.religions,
+                  options: masterOptions(masters.religions),
                   selected: _f.religionIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         religionIds: _toggle(_f.religionIds, id),
@@ -253,7 +257,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.motherTongue,
-                  items: masters.languages,
+                  options: masterOptions(masters.languages),
                   selected: _f.motherTongueIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         motherTongueIds: _toggle(_f.motherTongueIds, id),
@@ -261,7 +265,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.knownLanguages,
-                  items: masters.languages,
+                  options: masterOptions(masters.languages),
                   selected: _f.languageIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         languageIds: _toggle(_f.languageIds, id),
@@ -269,7 +273,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 _ChipGroup(
                   title: S.foodHabit,
-                  items: masters.foodHabits,
+                  options: masterOptions(masters.foodHabits),
                   selected: _f.foodHabitIds,
                   onToggle: (id) => setState(() => _f = _f.copyWith(
                         foodHabitIds: _toggle(_f.foodHabitIds, id),
@@ -293,7 +297,7 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 if (_f.nriOnly) ...[
                   const SizedBox(height: 8),
-                  _MultiPickerField(
+                  MultiPickerField(
                     icon: Icons.public_rounded,
                     hint: S.anyCountry,
                     selectedLabels: masters.countries
@@ -301,11 +305,11 @@ class _FilterSheetState extends State<FilterSheet> {
                         .map((c) => c.name)
                         .toList(),
                     onTap: () async {
-                      final next = await _MultiPickerDialog.show(
+                      final next = await showMultiPickerSheet(
                         context,
                         title: S.nriCountry,
                         options: [
-                          for (final c in masters.countries) (id: c.id, label: c.name),
+                          for (final c in masters.countries) PickerOption(c.id, c.name),
                         ],
                         selected: _f.countryIds,
                       );
@@ -315,18 +319,18 @@ class _FilterSheetState extends State<FilterSheet> {
                 ],
                 const SizedBox(height: 20),
                 const SectionHeader(S.rasi),
-                _MultiPickerField(
+                MultiPickerField(
                   hint: 'Any rasi',
                   selectedLabels: masters.zodiacSigns
                       .where((z) => _f.zodiacIds.contains(z.id))
                       .map((z) => z.label)
                       .toList(),
                   onTap: () async {
-                    final next = await _MultiPickerDialog.show(
+                    final next = await showMultiPickerSheet(
                       context,
                       title: S.rasi,
                       options: [
-                        for (final z in masters.zodiacSigns) (id: z.id, label: z.label),
+                        for (final z in masters.zodiacSigns) PickerOption(z.id, z.label),
                       ],
                       selected: _f.zodiacIds,
                     );
@@ -335,18 +339,18 @@ class _FilterSheetState extends State<FilterSheet> {
                 ),
                 const SizedBox(height: 20),
                 const SectionHeader(S.nakshatram),
-                _MultiPickerField(
+                MultiPickerField(
                   hint: 'Any nakshatram',
                   selectedLabels: masters.nakshatrams
                       .where((n) => _f.nakshatramIds.contains(n.id))
                       .map((n) => n.name)
                       .toList(),
                   onTap: () async {
-                    final next = await _MultiPickerDialog.show(
+                    final next = await showMultiPickerSheet(
                       context,
                       title: S.nakshatram,
                       options: [
-                        for (final n in masters.nakshatrams) (id: n.id, label: n.name),
+                        for (final n in masters.nakshatrams) PickerOption(n.id, n.name),
                       ],
                       selected: _f.nakshatramIds,
                     );
@@ -426,139 +430,37 @@ class _FilterSheetState extends State<FilterSheet> {
   }
 }
 
+/// A titled chip group of the sheet; long ones get a search field above the
+/// chips (SPEC §9.23 E).
 class _ChipGroup extends StatelessWidget {
   const _ChipGroup({
     required this.title,
-    required this.items,
+    required this.options,
     required this.selected,
     required this.onToggle,
   });
 
   final String title;
-  final List<MasterItem> items;
+  final List<PickerOption> options;
   final Set<int> selected;
   final ValueChanged<int> onToggle;
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
+    if (options.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHeader(title),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final item in items)
-              FilterChip(
-                label: Text(item.name),
-                selected: selected.contains(item.id),
-                onSelected: (_) => onToggle(item.id),
-              ),
-          ],
+        SearchableChipGroup(
+          key: ValueKey('chips-$title'),
+          searchLabel: title,
+          options: options,
+          selected: selected,
+          onToggle: onToggle,
         ),
         const SizedBox(height: 20),
       ],
     );
   }
-}
-
-/// Tappable field that summarises a long multi-select (rasi, nakshatram, country).
-class _MultiPickerField extends StatelessWidget {
-  const _MultiPickerField({
-    required this.hint,
-    required this.selectedLabels,
-    required this.onTap,
-    this.icon = Icons.auto_awesome_rounded,
-  });
-
-  final String hint;
-  final List<String> selectedLabels;
-  final VoidCallback onTap;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final empty = selectedLabels.isEmpty;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: InputDecorator(
-        decoration: InputDecoration(prefixIcon: Icon(icon)),
-        child: Text(
-          empty ? hint : selectedLabels.join(', '),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: empty ? theme.colorScheme.outline : null),
-        ),
-      ),
-    );
-  }
-}
-
-class _MultiPickerDialog extends StatefulWidget {
-  const _MultiPickerDialog({
-    required this.title,
-    required this.options,
-    required this.selected,
-  });
-
-  final String title;
-  final List<({int id, String label})> options;
-  final Set<int> selected;
-
-  static Future<Set<int>?> show(
-    BuildContext context, {
-    required String title,
-    required List<({int id, String label})> options,
-    required Set<int> selected,
-  }) =>
-      showDialog<Set<int>>(
-        context: context,
-        builder: (_) => _MultiPickerDialog(title: title, options: options, selected: selected),
-      );
-
-  @override
-  State<_MultiPickerDialog> createState() => _MultiPickerDialogState();
-}
-
-class _MultiPickerDialogState extends State<_MultiPickerDialog> {
-  late final Set<int> _selected = {...widget.selected};
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: Text(widget.title),
-        contentPadding: const EdgeInsets.only(top: 12),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: widget.options.length,
-            itemBuilder: (_, i) {
-              final o = widget.options[i];
-              return CheckboxListTile(
-                dense: true,
-                value: _selected.contains(o.id),
-                title: Text(o.label),
-                onChanged: (on) => setState(() {
-                  on == true ? _selected.add(o.id) : _selected.remove(o.id);
-                }),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => setState(() => _selected.clear()),
-            child: const Text(S.clearAll),
-          ),
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text(S.cancel)),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, _selected),
-            child: const Text('Done'),
-          ),
-        ],
-      );
 }

@@ -23,7 +23,8 @@ import '../../widgets/common.dart';
 ///   chips. [MoreScreen] pushes it.
 /// * [link] — Choose your agent (SPEC §9.12, guest / pending / rejected):
 ///   directory → confirm → POST /customer/agent {agent_id}; pops `true` once
-///   linked. Get started pushes it.
+///   linked. Get started and *Search all agents* on the publish screen push
+///   it. Rows show "N clients" when the server says (SPEC §9.23 C).
 class ChangeAgentScreen extends StatefulWidget {
   const ChangeAgentScreen({super.key, this.link = false});
 

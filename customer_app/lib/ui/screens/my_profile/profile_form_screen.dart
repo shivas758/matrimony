@@ -17,6 +17,7 @@ import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/photo_picker.dart';
+import '../../widgets/searchable_list.dart';
 import '../../widgets/step_header.dart';
 import 'privacy_screen.dart';
 
@@ -42,8 +43,10 @@ part 'profile_form_steps.dart';
 /// unsaved changes asks first.
 ///
 /// Creates my profile with POST /customer/my-profiles (multipart) or edits it
-/// with PATCH /customer/my-profiles/:id + the photo routes (SPEC §9.12).
-/// Needs a linked agent. Pops the saved [Profile].
+/// with PATCH /customer/my-profiles/:id + the photo routes (SPEC §9.12). No
+/// agent needed: a guest fills in the whole profile first and chooses the
+/// agent when publishing it (SPEC §9.23 C). Master lists longer than eight
+/// open a picker with a search box (SPEC §9.23 E). Pops the saved [Profile].
 ///
 /// The four steps live in `profile_form_steps.dart`, their field widgets in
 /// `profile_form_fields.dart`; all state stays here, so moving between the

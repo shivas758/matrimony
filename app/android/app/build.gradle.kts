@@ -1,9 +1,21 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Play Store upload key (SPEC §9.20 G). android/key.properties is NOT in git — it points at the
+// keystore kept outside the project (C:/Users/<you>/wedbook-keys). Only App Bundles (`flutter
+// build appbundle`, task bundleRelease) are signed with it; release APKs keep the old debug key
+// so the WhatsApp installs can still update in place.
+val uploadKeyProperties = Properties()
+val uploadKeyFile = rootProject.file("key.properties")
+if (uploadKeyFile.exists()) uploadKeyProperties.load(FileInputStream(uploadKeyFile))
+val buildingBundle = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
 
 android {
     namespace = "com.matrimonyagents.matrimony_agents"
@@ -31,11 +43,23 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("upload") {
+            if (uploadKeyFile.exists()) {
+                keyAlias = uploadKeyProperties["keyAlias"] as String
+                keyPassword = uploadKeyProperties["keyPassword"] as String
+                storeFile = file(uploadKeyProperties["storeFile"] as String)
+                storePassword = uploadKeyProperties["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // App Bundle for Play → upload key; APK for WhatsApp → the old debug key.
+            signingConfig =
+                if (buildingBundle && uploadKeyFile.exists()) signingConfigs.getByName("upload")
+                else signingConfigs.getByName("debug")
         }
     }
 }

@@ -232,6 +232,8 @@ class S {
   static const myCommunities = 'My communities';
   static const requestCommunity = 'Request another community';
   static const requestSent = 'Request sent to admin';
+  static const requestCommunityNote =
+      'An admin has to approve this before you can see those profiles.';
 
   // ---- Mediator fields (religion, languages, food, siblings)
   static const religion = 'Religion';
@@ -590,4 +592,330 @@ class S {
   static const phoneAuthNotSetUp =
       'Phone verification is not set up yet — please contact the admin.';
   static const phoneAuthFailed = 'Could not verify the number — try again.';
+
+  // ---- v3.2 paid extra communities, direct UPI payments (SPEC §9.20)
+  static String rupees(int amount) => '₹$amount';
+
+  /// "Up to 3 now — you can add more later (₹1000 each)"
+  static String signupCommunitiesLimit(int limit, int fee) =>
+      'Up to $limit now — you can add more later (₹$fee each)';
+
+  /// "Choose up to 3 communities — you can add more later (₹1000 each)"
+  static String tooManyCommunities(int limit, int fee) =>
+      'Choose up to $limit communities — you can add more later (₹$fee each)';
+
+  /// "1st", "2nd", "3rd", "4th", … "11th", "12th", "13th", "21st".
+  static String ordinal(int n) {
+    final mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 13) return '${n}th';
+    return switch (n % 10) { 1 => '${n}st', 2 => '${n}nd', 3 => '${n}rd', _ => '${n}th' };
+  }
+
+  /// "This is your 4th community: one-time fee ₹1000"
+  static String extraCommunityFee(int number, int fee) =>
+      'This is your ${ordinal(number)} community: one-time fee ₹$fee';
+  static String extraCommunityFeeBody(int freeLimit) =>
+      'Your first $freeLimit communities are free. After you send the request, pay by UPI '
+      'and enter the UPI reference (UTR) — an admin checks the payment and adds the community.';
+  static const continueToPay = 'Continue';
+  static String communityFeeFor(String community) => 'One-time fee for $community';
+  static const payCommunityFee = 'Pay the community fee';
+  static String payAmount(int amount) => 'Pay ₹$amount';
+  static String payWithUpiApp(int amount) => 'Pay ₹$amount with UPI app';
+  static const upiScanHint = 'Or scan this QR code with any UPI app — from another phone too';
+  static const upiId = 'UPI ID';
+  static const upiPayeeName = 'Name';
+  static const upiIdCopied = 'UPI ID copied';
+  static const copy = 'Copy';
+  static const upiNoApp =
+      'No UPI app opened. Scan the QR code from another phone, or pay to the UPI ID.';
+  static const upiReference = 'Reference';
+  static const utrLabel = 'UPI reference / UTR (12 digits)';
+  static const utrHint = 'After paying, find the 12-digit UTR / reference number in your UPI app.';
+  static const utrInvalid = 'Enter the 12-digit UTR';
+  static const submitForVerification = 'Submit for verification';
+  static const paymentUnderVerification = 'Payment under verification';
+  static const paymentUnderVerificationBody =
+      'An admin checks the payment, usually within a few hours. The community is added '
+      'once it is verified.';
+  static String paymentNotVerified(String? reason) =>
+      reason == null || reason.isEmpty ? 'Payment not verified' : 'Payment not verified: $reason';
+  static const submitAgain = 'Submit again';
+  static const paymentSubmitted = 'Submitted — an admin will verify the payment';
+  static const awaitingPayment = 'Awaiting payment';
+  static const notPaidYet = 'not paid yet — pay to send it to the admin';
+  static const paidWaitingApproval = 'Paid — waiting for admin approval';
+  static const waitingAdminApproval = 'Waiting for admin approval';
+  static const refundDue = 'refund due';
+  static String feeLabel(int fee) => 'Fee ₹$fee';
+  static String utrValue(String utr) => 'UTR $utr';
+  static const done = 'Done';
+  static const pendingRequests = 'Pending requests';
+  static const pastRequests = 'Past requests';
+  static String freeCommunitiesNote(int freeLimit, int fee) =>
+      'The first $freeLimit communities are free; each one after that is a one-time ₹$fee.';
+
+  // ---- v3.2 admin: payments to verify (SPEC §9.20 D)
+  static const paymentsToVerify = 'Payments to verify';
+  static const paymentsToVerifySubtitle = 'UPI payments waiting for your check';
+  static const paymentsCheckHint =
+      'Check this UTR and amount in your bank / UPI app before approving';
+  static const filterToVerify = 'To verify';
+  static const filterPaid = 'Paid';
+  static const filterRejected = 'Rejected';
+  static const filterAll = 'All';
+  static const noPaymentsToVerify = 'No payments to verify';
+  static const noPayments = 'No payments in this list';
+  static const purposeRegistration = 'Registration fee';
+  static const purposeExtraCommunity = 'Extra community';
+  static const utr = 'UTR';
+  static const utrCopied = 'UTR copied';
+  static const paidBy = 'Paid by';
+  static const forCommunity = 'Community';
+  static const submittedOn = 'Submitted';
+  static const verifiedOn = 'Verified';
+  static const rejectReason = 'Reason';
+  static const approvePaymentTitle = 'Approve this payment?';
+  static String approvePaymentBody(int amount, String? utr) =>
+      'Approve only if ₹$amount${utr == null ? '' : ' with UTR $utr'} has arrived in your bank / '
+      'UPI app.';
+  static const rejectPaymentTitle = 'Reject this payment?';
+  static const rejectPaymentBody = 'The payer sees this reason and can submit a corrected UTR.';
+  static const rejectReasonLabel = 'Reason';
+  static const rejectReasonHint = 'e.g. No payment with this UTR found';
+  static const rejectReasonInvalid = 'Write 3 to 200 characters';
+  static const paymentApproved = 'Payment approved';
+  static const paymentRejected = 'Payment rejected';
+  static String paymentsToVerifyCount(int n) =>
+      n == 1 ? '1 payment to verify' : '$n payments to verify';
+  static const statusToVerify = 'to verify';
+  static const statusPaid = 'paid';
+  static const statusRejected = 'rejected';
+  static const statusRefundDue = 'refund due';
+  static const statusAwaitingPayment = 'awaiting payment';
+
+  /// "Fee ₹1000 · payment submitted (UTR 123456789012)" etc.
+  static String feeState(int fee, String? paymentStatus, String? utr) {
+    final u = utr == null || utr.isEmpty ? '' : ' (UTR $utr)';
+    final state = switch (paymentStatus) {
+      'submitted' => 'payment submitted$u',
+      'paid' => 'paid$u',
+      'failed' => 'payment not verified$u',
+      'refund_due' => 'refund due$u',
+      _ => 'awaiting payment',
+    };
+    return 'Fee ₹$fee · $state';
+  }
+
+  // ---- v3.2 Play Store build: no non-Google payment (SPEC §9.20 G)
+  static const playNoExtraCommunityPayment =
+      "Extra communities can't be paid in this version yet — the admin can add them for you.";
+  static const onlinePaymentUnavailable = "Online payment isn't available in this version yet";
+  static String playSignupCommunitiesLimit(int limit) =>
+      'Up to $limit now — the admin can add more later';
+  static String playTooManyCommunities(int limit) =>
+      'Choose up to $limit communities — the admin can add more later';
+  static String playFreeCommunitiesNote(int freeLimit) =>
+      'The first $freeLimit communities are free; the admin can add more for you.';
+  static const ok = 'OK';
+
+  // ---- v3.2 delete my account (SPEC §9.20 F)
+  static const deleteMyAccount = 'Delete my account';
+  static const deleteMyAccountSubtitle = 'Ask us to delete your account and data';
+  static const deleteMyAccountBody =
+      "We'll open our account deletion page. After we confirm with you on your registered "
+      'number, your account and personal details are deleted within 7 days.';
+  static const openDeletionPage = 'Open deletion page';
+  static const cannotOpenBrowser = 'Could not open the browser';
+
+  // ---- v3.2 admin: account deletion requests (SPEC §9.20 F)
+  static const deletionRequests = 'Account deletion requests';
+  static const deletionRequestsSubtitle = 'People asking to delete their account';
+  static String deletionRequestsCount(int n) =>
+      n == 1 ? '1 deletion request' : '$n deletion requests';
+  static const deletionVerifyHint =
+      'Call or WhatsApp this number to confirm before deleting — the request is not verified.';
+  static const filterPending = 'Pending';
+  static const filterDone = 'Done';
+  static const noDeletionRequests = 'No account deletion requests';
+  static const noDeletionRequestsInList = 'No requests in this list';
+  static const appCustomer = customerAppName;
+  static const appAgent = 'Wedbook Agent';
+  static const accountFound = 'Account found';
+  static const noAccountWithNumber = 'No account with this number';
+  static const deleteAccount = 'Delete account';
+  static const deleteAccountTitle = 'Delete this account?';
+  static String deleteAccountConfirmBody(String phone) =>
+      'The account registered with +91 $phone and its personal details are deleted. '
+      'This cannot be undone.';
+  static const accountDeleted = 'Account deleted';
+  static const agentHasDataTitle = 'This agent still has data';
+  static const rejectDeletionTitle = 'Reject this request?';
+  static const rejectDeletionBody = 'Say why — for example, the person did not confirm it.';
+  static const noteLabel = 'Note';
+  static const rejectDeletionHint = 'e.g. Could not confirm with the person';
+  static const deletionRejected = 'Request rejected';
+  static const requestedOn = 'Requested';
+  static const handledOn = 'Handled';
+  static const statusDone = 'done';
+  static const statusPending = 'pending';
+  static const noReasonGiven = 'No reason given';
+
+  // ---- v3.3 report, block, terms (SPEC §9.22)
+  static const reportProfile = 'Report profile';
+  static const reportProfileBody = 'Why are you reporting this profile? The admins review every report.';
+  static const reportDetailsLabel = 'Details (optional)';
+  static const reportDetailsHint = 'Anything that helps the admins check it';
+  static const sendReport = 'Send report';
+  static const reportSent = 'Thanks — the admins will review this profile.';
+  static const block = 'Block';
+  static const blockProfileTitle = 'Block this profile?';
+  static const blockProfileBody =
+      'This profile will be hidden from you. Unblock any time in Settings → Blocked profiles.';
+  static const profileBlocked = 'Profile blocked';
+  static const blockedProfiles = 'Blocked profiles';
+  static const blockedProfilesSubtitle = 'Profiles you have hidden from yourself';
+  static const noBlockedProfiles = 'No blocked profiles';
+  static const noBlockedProfilesHint =
+      'Profiles you block from their ⋮ menu are listed here, so you can unblock them.';
+  static const unblock = 'Unblock';
+  static String unblocked(String label) => '$label unblocked';
+  static String blockedOn(String date) => 'Blocked on $date';
+
+  // terms consent at signup
+  static const termsAgreePrefix = 'I agree to the ';
+  static const termsLink = 'Terms & Conditions';
+  static const termsAnd = ' and ';
+  static const privacyLink = 'Privacy Policy';
+  static const termsRequired = 'Tick the box to agree to the Terms & Conditions and Privacy Policy';
+
+  // admin: reports
+  static const reports = 'Reports';
+  static const reportsSubtitle = 'Profiles reported by agents and families';
+  static String reportsCount(int n) => n == 1 ? '1 open report' : '$n open reports';
+  static const filterOpen = 'Open';
+  static const filterActioned = 'Actioned';
+  static const filterDismissed = 'Dismissed';
+  static const noOpenReports = 'No open reports';
+  static const noReportsInList = 'No reports in this list';
+  static const reportedBy = 'Reported by';
+  static const reporterFamily = 'Family';
+  static const reporterAgent = 'Agent';
+  static const familyLabel = 'Family';
+  static const uploadedByLabel = 'Uploaded by';
+  static String reportsOnProfile(int n) =>
+      n == 1 ? '1 report on this profile' : '$n reports on this profile';
+  static const profileDeletedLabel = 'Profile deleted';
+  static const dismiss = 'Dismiss';
+  static const hideProfile = 'Hide profile';
+  static const suspendAccount = 'Suspend account';
+  static const dismissReportTitle = 'Dismiss this report?';
+  static const dismissReportBody = 'Nothing changes for the profile. The report is closed.';
+  static const hideProfileTitle = 'Hide this profile?';
+  static const hideProfileBody =
+      'The profile is hidden from everyone but its owners, and every open report on it is closed.';
+  static const suspendAccountTitle = 'Suspend the account?';
+  static const suspendAccountBody =
+      "Suspends the family's account (or the uploading agent if there is no family account) and "
+      'hides the profile.';
+  static const noteOptionalLabel = 'Note (optional)';
+  static const reportDismissed = 'Report dismissed';
+  static const profileHidden = 'Profile hidden';
+  static const accountSuspended = 'Account suspended';
+  static const actionProfileHidden = 'profile hidden';
+  static const actionAccountSuspended = 'account suspended';
+  static const statusOpen = 'open';
+  static const statusActioned = 'actioned';
+  static const statusDismissed = 'dismissed';
+
+  // ---- v3.4 approved agents, gift codes (SPEC §9.23 A / B)
+  static const notApprovedTitle = 'Not approved yet';
+
+  /// "3 of 10 clients live. Until you have 10, …"
+  static String notApprovedBody(int live, int needed) =>
+      '$live of $needed clients live. Until you have $needed, you see only your own profiles '
+      "and clients, and families can't find you in the agents list. Give your free gift codes "
+      'to families to get started.';
+  static const giftCodes = 'Gift codes';
+  static const giftCodesIntro =
+      'Give a code to a family: they enter it when they publish their profile in '
+      '$customerAppName — no registration fee, and they become your client at once.';
+  static const giftCodesMoreHint = 'Need more codes? Ask the admin.';
+  static const unusedCodes = 'Unused';
+  static const usedCodes = 'Used';
+  static String unusedCount(int n) => n == 1 ? '1 unused' : '$n unused';
+  static String giftCodesLeft(int n) => n == 1 ? '1 gift code left' : '$n gift codes left';
+  static const noGiftCodes = 'No gift codes yet';
+  static const noGiftCodesHint = 'Pull down to check again, or ask the admin for codes.';
+  static const allCodesUsed = 'All your codes are used — ask the admin for more.';
+  static const giftCodeCopied = 'Gift code copied';
+  static const share = 'Share';
+  static String usedBy(String name) => 'Used by $name';
+  static const usedByUnknown = 'Used';
+  static String createdOn(String date) => 'Given $date';
+  static String usedOn(String date) => 'on $date';
+  static const cannotOpenWhatsApp = 'Could not open WhatsApp';
+
+  // client detail: spend a gift code on an unpaid profile
+  static const useGiftCode = 'Use a gift code';
+  static String useGiftCodeConfirm(int left) =>
+      'Use one of your free gift codes ($left left)? The profile goes live now.';
+  static const useGiftCodeConfirmAdmin =
+      "Use one of this client's agent's gift codes? The profile goes live now.";
+  static const useGiftCodeConfirmLabel = 'Use gift code';
+  static const giftCodeApplied = 'Gift code used — the profile is live';
+  static const noGiftCodesLeft = 'You have no gift codes left — ask the admin for more';
+
+  /// "Paid · gift code" — how a client's fee was settled.
+  static String paidVia(String? via) => switch (via) {
+        'gift' => 'Paid · gift code',
+        'cash' => 'Paid · cash',
+        'upi' => 'Paid · UPI',
+        'mock' || 'razorpay' => 'Paid · in app',
+        'waived' => 'Fee waived',
+        _ => feePaid,
+      };
+
+  // settings
+  static const approvedAgent = 'Approved agent ✓';
+  static String clientsProgress(int live, int needed) => '$live / $needed clients';
+  static const approvedAgentHint =
+      'Families find you in the agents list, and you see every profile of your communities.';
+  static String approvalProgressHint(int needed) =>
+      'At $needed live clients you are approved: you see every profile of your communities, and '
+      'families can find you in the agents list.';
+
+  // admin → agents
+  static const approved = 'Approved';
+  static const notApproved = 'Not approved';
+
+  /// "3/10 clients" — an admin row's progress pill.
+  static String clientsShort(int live, int needed) => '$live/$needed clients';
+  static const approveNow = 'Approve now';
+  static String approveAgentTitle(String name) => 'Approve $name now?';
+  static String approveAgentBody(int needed) =>
+      'They see every profile of their communities at once, and families can find them in the '
+      'agents list — without waiting for $needed live clients.';
+  static String agentApproved(String name) => '$name approved';
+  static const addGiftCodes = 'Add gift codes';
+  static String addGiftCodesTitle(String name) => 'Gift codes for $name';
+  static const addGiftCodesBody = 'How many codes to add (1–50)?';
+  static const giftCodesCountLabel = 'Number of codes';
+  static const giftCodesCountInvalid = 'Enter a number from 1 to 50';
+  static String giftCodesAdded(int n, String name) =>
+      n == 1 ? '1 gift code added for $name' : '$n gift codes added for $name';
+  static const add = 'Add';
+  static const notApprovedAgents = 'Not approved agents';
+  static const notApprovedAgentsSubtitle = 'Agents below 10 live clients — approve by hand';
+
+  // notifications (SPEC §9.23 A) — the server sends the text; these are
+  // the fallbacks for an item without a title.
+  static const agentApprovedTitle = 'You are approved';
+  static const giftCodeUsedTitle = 'Gift code used';
+
+  // ---- v3.4 searchable lists (SPEC §9.23 E)
+  static String searchIn(String what) =>
+      what.isEmpty ? 'Search' : 'Search ${what.toLowerCase()}';
+  static const noListMatches = 'Nothing matches your search';
+  static const pickNone = 'None';
 }

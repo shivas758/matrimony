@@ -63,6 +63,15 @@ class SettingsTarget extends NotificationTarget {
   int get hashCode => 1;
 }
 
+/// My gift codes (SPEC §9.23 B) — a family used one of them.
+class GiftCodesTarget extends NotificationTarget {
+  const GiftCodesTarget();
+  @override
+  bool operator ==(Object other) => other is GiftCodesTarget;
+  @override
+  int get hashCode => 7;
+}
+
 /// Admin → Agents, filtered to pending.
 class AdminPendingAgentsTarget extends NotificationTarget {
   const AdminPendingAgentsTarget();
@@ -81,6 +90,33 @@ class AdminPasswordResetsTarget extends NotificationTarget {
   int get hashCode => 3;
 }
 
+/// Admin → Payments to verify (SPEC §9.20 D).
+class AdminPaymentsTarget extends NotificationTarget {
+  const AdminPaymentsTarget();
+  @override
+  bool operator ==(Object other) => other is AdminPaymentsTarget;
+  @override
+  int get hashCode => 4;
+}
+
+/// Admin → Reports (SPEC §9.22 A).
+class AdminReportsTarget extends NotificationTarget {
+  const AdminReportsTarget();
+  @override
+  bool operator ==(Object other) => other is AdminReportsTarget;
+  @override
+  int get hashCode => 6;
+}
+
+/// Admin → Account deletion requests (SPEC §9.20 F).
+class AdminDeletionRequestsTarget extends NotificationTarget {
+  const AdminDeletionRequestsTarget();
+  @override
+  bool operator ==(Object other) => other is AdminDeletionRequestsTarget;
+  @override
+  int get hashCode => 5;
+}
+
 const _actionTypes = {
   'contact_request_received',
   'hold_request_received',
@@ -90,7 +126,13 @@ const _actionTypes = {
   'profile_delete_requested',
 };
 
-const _adminActionTypes = {'agent_pending', 'password_reset_requested'};
+const _adminActionTypes = {
+  'agent_pending',
+  'password_reset_requested',
+  'payment_to_verify',
+  'deletion_requested',
+  'report_received',
+};
 
 /// "Needs your action" or "Updates" — unknown types are updates.
 NotificationGroup notificationGroup(String type, {required bool isAdmin}) =>
@@ -110,15 +152,24 @@ NotificationTarget? notificationTarget(NotificationItem item, {required bool isA
     'contact_request_decided' ||
     'hold_request_decided' =>
       profileId == null ? null : ProfileTarget(profileId),
-    'community_request_decided' => const SettingsTarget(),
+    // My communities: the decision, or my fee payment the admin rejected
+    // (SPEC §9.20 C) — submit a corrected UTR there.
+    'community_request_decided' || 'payment_rejected' => const SettingsTarget(),
     'agent_pending' => isAdmin ? const AdminPendingAgentsTarget() : null,
     'password_reset_requested' => isAdmin ? const AdminPasswordResetsTarget() : null,
+    'payment_to_verify' => isAdmin ? const AdminPaymentsTarget() : null,
+    'deletion_requested' => isAdmin ? const AdminDeletionRequestsTarget() : null,
+    'report_received' => isAdmin ? const AdminReportsTarget() : null,
     'client_pending' ||
     'interest_decided' ||
     'agent_change_decided' ||
     'profile_delete_requested' =>
       customerId == null ? null : ClientTarget(customerId),
     'interest_received' => const TabTarget(HomeTab.clients, HomeSubTabs.clientsInterests),
+    // SPEC §9.23 A / B (informational): approved → the now wider Profiles
+    // tab; a family used my code → Gift codes.
+    'agent_approved' => const TabTarget(HomeTab.profiles),
+    'gift_code_used' => const GiftCodesTarget(),
     'agent_change_requested' => const TabTarget(HomeTab.clients, HomeSubTabs.clientsTransfers),
     _ => null,
   };

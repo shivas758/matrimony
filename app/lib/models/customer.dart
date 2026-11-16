@@ -18,6 +18,7 @@ class ProfileSummary {
     this.photoUrl,
     this.paid,
     this.paidAt,
+    this.paidVia,
     this.visibility,
     this.deleteRequestId,
     this.profileCode,
@@ -52,6 +53,10 @@ class ProfileSummary {
   /// rows, agent-uploaded profiles).
   final bool? paid;
   final DateTime? paidAt;
+
+  /// How the fee was settled (SPEC §9.23 B): `upi` | `cash` | `gift` |
+  /// `mock` | `razorpay` | `waived`; null while unpaid or on an older server.
+  final String? paidVia;
 
   /// payment_pending | awaiting_approval | live | hidden (client rows only).
   final String? visibility;
@@ -104,6 +109,9 @@ class ProfileSummary {
       photoUrl: j['photo_url'] as String?,
       paid: j['paid'] as bool?,
       paidAt: DateTime.tryParse('${j['paid_at']}')?.toLocal(),
+      paidVia: j['paid_via'] is String && (j['paid_via'] as String).isNotEmpty
+          ? j['paid_via'] as String
+          : null,
       visibility: j['visibility'] as String?,
       deleteRequestId: (j['delete_request_id'] as num?)?.toInt(),
       profileCode: code is String && code.trim().isNotEmpty ? code.trim() : null,

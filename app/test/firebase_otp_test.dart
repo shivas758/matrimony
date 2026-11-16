@@ -132,6 +132,7 @@ class _FakeAuth extends AuthState {
     required String phoneVerificationToken,
     String? agencyName,
     int? stateId,
+    bool acceptedTerms = false,
   }) async {
     signedUp = {'phone': phone, 'token': phoneVerificationToken};
   }
@@ -192,6 +193,7 @@ Future<void> _finishSignup(WidgetTester tester, _World w) async {
   await tester.enterText(find.widgetWithText(TextFormField, S.password), 'secret1');
   await tester.enterText(find.widgetWithText(TextFormField, S.confirmPassword), 'secret1');
   await _tap(tester, find.widgetWithText(FilterChip, 'Reddy'));
+  await _tap(tester, find.byType(Checkbox)); // the terms (SPEC §9.22 C)
   await _tap(tester, _button(S.signup));
   expect(w.auth.signedUp, {'phone': '9000000001', 'token': 'verified-token'});
 }

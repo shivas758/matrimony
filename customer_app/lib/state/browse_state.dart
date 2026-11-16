@@ -117,6 +117,16 @@ class BrowseState extends ChangeNotifier {
     }
   }
 
+  /// A profile I just blocked (SPEC §9.22 B) leaves the list at once.
+  void removeProfile(int profileId) {
+    final before = _profiles.length;
+    _profiles.removeWhere((p) => p.id == profileId);
+    if (_profiles.length == before) return;
+    if (_total > 0) _total -= 1;
+    _interestOverrides.remove(profileId);
+    notifyListeners();
+  }
+
   /// Records an interest change made on the detail screen.
   void noteInterest(int profileId, {String? status, required bool interested}) {
     _interestOverrides[profileId] = (status: status, interested: interested);

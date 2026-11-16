@@ -10,8 +10,12 @@ import '../strings.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'admin/admin_agents_screen.dart';
+import 'admin/admin_deletion_requests_screen.dart';
 import 'admin/admin_password_resets_screen.dart';
+import 'admin/admin_payments_screen.dart';
+import 'admin/admin_reports_screen.dart';
 import 'clients/client_detail_screen.dart';
+import 'gift_codes_screen.dart';
 import 'profiles/profile_detail_screen.dart';
 import 'settings_screen.dart';
 
@@ -23,6 +27,10 @@ Widget? screenForTarget(NotificationTarget target) => switch (target) {
       SettingsTarget() => const SettingsScreen(),
       AdminPendingAgentsTarget() => const AdminAgentsScreen(initialStatus: 'pending'),
       AdminPasswordResetsTarget() => const AdminPasswordResetsScreen(),
+      AdminPaymentsTarget() => const AdminPaymentsScreen(),
+      AdminDeletionRequestsTarget() => const AdminDeletionRequestsScreen(),
+      AdminReportsTarget() => const AdminReportsScreen(),
+      GiftCodesTarget() => const GiftCodesScreen(),
     };
 
 /// Opens [target] from anywhere (a tapped push, SPEC §9.16): home-tab
@@ -227,8 +235,24 @@ class _NotificationTile extends StatelessWidget {
         'interest_received' || 'interest_decided' => Icons.favorite_outline_rounded,
         'agent_change_requested' || 'agent_change_decided' => Icons.swap_horiz_rounded,
         'profile_delete_requested' => Icons.delete_outline_rounded,
+        'payment_to_verify' => Icons.currency_rupee_rounded,
+        'payment_rejected' => Icons.money_off_rounded,
+        'deletion_requested' => Icons.person_remove_outlined,
+        'report_received' => Icons.flag_outlined,
+        'agent_approved' => Icons.verified_rounded,
+        'gift_code_used' => Icons.card_giftcard_rounded,
         _ => Icons.notifications_none_rounded,
       };
+
+  /// The server's title; a fallback for the SPEC §9.23 kinds if it sent none.
+  static String titleFor(NotificationItem item) {
+    if (item.title.isNotEmpty) return item.title;
+    return switch (item.type) {
+      'agent_approved' => S.agentApprovedTitle,
+      'gift_code_used' => S.giftCodeUsedTitle,
+      _ => item.title,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +283,7 @@ class _NotificationTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          item.title,
+                          titleFor(item),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleSmall?.copyWith(

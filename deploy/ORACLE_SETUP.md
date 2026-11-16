@@ -514,9 +514,17 @@ The API is down for the few minutes the image rebuilds (longer on a 1 GB Micro).
 database dump: `VM_HOST=ubuntu@YOUR_PUBLIC_IP ./deploy/update.sh`.
 
 **Schema changes** go in `backend/db/migrations/` as numbered, idempotent files and are applied
-by the loop above. `001_subcastes.sql` is the first; `011_razorpay_settlement.sql` is the latest: it
-lets a payment be marked `refund_due` and keeps one row per Razorpay order (v2.9, no data
-changes). `010_wedbook_codes_privacy.sql` added the
+by the loop above. `001_subcastes.sql` is the first; `015_gift_codes_agent_approval.sql` is the
+latest (v2.13, SPEC §9.23): gift codes, "approved" agents and customer profiles without an agent.
+On its first run it turns every `pending` agent `active`, and on every run it approves admins, demo
+agents and agents that already have 10 live clients — **every other existing agent becomes "not
+approved"** (sees only their own uploads and clients, not listed for customers) until they reach 10
+live clients or an admin taps **Approve now** in Admin → Agents. Optional env: `APPROVAL_CLIENTS`
+(default 10), `GIFT_CODES_PER_AGENT` (default 10). Agents get their ten gift codes the next time
+they open the app. `014` added reports / blocks / terms consent, `013` the store-review demo
+world, `012_upi_payments_community_fee.sql` direct UPI payments with admin verification, paid
+extra communities and account deletion requests (v2.10, no data changes). `011_razorpay_settlement.sql` let a payment be marked
+`refund_due` and keeps one row per Razorpay order. `010_wedbook_codes_privacy.sql` added the
 `states` list, agent codes, customer / profile IDs, the privacy toggles and the community audience
 (Wedbook, v2.8). It only adds tables and columns — no codes are issued by the migration: each agent
 registered earlier is asked once, on opening Wedbook Agent 3.0.0, to choose their State; that gives them
@@ -653,7 +661,52 @@ docker compose logs api | grep "OTP provider"     # should say: OTP provider fir
 shows a test checkout (*Pay ₹150* / *Simulate failure*) and nothing is charged. `PROFILE_FEE_INR`
 changes the amount. Each customer registers one profile (SPEC §9.17 — fixed, not an env setting).
 
-#### Razorpay (SPEC §9.19 B)
+#### Direct UPI with admin verification (SPEC §9.20) — in use
+
+Payment gateways (Razorpay, Easebuzz) refuse matrimony businesses, so the WhatsApp APKs take the
+₹150 registration fee — and the agents' ₹1000 fee for each community beyond their first three —
+by **UPI straight to your account**:
+
+1. The app opens any UPI app with your UPI ID and the amount filled in (or shows a QR code).
+2. The payer types the 12-digit **UPI reference (UTR)** from their UPI app.
+3. **Wedbook Agent → Admin → Payments to verify** lists it. Open your bank / UPI app, find that
+   UTR and amount, then tap **Approve** (the profile goes live / the community is added) or
+   **Reject** with a reason (the payer can correct the UTR).
+
+```bash
+cd ~/matrimony-agents/backend
+nano .env     # set / add:
+              # PAYMENT_PROVIDER=upi
+              # UPI_PAYEE_VPA=<your UPI ID, e.g. name@axisbank>
+              # UPI_PAYEE_NAME=Wedbook        (some UPI apps show this before the bank name)
+              # COMMUNITY_FREE_LIMIT=3 / EXTRA_COMMUNITY_FEE_INR=1000 (defaults)
+docker compose up -d
+docker compose logs api | grep "payments upi"
+```
+
+A business UPI ID (PhonePe / Paytm / BharatPe for Business, or your bank's merchant QR) works
+most reliably: some UPI apps refuse app-opened payments to personal UPI IDs — the QR code and the
+copyable UPI ID in the app are the fallback. The **Play Store builds** never show UPI (Google
+allows only Google Play Billing for in-app features) — see `docs/PLAY_STORE_GUIDE.md`.
+
+**Store-review demo world** (SPEC §9.21): Google's reviewers log in with demo accounts that only
+see demo profiles. Flag an account as demo only in the database, e.g.
+`UPDATE agents SET is_demo = TRUE WHERE phone = '…'` (its uploads follow automatically) and
+`UPDATE customers SET is_demo = TRUE WHERE phone = '…'`.
+
+**Backups keep the privacy promise:** the nightly photo mirror moves photos deleted in the app into
+`~/backups/uploads-deleted/<date>/`, which is purged after 14 days like the database dumps. After
+changing `deploy/backup.sh`, copy it again: `cp ~/matrimony-agents/deploy/backup.sh ~/backup.sh`.
+
+**Reports and blocks** (Google Play rule, SPEC §9.22): members report profiles from the apps (⋮ →
+Report profile); they appear in **Wedbook Agent → Admin → Reports**, where an admin dismisses the
+report, hides the profile, or suspends the account behind it. Blocks need no admin.
+
+**Account deletion requests** (Google Play rule): people ask at
+`https://YOUR_DOMAIN/delete-account/matrimony` or `/delete-account/agent`; they appear in **Wedbook Agent → Admin → Account deletion
+requests**. Call the number to confirm, then **Delete account** (or **Reject** with a note).
+
+#### Razorpay (SPEC §9.19 B — not usable: Razorpay does not accept matrimony businesses)
 
 Wedbook Matrimony **3.1.0** opens Razorpay Checkout (UPI, cards, net banking). Older apps say
 "Online payment is coming soon — contact your agent" (agents can still *Mark paid (cash)*), so

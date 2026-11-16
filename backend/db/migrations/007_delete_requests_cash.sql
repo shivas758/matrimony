@@ -10,9 +10,18 @@
 
 BEGIN;
 
-ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_provider_check;
-ALTER TABLE payments ADD CONSTRAINT payments_provider_check
-  CHECK (provider IN ('mock','razorpay','waived','cash'));
+-- deploy/update.sh re-runs every migration: only widen the check while it is still
+-- the 006 version — never narrow a later one (012 adds 'upi'; 'upi' rows would fail).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'payments_provider_check'
+                    AND pg_get_constraintdef(oid) LIKE '%cash%') THEN
+    ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_provider_check;
+    ALTER TABLE payments ADD CONSTRAINT payments_provider_check
+      CHECK (provider IN ('mock','razorpay','waived','cash'));
+  END IF;
+END $$;
 ALTER TABLE payments
   ADD COLUMN IF NOT EXISTS recorded_by INT REFERENCES agents(id),
   ADD COLUMN IF NOT EXISTS note TEXT;

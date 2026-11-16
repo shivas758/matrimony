@@ -109,6 +109,18 @@ class ProfileService {
   /// Uploader or admin only (SPEC §4). Hard delete, photos and links included.
   Future<void> delete(int id) => _api.delete('/profiles/$id');
 
+  /// Reports a profile to the admins (SPEC §9.22 A): [reason] is a
+  /// `ReportReason` wire value, [details] up to 500 characters.
+  /// `400 own_profile` for my own uploads, `404` when it is not visible.
+  Future<void> report(int id, {required String reason, String? details}) => _api.post(
+    '/profiles/$id/report',
+    body: {'reason': reason, if (details != null && details.isNotEmpty) 'details': details},
+  );
+
+  /// Hides the profile from me everywhere (SPEC §9.22 B); undone from
+  /// Settings → Blocked profiles.
+  Future<void> block(int id) => _api.post('/profiles/$id/block');
+
   Future<void> deletePhoto(int photoId) => _api.delete('/photos/$photoId');
 
   Future<void> makePhotoPrimary(int photoId) => _api.post('/photos/$photoId/primary');

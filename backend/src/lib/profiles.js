@@ -1,6 +1,8 @@
+import { agentBlockSql, customerBlockSql } from './moderation.js';
 import { many, one, query } from './db.js';
 import { deleteStoredPhoto } from './photos.js';
 import { displayName, hiddenSet, mask } from './privacy.js';
+import { isApproved } from './agentApproval.js';
 
 /**
  * An interest that is still "in play" (SPEC §9.4): pending, or accepted with
@@ -25,7 +27,25 @@ export const shownToSql = (n) =>
  * Returns a { clause, params } fragment; `next` is the next $n placeholder index.
  */
 export function visibilityClause(agent, next) {
-  if (agent.is_admin) return { clause: 'TRUE', params: [], next };
+  // Admins see the real world only; demo content is reached through demo logins (SPEC §9.21).
+  if (agent.is_admin) return { clause: 'NOT p.is_demo', params: [], next };
+  // Not approved yet (SPEC §9.23 A — fewer than 10 live clients): only my own
+  // work — my uploads (my clients' profiles among them), customers interested
+  // in one of my uploads (§9.4 branch below), and the profiles my own clients
+  // are interested in. Nothing else of anyone's communities.
+  if (!isApproved(agent)) {
+    return {
+      clause: `(p.uploaded_by = $${next}
+        OR (p.is_demo = $${next + 1} AND ${agentBlockSql(next)} AND p.status = 'active' AND (
+           (p.customer_id IS NOT NULL
+            AND EXISTS (SELECT 1 FROM customer_interests ci JOIN profiles t ON t.id = ci.profile_id
+                         WHERE ci.from_profile_id = p.id AND t.uploaded_by = $${next} AND ${LIVE_INTEREST}))
+        OR EXISTS (SELECT 1 FROM customer_interests ci JOIN customers mc ON mc.id = ci.customer_id
+                    WHERE ci.profile_id = p.id AND mc.agent_id = $${next} AND ${LIVE_INTEREST}))))`,
+      params: [agent.id, Boolean(agent.is_demo)],
+      next: next + 2,
+    };
+  }
   const shown = shownToSql(next + 1);
   // Third branch: a profile on hold stays visible to the agent whose hold was
   // approved — they are the ones in talks — but to nobody else.
@@ -37,9 +57,11 @@ export function visibilityClause(agent, next) {
   // invisible), and an accepted interest counts only until its window ends —
   // nothing ever moves a lapsed row off 'accepted', every other read treats
   // it as 'expired' (LIVE_INTEREST).
+  // My own uploads always; everything else only from my world (SPEC §9.21).
   return {
     clause: `(p.uploaded_by = $${next}
-      OR (p.status = 'active' AND ${shown})
+      OR (p.is_demo = $${next + 2} AND ${agentBlockSql(next)} AND (
+         (p.status = 'active' AND ${shown})
       OR (p.status = 'on_hold' AND ${shown}
           AND EXISTS (SELECT 1 FROM hold_requests h
                        WHERE h.profile_id = p.id AND h.requester_id = $${next} AND h.status = 'approved'))
@@ -47,9 +69,9 @@ export function visibilityClause(agent, next) {
           -- only the customer profile that expressed the interest (SPEC §9.12)
           AND EXISTS (SELECT 1 FROM customer_interests ci JOIN profiles t ON t.id = ci.profile_id
                        WHERE ci.from_profile_id = p.id AND t.uploaded_by = $${next}
-                         AND ${LIVE_INTEREST})))`,
-    params: [agent.id, agent.community_ids],
-    next: next + 2,
+                         AND ${LIVE_INTEREST})))))`,
+    params: [agent.id, agent.community_ids, Boolean(agent.is_demo)],
+    next: next + 3,
   };
 }
 
@@ -64,11 +86,11 @@ export function visibilityClause(agent, next) {
 export function customerVisibilityClause(customer, next) {
   return {
     clause: `(p.customer_id = $${next}
-      OR (p.status = 'active'
+      OR (p.status = 'active' AND p.is_demo = $${next + 3} AND ${customerBlockSql(next)}
           AND (p.community_id = ANY($${next + 1}::int[]) OR p.audience_all
                OR p.audience_community_ids && $${next + 2}::int[])))`,
-    params: [customer.id, customer.community_ids || [], customer.own_community_ids || []],
-    next: next + 3,
+    params: [customer.id, customer.community_ids || [], customer.own_community_ids || [], Boolean(customer.is_demo)],
+    next: next + 4,
   };
 }
 

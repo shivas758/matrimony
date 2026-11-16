@@ -63,6 +63,8 @@ const signupSchema = z.object({
   // Optional in the schema so a missing token gets the specific
   // phone_not_verified code (SPEC §9.1) rather than validation_failed.
   phone_verification_token: z.string().optional(),
+  // The 3.3.0 app requires the terms checkbox (SPEC §9.22 C); older builds omit it.
+  accepted_terms: z.boolean().optional(),
 });
 
 // POST /api/customer/auth/signup — a 'guest' with no agent (SPEC §9.12), or,
@@ -82,7 +84,7 @@ customerAuthRouter.post(
 
     let agent = null;
     if (body.agent_phone) {
-      agent = await one('SELECT id, status FROM agents WHERE phone = $1', [body.agent_phone]);
+      agent = await one('SELECT id, status FROM agents WHERE phone = $1 AND NOT is_demo', [body.agent_phone]);
       if (!agent) throw notFound('agent_not_found', 'No agent has this mobile number — check with your agent');
       if (agent.status !== 'active') {
         throw badRequest('agent_not_active', "Your agent's account is not active yet — check with your agent");
@@ -92,10 +94,10 @@ customerAuthRouter.post(
     let created;
     try {
       created = await one(
-        `INSERT INTO customers (full_name, phone, agent_id, status, source, phone_verified_at)
-         VALUES ($1, $2, $3, $4, 'app', now())
+        `INSERT INTO customers (full_name, phone, agent_id, status, source, phone_verified_at, terms_accepted_at)
+         VALUES ($1, $2, $3, $4, 'app', now(), CASE WHEN $5 THEN now() END)
          RETURNING id`,
-        [body.full_name, body.phone, agent?.id ?? null, agent ? 'pending' : 'guest'],
+        [body.full_name, body.phone, agent?.id ?? null, agent ? 'pending' : 'guest', body.accepted_terms === true],
       );
     } catch (e) {
       // Two signups for the same number racing past the check above.

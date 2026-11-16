@@ -2,6 +2,7 @@ import 'package:intl/intl.dart';
 
 import '../services/api_client.dart';
 import 'master_data.dart';
+import 'payment.dart';
 
 /// Whether the on-request fields were included. Customers get 'granted' for
 /// their own profile and while an accepted interest is unexpired (SPEC §9.4).
@@ -177,9 +178,20 @@ class ProfileSummary {
     this.deleteRequestId,
     this.profileCode,
     this.nameHidden = false,
+    this.payment,
+    this.paidVia,
   });
 
   final int id;
+
+  /// My own profiles: how the fee was settled — 'upi' | 'cash' | 'gift' |
+  /// 'mock' | 'razorpay' | 'waived' (SPEC §9.23 B); null while unpaid or on
+  /// an older server.
+  final String? paidVia;
+
+  /// My own unpaid profiles: the latest UPI payment — being verified, or not
+  /// verified (SPEC §9.20 B). Null otherwise.
+  final ProfilePayment? payment;
 
   /// The name — or, when the family keeps it back, the server's neutral
   /// label ("Profile 1042", SPEC §9.18 D); see [nameHidden].
@@ -217,6 +229,10 @@ class ProfileSummary {
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
+  /// Not live yet because the agent, the fee or the approval is missing —
+  /// My profile and Get started offer *Publish my profile* (SPEC §9.23 F).
+  bool get needsPublishing => Profile.unpublished(visibility, paid: paid);
+
   /// Always something to show: the name (or the server's neutral label), and
   /// "Profile 41" should a row ever arrive without either.
   String get displayName => fullName.trim().isEmpty ? Profile.neutralName(id) : fullName;
@@ -241,6 +257,8 @@ class ProfileSummary {
         visibility: ProfileVisibility.fromApi(j['visibility'] as String?),
         deleteRequestId: (j['delete_request_id'] as num?)?.toInt() ??
             (j['delete_request'] is Map ? ((j['delete_request'] as Map)['id'] as num?)?.toInt() : null),
+        payment: ProfilePayment.tryParse(j['payment']),
+        paidVia: Profile._code(j['paid_via']),
       );
 }
 
@@ -290,7 +308,8 @@ class Interest {
   bool get canReExpress => isDeclined || isWithdrawn || isRevoked || isExpired;
 
   factory Interest.fromJson(Map<String, dynamic> j) => Interest(
-        id: (j['id'] as num).toInt(),
+        // The preview's made-up interest (SPEC §9.23 D) has no id.
+        id: (j['id'] as num?)?.toInt() ?? 0,
         status: '${j['status'] ?? 'pending'}',
         note: j['note'] as String?,
         createdAt: Profile._date(j['created_at']),
@@ -366,10 +385,13 @@ class Profile {
     this.profileFeeInr,
     this.deleteRequest,
     this.profileCode,
+    this.payment,
     this.hiddenFields = const [],
     this.audienceAll = false,
     this.audienceCommunities = const [],
     this.maskedFields = const [],
+    this.paidVia,
+    this.isPreview = false,
     // ---- protected
     this.city,
     this.state,
@@ -479,6 +501,10 @@ class Profile {
   /// The pending deletion request on this (paid) profile of mine, if any.
   final DeleteRequest? deleteRequest;
 
+  /// While unpaid: the latest UPI payment — being verified, or not verified
+  /// (SPEC §9.20 B). Null otherwise.
+  final ProfilePayment? payment;
+
   /// My profile's permanent ID, e.g. `GN-KA1A-A001` (SPEC §9.18 C). Owner
   /// side only — never sent for other people's profiles; null until assigned.
   final String? profileCode;
@@ -491,6 +517,15 @@ class Profile {
   /// community plus [audienceCommunities]. Own profiles only.
   final bool audienceAll;
   final List<MasterItem> audienceCommunities;
+
+  /// How the fee was settled — 'upi' | 'cash' | 'gift' | 'mock' | 'razorpay'
+  /// | 'waived' (SPEC §9.23 B). Own profiles only; null while unpaid.
+  final String? paidVia;
+
+  /// My own profile as another family would see it (`preview: true`, GET
+  /// /customer/my-profiles/:id/preview — SPEC §9.23 D). Nothing on such a
+  /// page may act on it (no interest, report or block).
+  final bool isPreview;
 
   // ---- any profile
   /// The privacy keys the server withheld from ME on this profile (SPEC
@@ -528,6 +563,18 @@ class Profile {
   final String? propertyDetails;
 
   bool get isBride => gender == 'bride';
+
+  /// One of MY profiles that is not live yet because the agent, the fee or
+  /// the approval is missing (SPEC §9.23 C): *Publish my profile*.
+  bool get needsPublishing => unpublished(visibility, paid: paid);
+
+  /// payment_pending / awaiting_approval — or, from a server that does not
+  /// say, simply unpaid. A profile the agent hid is published, just hidden.
+  static bool unpublished(ProfileVisibility? visibility, {required bool paid}) => switch (visibility) {
+        ProfileVisibility.paymentPending || ProfileVisibility.awaitingApproval => true,
+        ProfileVisibility.live || ProfileVisibility.hidden => false,
+        null => !paid,
+      };
 
   /// "Profile 1042" — the neutral label of a profile whose name is hidden.
   /// The server already sends it as `full_name`; this is the same text for
@@ -778,7 +825,7 @@ class Profile {
         contactAccess: _access((j['contact_access'] ?? j['access']) as String?),
         contactExpiresAt: _date(j['contact_expires_at']),
         hasProtectedFields: protectedKeys.any(j.containsKey),
-        interest: j['interest'] == null ? null : Interest.fromJson(j['interest'] as Map<String, dynamic>),
+        interest: j['interest'] is Map<String, dynamic> ? Interest.fromJson(j['interest'] as Map<String, dynamic>) : null,
         listInterestStatus: j['interest_status'] as String?,
         listIsInterested: j['is_interested'] == true,
         locked: j['locked'] == true,
@@ -788,10 +835,13 @@ class Profile {
         profileFeeInr: j['profile_fee_inr'] as num?,
         deleteRequest: DeleteRequest.tryParse(j['delete_request']),
         profileCode: _code(j['profile_code']),
+        payment: ProfilePayment.tryParse(j['payment']),
         hiddenFields: _strings(j['hidden_fields']),
         audienceAll: j['audience_all'] == true,
         audienceCommunities: _refs(j['audience_communities']),
         maskedFields: _strings(j['masked_fields']),
+        paidVia: _code(j['paid_via']),
+        isPreview: j['preview'] == true,
         // protected
         city: j['city'] as String?,
         state: j['state'] as String?,

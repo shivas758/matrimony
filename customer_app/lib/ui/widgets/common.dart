@@ -108,8 +108,24 @@ class AuthedPhoto extends StatelessWidget {
   final double? height;
   final String? placeholderInitials;
 
+  /// Tests and the store-screenshot generator: photos come from here instead
+  /// of the network (no cache manager, no token). Never set in the app.
+  @visibleForTesting
+  static ImageProvider Function(String url)? debugImageOverride;
+
   @override
   Widget build(BuildContext context) {
+    final override = debugImageOverride;
+    if (url != null && override != null) {
+      return Image(
+        image: override(url!),
+        fit: fit,
+        alignment: alignment,
+        width: width,
+        height: height,
+        errorBuilder: (_, _, _) => _placeholder(context),
+      );
+    }
     final token = api.tokenSync;
     if (url == null || token == null) return _placeholder(context);
     return CachedNetworkImage(
@@ -472,6 +488,8 @@ String friendlyMessage(ApiException e) => switch (e.code) {
       'not_paid' => S.errNotPaid,
       'payment_verification_failed' => S.errPaymentVerification,
       'payment_provider_changed' => S.errPaymentProviderChanged,
+      'utr_already_used' => S.errUtrUsed,
+      'payment_under_review' => S.errPaymentUnderReview,
       // The server names the field; its own message is the most useful text.
       'validation_failed' => e.fieldErrors?.values.firstOrNull ?? S.errValidation,
       _ => e.message,
@@ -508,6 +526,27 @@ String linkAgentMessage(ApiException e) =>
     _linkAgentCodes.contains(e.code) && e.message.trim().isNotEmpty ? e.message : friendlyMessage(e);
 
 const _linkAgentCodes = {'agent_not_found', 'agent_not_active', 'agent_has_no_communities', 'same_agent'};
+
+/// Redeeming a gift code (SPEC §9.23 B): the server's own sentence for every
+/// gift-code answer (it knows whether the code was wrong, used or another
+/// agent's); our words only when it sent none. Anything else (network …) as
+/// [friendlyMessage].
+String giftCodeMessage(ApiException e) {
+  final own = e.message.trim();
+  final fallback = switch (e.code) {
+    'gift_code_not_found' => S.errGiftCodeNotFound,
+    'gift_code_used' => S.errGiftCodeUsed,
+    'gift_code_other_agent' => S.errGiftCodeOtherAgent,
+    'too_many_attempts' => S.errGiftCodeTooMany,
+    'already_paid' => S.errAlreadyPaid,
+    'payment_under_review' => S.errPaymentUnderReview,
+    _ => null,
+  };
+  if (fallback == null && !_giftCodeServerWords.contains(e.code)) return friendlyMessage(e);
+  return own.isNotEmpty ? own : (fallback ?? friendlyMessage(e));
+}
+
+const _giftCodeServerWords = {'agent_not_active', 'agent_has_no_communities', 'account_suspended'};
 
 /// Label + phone number + Call, for the shared family/contact details.
 /// The app never dials by itself: Call opens the phone's dialler.
@@ -701,6 +740,8 @@ class AgentRow extends StatelessWidget {
                     letterSpacing: 0.3,
                   ),
                 ),
+              // Live clients (SPEC §9.23 A); unknown on an older server → nothing.
+              if (agent.liveClients != null) ClientsCount(count: agent.liveClients!),
               if (phone != null && phone.isNotEmpty)
                 Text('+91 $phone', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
             ],
@@ -708,6 +749,37 @@ class AgentRow extends StatelessWidget {
         ),
         if (phone != null && phone.isNotEmpty) CallButton(phone: phone, compact: true),
       ],
+    );
+  }
+}
+
+/// "12 clients" with a people icon — how many of an agent's clients are live
+/// (SPEC §9.23 A). Directory rows, recommended agents, My agent.
+class ClientsCount extends StatelessWidget {
+  const ClientsCount({super.key, required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 1),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.groups_2_outlined, size: 15, color: AppColors.wineLight),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              S.clientsCount(count),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(color: AppColors.wineLight, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -6,11 +6,14 @@ import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/terms_consent.dart';
 
 /// Step 3, new numbers only: just the name (SPEC §9.12). The account starts
 /// as a guest and lands on Home; the agent is chosen later from Get started.
 /// The verified phone is shown read-only; the verification token from the
-/// OTP step travels with the request.
+/// OTP step travels with the request. *Create account* works only once the
+/// Terms & Privacy box is ticked; the signup then says `accepted_terms: true`
+/// (SPEC §9.22 C).
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key, required this.phone, required this.verificationToken});
 
@@ -27,6 +30,9 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _busy = false;
   String? _error;
 
+  /// The Terms & Privacy checkbox (SPEC §9.22 C) — required to sign up.
+  bool _agreed = false;
+
   /// The 15-minute verification token lapsed — only "Start again" helps.
   bool _expired = false;
 
@@ -38,6 +44,11 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_agreed) {
+      // "Done" on the keyboard before ticking the box.
+      setState(() => _error = S.termsRequired);
+      return;
+    }
     FocusScope.of(context).unfocus();
     setState(() {
       _busy = true;
@@ -48,6 +59,7 @@ class _SignupScreenState extends State<SignupScreen> {
             fullName: _name.text.trim(),
             phone: widget.phone,
             verificationToken: widget.verificationToken,
+            acceptedTerms: true,
           );
       // The root now shows Home underneath this route.
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
@@ -125,6 +137,15 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                       validator: (v) => (v ?? '').trim().length < 2 ? S.fullNameInvalid : null,
                     ),
+                    const SizedBox(height: 12),
+                    TermsConsent(
+                      value: _agreed,
+                      enabled: !_busy && !_expired,
+                      onChanged: (v) => setState(() {
+                        _agreed = v;
+                        if (v && _error == S.termsRequired) _error = null;
+                      }),
+                    ),
                     if (_error != null) ...[
                       const SizedBox(height: 16),
                       ErrorBanner(message: _error!),
@@ -138,7 +159,8 @@ class _SignupScreenState extends State<SignupScreen> {
                       )
                     else
                       FilledButton(
-                        onPressed: _busy ? null : _submit,
+                        // Only once the terms are accepted (SPEC §9.22 C).
+                        onPressed: _busy || !_agreed ? null : _submit,
                         child: _busy ? const ButtonSpinner() : const Text(S.createAccount),
                       ),
                     const SizedBox(height: 16),

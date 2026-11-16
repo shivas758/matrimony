@@ -2,6 +2,8 @@ import { many, one } from '../lib/db.js';
 import { verifyToken } from '../lib/auth.js';
 import { forbidden, unauthorized } from '../lib/errors.js';
 import { AGENT_SELECT } from '../lib/serialize.js';
+import { config } from '../lib/config.js';
+import { refreshAgentApproval } from '../lib/agentApproval.js';
 
 /** Bearer token from the Authorization header, or null. */
 export function bearerToken(req) {
@@ -31,9 +33,20 @@ export async function requireAuth(req, _res, next) {
     const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [Number(payload.sub)]);
     if (!agent) throw unauthorized('unknown_agent', 'Account no longer exists');
 
-    const rows = await many('SELECT community_id FROM agent_communities WHERE agent_id = $1', [agent.id]);
+    const [rows, flags] = await Promise.all([
+      many('SELECT community_id FROM agent_communities WHERE agent_id = $1', [agent.id]),
+      one('SELECT is_demo FROM agents WHERE id = $1', [agent.id]),
+    ]);
     agent.community_ids = rows.map((r) => r.community_id);
+    // Store-review demo world (SPEC §9.21).
+    agent.is_demo = Boolean(flags?.is_demo);
     agent.is_admin = agent.role === 'admin';
+    // SPEC §9.23 A: the approval is stamped the first time the threshold is met
+    // (also checked where clients' profiles go live; this is the safety net).
+    if (!agent.is_admin && !agent.approved_at && agent.live_clients >= config.agents.approvalClients) {
+      agent.approved_at = (await refreshAgentApproval(agent.id)) ?? agent.approved_at;
+    }
+    agent.approved = agent.is_admin || agent.approved_at != null;
     req.agent = agent;
     next();
   } catch (e) {

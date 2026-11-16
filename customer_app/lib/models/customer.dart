@@ -21,8 +21,9 @@ enum CustomerStatus {
 }
 
 /// An agent as customers see them: business details only (SPEC §9.6). Used
-/// for `customer.agent`, the agent directory rows and `to_agent` in a
-/// pending change (where phone and communities may be absent).
+/// for `customer.agent`, the agent directory rows, the recommended agents
+/// (SPEC §9.23 C) and `to_agent` in a pending change (where phone and
+/// communities may be absent).
 class AgentCard {
   const AgentCard({
     required this.id,
@@ -33,6 +34,8 @@ class AgentCard {
     this.phone,
     this.communities = const [],
     this.isCurrent = false,
+    this.liveClients,
+    this.match,
   });
 
   final int id;
@@ -48,6 +51,14 @@ class AgentCard {
 
   /// Directory rows flag the customer's current agent.
   final bool isCurrent;
+
+  /// How many of the agent's clients are live (SPEC §9.23 A) — "12
+  /// clients". Null when the server did not say (older than v2.13): the
+  /// screens then show nothing rather than a wrong number.
+  final int? liveClients;
+
+  /// Recommended agents only: why this one — 'city' | 'state' | 'community'.
+  final String? match;
 
   /// "Sri Lakshmi Marriage Bureau · Guntur" — whichever parts are present.
   String? get agencyLine {
@@ -69,10 +80,68 @@ class AgentCard {
             .map((e) => MasterItem.fromJson(e as Map<String, dynamic>))
             .toList(),
         isCurrent: j['is_current'] == true,
+        liveClients: _count(j['live_clients']),
+        match: _code(j['match']),
       );
 
   /// A code as shown to people; null when absent or blank.
   static String? _code(dynamic v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
+
+  /// A non-negative whole number (Postgres counts can arrive as strings);
+  /// null for anything else.
+  static int? _count(dynamic v) {
+    final n = v is num ? v.toInt() : (v is String ? int.tryParse(v.trim()) : null);
+    return n == null || n < 0 ? null : n;
+  }
+}
+
+/// What the recommendations were based on (SPEC §9.23 C): my profile's
+/// community and native place. Only the server reads the community, even
+/// when the family hid it.
+class RecommendationBasis {
+  const RecommendationBasis({this.community, this.city, this.state});
+
+  final MasterItem? community;
+  final String? city;
+  final String? state;
+
+  /// "Kamma · Guntur, Andhra Pradesh" — whichever parts are known; null when none.
+  String? get label {
+    final place = [city, state].whereType<String>().where((s) => s.isNotEmpty).join(', ');
+    final parts = [community?.name, if (place.isNotEmpty) place].whereType<String>().toList();
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  static RecommendationBasis? tryParse(dynamic j) {
+    if (j is! Map) return null;
+    final c = j['community'];
+    return RecommendationBasis(
+      community: c is Map<String, dynamic> && c['id'] is num ? MasterItem.fromJson(c) : null,
+      city: AgentCard._code(j['city']),
+      state: AgentCard._code(j['state']),
+    );
+  }
+}
+
+/// GET /customer/agents/recommended → {agents, based_on} (SPEC §9.23 C):
+/// approved agents with my community, same city first, then same state, then
+/// the rest; empty with `based_on: null` while I have no profile.
+class RecommendedAgents {
+  const RecommendedAgents({this.agents = const [], this.basedOn});
+
+  final List<AgentCard> agents;
+  final RecommendationBasis? basedOn;
+
+  static const empty = RecommendedAgents();
+
+  factory RecommendedAgents.fromJson(Map<String, dynamic> j) => RecommendedAgents(
+        agents: (j['agents'] is List ? j['agents'] as List : const [])
+            .whereType<Map<String, dynamic>>()
+            .where((a) => a['id'] is num)
+            .map(AgentCard.fromJson)
+            .toList(),
+        basedOn: RecommendationBasis.tryParse(j['based_on']),
+      );
 }
 
 /// The customer's open request to move to another agent (SPEC §9.6).
@@ -174,7 +243,9 @@ class Customer {
   /// app); null only if the server did not say.
   final num? profileFeeInr;
 
-  /// 'mock' | 'razorpay' — both check out in the app since v3.1 (SPEC §9.19 B).
+  /// 'mock' | 'razorpay' (in-app checkout since v3.1, SPEC §9.19 B) |
+  /// 'upi' (pay to the owner's UPI ID, an admin verifies the UTR — v3.2,
+  /// SPEC §9.20).
   final String paymentProvider;
   final UnlockChecklist unlock;
 
@@ -196,6 +267,14 @@ class Customer {
   ProfileSummary? get firstUnpaid {
     for (final p in profiles) {
       if (!p.paid) return p;
+    }
+    return null;
+  }
+
+  /// My profile [id] from `profiles[]`, if it is there.
+  ProfileSummary? myProfile(int id) {
+    for (final p in profiles) {
+      if (p.id == id) return p;
     }
     return null;
   }

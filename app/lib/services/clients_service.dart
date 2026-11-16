@@ -74,6 +74,18 @@ class ClientsService {
     return Customer.fromJson(json['client'] as Map<String, dynamic>);
   }
 
+  /// Spends a gift code on the client's unpaid profile (SPEC §9.23 B): the
+  /// given [code], or the client's agent's oldest unused one. The profile
+  /// is paid and goes live. `409 no_gift_codes` / `already_paid`. Returns
+  /// the refreshed client row.
+  Future<Customer> useGiftCode(int clientId, int profileId, {String? code}) async {
+    final json = await _api.post(
+      '/clients/$clientId/profiles/$profileId/gift-code',
+      body: {if (code != null && code.trim().isNotEmpty) 'code': code.trim()},
+    );
+    return Customer.fromJson(json['client'] as Map<String, dynamic>);
+  }
+
   // ---- delete requests for paid profiles (SPEC §9.13)
 
   /// My clients' requests (admin: all), pending by default.

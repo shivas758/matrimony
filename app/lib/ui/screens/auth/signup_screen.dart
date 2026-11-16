@@ -4,13 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../../config.dart';
 import '../../../services/api_client.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/phone_auth_gateway.dart';
 import '../../../state/auth_state.dart';
 import '../../../state/masters_state.dart';
+import '../../../state/store_config.dart';
 import '../../strings.dart';
 import '../../theme.dart';
+import '../../widgets/searchable_lists.dart';
+import '../../widgets/terms_consent.dart';
 import 'choose_state_screen.dart';
 import 'login_screen.dart';
 
@@ -21,8 +25,13 @@ import 'login_screen.dart';
 /// code and checks it. `firebase` (SPEC §9.19 A): the phone sends and checks
 /// the SMS through Firebase phone auth ([PhoneAuthGateway]); the server then
 /// checks the Firebase ID token and answers the same verification token.
+///
+/// At most [maxCommunities] communities at signup (SPEC §9.20 C) — more are
+/// requested later from My communities, ₹1000 each.
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
+
+  static const maxCommunities = AppConfig.communityFreeLimit;
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -61,6 +70,9 @@ class _SignupScreenState extends State<SignupScreen> {
 
   bool _busy = false;
   bool _obscure = true;
+
+  /// The Terms & Privacy checkbox (SPEC §9.22 C) — signup waits for it.
+  bool _acceptedTerms = false;
   String? _error;
 
   @override
@@ -309,10 +321,39 @@ class _SignupScreenState extends State<SignupScreen> {
 
   // ---- step 2: details
 
+  /// No price in a Play Store build, which cannot take the payment (SPEC §9.20 G).
+  String get _tooManyMessage => StoreConfig.isPlayStore(context)
+      ? S.playTooManyCommunities(SignupScreen.maxCommunities)
+      : S.tooManyCommunities(SignupScreen.maxCommunities, AppConfig.extraCommunityFeeInr);
+
+  /// A 4th chip is refused with the rule (the server's `too_many_communities`
+  /// says the same).
+  void _toggleCommunity(int id, bool on) {
+    setState(() {
+      if (!on) {
+        _communityIds.remove(id);
+        _error = null;
+      } else if (_communityIds.length >= SignupScreen.maxCommunities) {
+        _error = _tooManyMessage;
+      } else {
+        _communityIds.add(id);
+        _error = null;
+      }
+    });
+  }
+
   Future<void> _submit() async {
     if (!_detailsForm.currentState!.validate()) return;
     if (_communityIds.isEmpty) {
       setState(() => _error = S.selectOneCommunity);
+      return;
+    }
+    if (_communityIds.length > SignupScreen.maxCommunities) {
+      setState(() => _error = _tooManyMessage);
+      return;
+    }
+    if (!_acceptedTerms) {
+      setState(() => _error = S.termsRequired);
       return;
     }
     final token = _verificationToken;
@@ -333,6 +374,7 @@ class _SignupScreenState extends State<SignupScreen> {
             communityIds: _communityIds.toList(),
             phoneVerificationToken: token,
             stateId: _stateId,
+            acceptedTerms: true,
           );
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
@@ -624,6 +666,16 @@ class _SignupScreenState extends State<SignupScreen> {
             S.selectCommunitiesHint,
             style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
           ),
+          const SizedBox(height: 2),
+          Text(
+            StoreConfig.isPlayStore(context)
+                ? S.playSignupCommunitiesLimit(SignupScreen.maxCommunities)
+                : S.signupCommunitiesLimit(SignupScreen.maxCommunities, AppConfig.extraCommunityFeeInr),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppColors.goldDark,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 12),
           if (masters.loading && !masters.isLoaded)
             const Padding(
@@ -637,32 +689,32 @@ class _SignupScreenState extends State<SignupScreen> {
               label: Text('${masters.error} — ${S.retry}'),
             )
           else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final c in masters.data.communities)
-                  FilterChip(
-                    label: Text(c.name),
-                    selected: _communityIds.contains(c.id),
-                    onSelected: (on) => setState(() {
-                      if (on) {
-                        _communityIds.add(c.id);
-                      } else {
-                        _communityIds.remove(c.id);
-                      }
-                      _error = null;
-                    }),
-                  ),
-              ],
+            // A long list gets a search field above the chips (SPEC §9.23 E).
+            SearchableChipGroup(
+              key: const ValueKey('signup-communities'),
+              searchLabel: S.community,
+              enabled: !_busy,
+              options: masterOptions(masters.data.communities),
+              selected: _communityIds,
+              onToggle: (id) => _toggleCommunity(id, !_communityIds.contains(id)),
             ),
           if (_error != null) ...[
             const SizedBox(height: 16),
             ErrorBanner(message: _error!),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
+          TermsConsent(
+            value: _acceptedTerms,
+            enabled: !_busy,
+            onChanged: (v) => setState(() {
+              _acceptedTerms = v;
+              if (_error == S.termsRequired) _error = null;
+            }),
+          ),
+          const SizedBox(height: 16),
           FilledButton(
-            onPressed: _busy ? null : _submit,
+            // Disabled until the terms are accepted.
+            onPressed: _busy || !_acceptedTerms ? null : _submit,
             child: _busy ? _spinner() : const Text(S.signup),
           ),
           const SizedBox(height: 8),

@@ -68,6 +68,7 @@ export async function agentFeed(agent) {
     const [
       inbox, decisions, communityDecisions, pendingAgents, pendingResets, holdInbox, holdDecisions,
       pendingClients, interestInbox, interestDecisions, changeInbox, changeDecided, deleteInbox,
+      paymentsToVerify, rejectedPayments, deletionRequests, openReports,
     ] = await Promise.all([
       many(inboxSql, req.agent.is_admin ? [] : [me]),
       many(
@@ -173,6 +174,61 @@ export async function agentFeed(agent) {
           WHERE d.status = 'pending' ${mineOr('cu.agent_id')}
           ORDER BY d.created_at DESC LIMIT 50`,
         inboxParams,
+      ),
+      // SPEC §9.20: UPI claims waiting for an admin (admins only).
+      req.agent.is_admin
+        ? many(
+            `SELECT p.id, p.purpose, p.amount_paise, p.utr, p.submitted_at,
+                    COALESCE(cu.full_name, a.full_name) AS payer_name
+               FROM payments p
+               LEFT JOIN customers cu ON cu.id = p.customer_id
+               LEFT JOIN agents a ON a.id = p.agent_id
+              WHERE p.status = 'submitted' ORDER BY p.submitted_at DESC LIMIT 50`,
+          )
+        : Promise.resolve([]),
+      // My own community-fee payments an admin could not verify.
+      many(
+        `SELECT p.id, p.reject_reason, p.verified_at, c.name AS community_name
+           FROM payments p
+           LEFT JOIN community_change_requests ccr ON ccr.id = p.community_request_id
+           LEFT JOIN communities c ON c.id = ccr.community_id
+          WHERE p.agent_id = $1 AND p.provider = 'upi' AND p.status = 'failed'
+            AND p.reject_reason IS NOT NULL AND p.verified_at IS NOT NULL
+          ORDER BY p.verified_at DESC LIMIT 20`,
+        [me],
+      ),
+      // SPEC §9.20 F: account deletion requests (admins only).
+      req.agent.is_admin
+        ? many(
+            `SELECT id, app, phone, created_at FROM account_deletion_requests
+              WHERE status = 'pending' ORDER BY created_at DESC LIMIT 50`,
+          )
+        : Promise.resolve([]),
+      // SPEC §9.22 A: open reports (admins only).
+      req.agent.is_admin
+        ? many(
+            `SELECT r.id, r.reason, r.profile_label, r.created_at FROM reports r
+              WHERE r.status = 'open' ORDER BY r.created_at DESC LIMIT 50`,
+          )
+        : Promise.resolve([]),
+    ]);
+
+    // SPEC §9.23: my approval and my gift codes being used — informational,
+    // shown for 30 days, never in the badge.
+    const [approvedRows, giftUses] = await Promise.all([
+      req.agent.is_admin
+        ? Promise.resolve([])
+        : many(
+            `SELECT id, approved_at FROM agents
+              WHERE id = $1 AND approved_at > now() - interval '30 days'`,
+            [me],
+          ),
+      many(
+        `SELECT g.id, g.code, g.used_at, COALESCE(cu.full_name, g.customer_name) AS customer_name
+           FROM gift_codes g LEFT JOIN customers cu ON cu.id = g.customer_id
+          WHERE g.agent_id = $1 AND g.status = 'used' AND g.used_at > now() - interval '30 days'
+          ORDER BY g.used_at DESC LIMIT 20`,
+        [me],
       ),
     ]);
 
@@ -292,13 +348,59 @@ export async function agentFeed(agent) {
         body: `${r.customer_name} asked to delete the profile ${r.profile_name}`,
         at: r.created_at,
       })),
+      // ---- SPEC §9.20: UPI payments waiting for an admin; my rejected community fees.
+      ...paymentsToVerify.map((r) => ({
+        type: 'payment_to_verify',
+        id: r.id,
+        title: 'Payment to verify',
+        body: `₹${r.amount_paise / 100} ${r.purpose === 'extra_community' ? 'community fee' : 'registration fee'} from ${
+          r.payer_name ?? 'a member'
+        } · UTR ${r.utr}`,
+        at: r.submitted_at,
+      })),
+      ...openReports.map((r) => ({
+        type: 'report_received',
+        id: r.id,
+        title: 'Profile reported',
+        body: `${r.profile_label} was reported: ${r.reason.replace(/_/g, ' ')}`,
+        at: r.created_at,
+      })),
+      ...deletionRequests.map((r) => ({
+        type: 'deletion_requested',
+        id: r.id,
+        title: 'Account deletion request',
+        body: `+91 ${r.phone} asked to delete their ${r.app === 'agent' ? 'Wedbook Agent' : 'Wedbook Matrimony'} account — confirm with them first`,
+        at: r.created_at,
+      })),
+      ...approvedRows.map((r) => ({
+        type: 'agent_approved',
+        id: r.id,
+        title: 'You are approved',
+        body: 'Families can now find you in the agents list, and you see every profile shown to your communities',
+        at: r.approved_at,
+      })),
+      ...giftUses.map((r) => ({
+        type: 'gift_code_used',
+        id: r.id,
+        title: 'Gift code used',
+        body: `${r.customer_name ?? 'A family'} used gift code ${r.code} — their profile is live`,
+        at: r.used_at,
+      })),
+      ...rejectedPayments.map((r) => ({
+        type: 'payment_rejected',
+        id: r.id,
+        title: 'Payment not verified',
+        body: `${r.community_name ? `${r.community_name}: ` : ''}${r.reject_reason} — check the UTR and submit it again`,
+        at: r.verified_at,
+      })),
     ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
     return {
       // Badge count = things that need an action from me.
       badge:
         inbox.length + holdInbox.length + pendingAgents.length + pendingResets.length +
-        pendingClients.length + interestInbox.length + changeInbox.length + deleteInbox.length,
+        pendingClients.length + interestInbox.length + changeInbox.length + deleteInbox.length +
+        paymentsToVerify.length + deletionRequests.length + openReports.length,
       counts: {
         contact_requests_inbox: inbox.length,
         hold_requests_inbox: holdInbox.length,
@@ -309,6 +411,9 @@ export async function agentFeed(agent) {
         interests_inbox: interestInbox.length,
         agent_change_inbox: changeInbox.length,
         delete_requests_inbox: deleteInbox.length,
+        payments_to_verify: paymentsToVerify.length,
+        deletion_requests: deletionRequests.length,
+        reports_open: openReports.length,
       },
       items,
     };

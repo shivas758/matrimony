@@ -16,7 +16,8 @@ class AppNotification {
 
   /// payment_due, interest_expiring (action); account_approved,
   /// account_rejected, interest_accepted / declined / revoked,
-  /// payment_received, agent_change_approved / rejected,
+  /// payment_received, payment_rejected (a UPI payment an admin did not
+  /// verify, SPEC §9.20 B), agent_change_approved / rejected,
   /// delete_request_approved / rejected (update). Unknown types are listed
   /// but not tappable.
   final String type;
@@ -34,7 +35,8 @@ class AppNotification {
   /// Someone else's profile (interest_*).
   final int? profileId;
 
-  /// One of MY profiles (payment_due, payment_received, delete_request_*).
+  /// One of MY profiles (payment_due, payment_received, payment_rejected,
+  /// delete_request_*).
   final int? myProfileId;
   final int? interestId;
 
@@ -155,6 +157,9 @@ NotificationRoute routeFor(AppNotification n) {
     case 'account_rejected':
       return const NotificationRoute(NotificationDestination.getStarted);
     case 'payment_received':
+    // My profile shows "Payment not verified" + the reason, and *Fix payment*
+    // leads to the checkout (SPEC §9.20 B).
+    case 'payment_rejected':
     case 'delete_request_rejected':
       return ownOr(myProfiles);
     case 'agent_change_approved':

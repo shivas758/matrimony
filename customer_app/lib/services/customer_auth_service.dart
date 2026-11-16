@@ -97,18 +97,21 @@ class CustomerAuthService {
     return _store(json);
   }
 
-  /// POST /customer/auth/signup {full_name, phone, phone_verification_token}
-  /// → 201 {token, customer} as a `guest` with no agent (SPEC §9.12). The
-  /// agent is chosen later from Get started.
+  /// POST /customer/auth/signup {full_name, phone, phone_verification_token,
+  /// accepted_terms} → 201 {token, customer} as a `guest` with no agent
+  /// (SPEC §9.12). The agent is chosen later from Get started.
+  /// [acceptedTerms]: the Terms & Privacy checkbox was ticked (SPEC §9.22 C).
   Future<LoggedIn> signup({
     required String fullName,
     required String phone,
     required String verificationToken,
+    bool acceptedTerms = false,
   }) async {
     final json = await _api.post('/customer/auth/signup', body: {
       'full_name': fullName,
       'phone': phone,
       'phone_verification_token': verificationToken,
+      if (acceptedTerms) 'accepted_terms': true,
     });
     return _store(json);
   }

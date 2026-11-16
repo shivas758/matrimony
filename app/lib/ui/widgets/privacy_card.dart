@@ -5,6 +5,7 @@ import '../../state/profile_form_logic.dart';
 import '../strings.dart';
 import '../theme.dart';
 import 'common.dart';
+import 'searchable_lists.dart';
 
 /// The Privacy card at the end of the profile form (SPEC §9.18 D / E / G):
 /// what is always shown, a switch per detail the family may keep for after
@@ -155,20 +156,18 @@ class PrivacyCard extends StatelessWidget {
                               ?.copyWith(color: theme.colorScheme.outline),
                         ),
                         const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            for (final c in others)
-                              FilterChip(
-                                label: Text(c.name),
-                                selected: privacy.communityIds.contains(c.id),
-                                visualDensity: VisualDensity.compact,
-                                onSelected: enabled
-                                    ? (on) => onChanged(privacy.withCommunity(c.id, on))
-                                    : null,
-                              ),
-                          ],
+                        // A long list gets a search field; picked ones stay
+                        // visible (SPEC §9.23 E).
+                        SearchableChipGroup(
+                          key: const ValueKey('audience-communities'),
+                          compact: true,
+                          enabled: enabled,
+                          searchLabel: S.community,
+                          options: masterOptions(others),
+                          selected: privacy.communityIds,
+                          onToggle: (id) => onChanged(
+                            privacy.withCommunity(id, !privacy.communityIds.contains(id)),
+                          ),
                         ),
                       ],
                     ),

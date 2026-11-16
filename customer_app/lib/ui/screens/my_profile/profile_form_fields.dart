@@ -7,6 +7,9 @@ part of 'profile_form_screen.dart';
 /// "Full name *" — how a required field is labelled.
 String _required(String label) => '$label *';
 
+/// A master choice. Up to eight entries: the plain dropdown; a longer list
+/// (community, education, profession, mother tongue, countries, star, rasi …)
+/// opens a picker sheet with a search box instead (SPEC §9.23 E).
 class _MasterDropdown extends StatelessWidget {
   const _MasterDropdown({
     required this.label,
@@ -28,6 +31,17 @@ class _MasterDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (isLongList(items.length)) {
+      return SearchablePickerField(
+        label: requiredMessage == null ? label : _required(label),
+        pickerTitle: label,
+        icon: icon,
+        options: pickOptionsOf(items),
+        value: value,
+        onChanged: onChanged,
+        validator: requiredMessage == null ? null : (v) => v == null ? requiredMessage : null,
+      );
+    }
     // Guard against a stale id that is no longer in the list.
     final safeValue = items.any((i) => i.id == value) ? value : null;
     return DropdownButtonFormField<int>(
@@ -178,7 +192,8 @@ class _SubcasteFieldState extends State<_SubcasteField> {
   }
 }
 
-/// Multi-select chips for the languages a person knows.
+/// Multi-select chips for the languages a person knows; a list longer than
+/// eight opens a picker with a search box and checkboxes (SPEC §9.23 E).
 class _LanguageChips extends StatelessWidget {
   const _LanguageChips({required this.items, required this.selected, required this.onToggle});
 
@@ -189,6 +204,25 @@ class _LanguageChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (isLongList(items.length)) {
+      return MultiPickerField(
+        label: S.knownLanguages,
+        title: S.knownLanguages,
+        icon: Icons.translate_rounded,
+        hint: S.selectHint,
+        options: pickOptionsOf(items),
+        selected: selected,
+        // The picker answers with the whole new set; the form toggles ids.
+        onChanged: (next) {
+          for (final id in {...selected}.difference(next)) {
+            onToggle(id);
+          }
+          for (final id in next.difference(selected)) {
+            onToggle(id);
+          }
+        },
+      );
+    }
     return InputDecorator(
       decoration: const InputDecoration(
         labelText: S.knownLanguages,
@@ -234,6 +268,26 @@ class _EducationLevelRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final safeValue = countries.any((c) => c.id == countryId) ? countryId : null;
+    // A long country list opens the search picker (SPEC §9.23 E).
+    final Widget country = isLongList(countries.length)
+        ? SearchablePickerField(
+            label: S.country,
+            options: pickOptionsOf(countries),
+            value: safeValue,
+            onChanged: onCountryChanged,
+          )
+        : DropdownButtonFormField<int>(
+            key: ValueKey('${level.apiValue}:${safeValue ?? 0}:${countries.length}'),
+            initialValue: safeValue,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: S.country),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('—')),
+              for (final c in countries)
+                DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)),
+            ],
+            onChanged: onCountryChanged,
+          );
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -251,21 +305,7 @@ class _EducationLevelRow extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        Expanded(
-          flex: 2,
-          child: DropdownButtonFormField<int>(
-            key: ValueKey('${level.apiValue}:${safeValue ?? 0}:${countries.length}'),
-            initialValue: safeValue,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: S.country),
-            items: [
-              const DropdownMenuItem(value: null, child: Text('—')),
-              for (final c in countries)
-                DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)),
-            ],
-            onChanged: onCountryChanged,
-          ),
-        ),
+        Expanded(flex: 2, child: country),
       ],
     );
   }

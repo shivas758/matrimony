@@ -26,7 +26,7 @@ export async function requireCustomer(req, _res, next) {
 
     const customer = await one(
       `SELECT id, full_name, phone, agent_id, status, source, phone_verified_at,
-              approved_by, approved_at, last_login_at, created_at
+              approved_by, approved_at, last_login_at, created_at, is_demo
          FROM customers WHERE id = $1`,
       [Number(payload.sub)],
     );

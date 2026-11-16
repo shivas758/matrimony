@@ -8,9 +8,12 @@ import '../../widgets/common.dart';
 import 'admin_agents_screen.dart';
 import 'admin_community_requests_screen.dart';
 import 'admin_customers_screen.dart';
+import 'admin_deletion_requests_screen.dart';
 import 'admin_logs_screen.dart';
 import 'admin_masters_screen.dart';
 import 'admin_password_resets_screen.dart';
+import 'admin_payments_screen.dart';
+import 'admin_reports_screen.dart';
 
 /// Admin dashboard (SPEC §5 screen 9).
 class AdminHomeScreen extends StatefulWidget {
@@ -70,7 +73,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisCount: 2,
-                childAspectRatio: 1.65,
+                childAspectRatio: 1.5,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 children: [
@@ -85,6 +88,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     icon: Icons.hourglass_top_rounded,
                     highlight: s.pendingAgents > 0,
                   ),
+                  // SPEC §9.23 A — below 10 live clients (an older server sends none).
+                  if (s.unapprovedAgents != null)
+                    _StatCard(
+                      label: S.notApprovedAgents,
+                      value: '${s.unapprovedAgents}',
+                      icon: Icons.verified_outlined,
+                    ),
                   _StatCard(
                     label: 'Active profiles',
                     value: '${s.activeProfiles}',
@@ -143,12 +153,27 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               title: S.allAgents,
               onTap: () => _open(const AdminAgentsScreen()),
             ),
+            // SPEC §9.23 G: the admin approves by hand the agents to keep.
+            if (s?.unapprovedAgents != null)
+              _NavTile(
+                icon: Icons.verified_outlined,
+                title: S.notApprovedAgents,
+                subtitle: S.notApprovedAgentsSubtitle,
+                onTap: () => _open(const AdminAgentsScreen(initialApproved: false)),
+              ),
             _NavTile(
               icon: Icons.people_alt_outlined,
               title: S.customers,
               subtitle: S.customersSubtitle,
               badge: s?.pendingCustomers ?? 0,
               onTap: () => _open(const AdminCustomersScreen()),
+            ),
+            _NavTile(
+              icon: Icons.currency_rupee_rounded,
+              title: S.paymentsToVerify,
+              subtitle: S.paymentsToVerifySubtitle,
+              badge: s?.paymentsToVerify ?? 0,
+              onTap: () => _open(const AdminPaymentsScreen()),
             ),
             _NavTile(
               icon: Icons.playlist_add_check_rounded,
@@ -162,6 +187,20 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               subtitle: 'Agents who forgot their password',
               badge: s?.pendingPasswordResets ?? 0,
               onTap: () => _open(const AdminPasswordResetsScreen()),
+            ),
+            _NavTile(
+              icon: Icons.flag_outlined,
+              title: S.reports,
+              subtitle: S.reportsSubtitle,
+              badge: s?.reportsOpen ?? 0,
+              onTap: () => _open(const AdminReportsScreen()),
+            ),
+            _NavTile(
+              icon: Icons.person_remove_outlined,
+              title: S.deletionRequests,
+              subtitle: S.deletionRequestsSubtitle,
+              badge: s?.deletionRequests ?? 0,
+              onTap: () => _open(const AdminDeletionRequestsScreen()),
             ),
             _NavTile(
               icon: Icons.list_alt_rounded,
