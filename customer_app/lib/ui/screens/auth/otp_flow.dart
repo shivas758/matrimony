@@ -5,10 +5,12 @@ import '../../../services/customer_auth_service.dart';
 import '../../../services/phone_auth_gateway.dart';
 import '../../../state/auth_state.dart';
 import '../../strings.dart';
+import 'reset_password_screen.dart';
 import 'signup_screen.dart';
 
 /// The send → verify steps shared by the phone and OTP screens, for every
-/// OTP provider (SPEC §9.1 code flow, §9.19 A Firebase phone auth).
+/// OTP provider (SPEC §9.1 code flow, §9.19 A Firebase phone auth) and both
+/// purposes — Create account and Forgot password (SPEC §9.24 C).
 
 /// A Firebase phone verification in progress — what the OTP screen needs to
 /// confirm the typed code and to resend it.
@@ -43,16 +45,18 @@ final class OtpAutoVerified extends OtpRequest {
   final OtpVerifyResult result;
 }
 
-/// The server's send, then — when its provider is `firebase` — Firebase's
-/// own verification of `+91<phone>`. Throws [ApiException] (server) or
+/// The server's send for [purpose], then — when its provider is `firebase`
+/// — Firebase's own verification of `+91<phone>`. Throws [ApiException]
+/// (server: `phone_taken`, `account_not_found`, cooldowns …) or
 /// [PhoneAuthFailure] (Firebase).
 Future<OtpRequest> requestOtp(
   AuthState auth,
   PhoneAuthGateway gateway,
   String phone, {
+  required OtpPurpose purpose,
   int? resendToken,
 }) async {
-  final sent = await auth.sendOtp(phone);
+  final sent = await auth.sendOtp(phone, purpose: purpose);
   if (!sent.isFirebase) return OtpCodeNeeded(sent);
   final options = sent.firebase;
   if (options == null) {
@@ -69,7 +73,8 @@ Future<OtpRequest> requestOtp(
           resendToken: nextResendToken,
         ),
       ),
-    PhoneAutoVerified(:final idToken) => OtpAutoVerified(await verifyFirebaseIdToken(auth, gateway, phone, idToken)),
+    PhoneAutoVerified(:final idToken) =>
+      OtpAutoVerified(await verifyFirebaseIdToken(auth, gateway, phone, idToken, purpose: purpose)),
   };
 }
 
@@ -80,25 +85,37 @@ Future<OtpVerifyResult> verifyFirebaseIdToken(
   AuthState auth,
   PhoneAuthGateway gateway,
   String phone,
-  String idToken,
-) async {
+  String idToken, {
+  required OtpPurpose purpose,
+}) async {
   try {
-    return await auth.verifyFirebaseToken(phone: phone, idToken: idToken);
+    return await auth.verifyFirebaseToken(phone: phone, idToken: idToken, purpose: purpose);
   } finally {
     await gateway.signOut();
   }
 }
 
-/// Where a verified number goes: a known customer is logged in (the root
-/// swaps to Home underneath, so every pushed route is popped); a new number
-/// continues to the signup screen ([replace]: instead of the current route).
-void continueAfterVerify(NavigatorState nav, String phone, OtpVerifyResult result, {bool replace = false}) {
+/// Where a verified number goes ([replace]: instead of the current route):
+/// Create account → the name + password screen; Forgot password → the new
+/// password. A server older than v2.14 may log a known number in at once
+/// ([LoggedIn]) — then the root swaps to Home underneath, so every pushed
+/// route is popped.
+void continueAfterVerify(
+  NavigatorState nav,
+  String phone,
+  OtpPurpose purpose,
+  OtpVerifyResult result, {
+  bool replace = false,
+}) {
   switch (result) {
     case LoggedIn():
       nav.popUntil((r) => r.isFirst);
-    case NeedsSignup(:final verificationToken):
+    case PhoneVerified(:final verificationToken):
       final route = MaterialPageRoute<void>(
-        builder: (_) => SignupScreen(phone: phone, verificationToken: verificationToken),
+        builder: (_) => switch (purpose) {
+          OtpPurpose.signup => SignupScreen(phone: phone, verificationToken: verificationToken),
+          OtpPurpose.reset => ResetPasswordScreen(phone: phone, verificationToken: verificationToken),
+        },
       );
       if (replace) {
         nav.pushReplacement(route);

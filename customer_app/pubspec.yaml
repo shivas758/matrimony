@@ -2,7 +2,7 @@ name: gandharva
 description: "Wedbook Matrimony (formerly MILI; internal code name Gandharva) — the customers' app of the Wedbook matrimony network."
 publish_to: 'none'
 
-version: 3.4.0+11
+version: 3.5.0+12
 
 environment:
   sdk: ^3.11.3

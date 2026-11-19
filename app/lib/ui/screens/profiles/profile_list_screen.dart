@@ -10,7 +10,6 @@ import '../../widgets/common.dart';
 import 'filter_sheet.dart';
 import 'profile_card.dart';
 import 'profile_detail_screen.dart';
-import 'profile_form_screen.dart';
 import 'my_uploads_screen.dart';
 import '../notifications_screen.dart';
 
@@ -55,13 +54,6 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
     final state = context.read<ProfilesState>();
     final next = await FilterSheet.show(context, state.filters);
     if (next != null) await state.setFilters(next);
-  }
-
-  Future<void> _addProfile() async {
-    final created = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const ProfileFormScreen()),
-    );
-    if (created == true && mounted) context.read<ProfilesState>().refresh();
   }
 
   @override
@@ -113,11 +105,6 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
           ),
           const NotificationBell(),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addProfile,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text(S.addProfile),
       ),
       body: Column(
         // Without this the filter bar shrinks to its content and floats centred.
@@ -172,7 +159,7 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
       onRefresh: state.refresh,
       child: GridView.builder(
         controller: _scroll,
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: 240,
           childAspectRatio: 0.62,

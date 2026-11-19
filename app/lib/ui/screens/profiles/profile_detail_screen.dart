@@ -248,8 +248,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   }
 
   Future<void> _edit() async {
+    final profile = _profile;
+    if (profile == null) return;
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => ProfileFormScreen(existing: _profile)),
+      MaterialPageRoute(builder: (_) => ProfileFormScreen(existing: profile)),
     );
     if (saved == true) {
       await _load();

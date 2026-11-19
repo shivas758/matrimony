@@ -3,12 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../services/api_client.dart';
-import '../../../services/auth_service.dart';
 import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/app_logo.dart';
-import '../../widgets/common.dart';
+import 'forgot_password_screen.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -52,63 +51,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// "Forgot password?" — asks for the number and files a request the admin
-  /// settles with a temporary password (SPEC §4 Auth). No OTP, no email.
-  Future<void> _forgotPassword() async {
-    final phone = TextEditingController(text: _phone.text.trim());
-    final formKey = GlobalKey<FormState>();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text(S.forgotPassword),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(S.forgotPasswordBody),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: phone,
-                autofocus: true,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(10),
-                ],
-                decoration: const InputDecoration(
-                  labelText: S.phone,
-                  prefixIcon: Icon(Icons.phone_rounded),
-                  prefixText: '+91 ',
-                ),
-                validator: (v) =>
-                    (v ?? '').trim().length == 10 ? null : 'Enter your 10-digit mobile number',
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text(S.cancel)),
-          FilledButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) Navigator.pop(ctx, true);
-            },
-            child: const Text(S.forgotPasswordSend),
-          ),
-        ],
-      ),
+  /// "Forgot password?" — mobile → OTP → new password → logged in (SPEC
+  /// §9.24 D), with the number typed here already filled in.
+  void _forgotPassword() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ForgotPasswordScreen(phone: _phone.text.trim())),
     );
-    if (ok != true || !mounted) return;
-    setState(() => _busy = true);
-    try {
-      await context.read<AuthService>().forgotPassword(phone.text.trim());
-      if (mounted) showSnack(context, S.forgotPasswordSent);
-    } on ApiException catch (e) {
-      if (mounted) showSnack(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
   }
 
   @override
@@ -274,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-/// Shared by the signup screen.
+/// Shared by the signup and forgot-password screens.
 class ErrorBanner extends StatelessWidget {
   const ErrorBanner({super.key, required this.message});
 

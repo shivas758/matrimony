@@ -165,7 +165,7 @@ Map<String, dynamic> _mockSend() => {
       'mock_code': '123456',
     };
 
-Map<String, dynamic> _newNumber() => {'new': true, 'verification_token': 'vt-1'};
+Map<String, dynamic> _newNumber() => {'verification_token': 'vt-1'};
 
 Map<String, dynamic> _login() => {'token': 'jwt-1', 'customer': guestMeJson()};
 
@@ -187,11 +187,14 @@ Future<void> _dispose(WidgetTester tester) async {
   await tester.pumpWidget(const SizedBox.shrink());
 }
 
+/// The mobile-number step of Create account ([purpose] signup, the default)
+/// or Forgot password (SPEC §9.24 C).
 class _OtpHost {
-  _OtpHost() {
+  _OtpHost({this.purpose = OtpPurpose.signup}) {
     auth = AuthState(api: api, auth: CustomerAuthService(api));
   }
 
+  final OtpPurpose purpose;
   final api = _FakeApi();
   final phoneAuth = _FakePhoneAuth();
   late final AuthState auth;
@@ -202,7 +205,7 @@ class _OtpHost {
           Provider<PhoneAuthGateway>.value(value: phoneAuth),
           ChangeNotifierProvider<AuthState>.value(value: auth),
         ],
-        child: MaterialApp(theme: AppTheme.light(), home: const PhoneScreen()),
+        child: MaterialApp(theme: AppTheme.light(), home: PhoneScreen(purpose: purpose)),
       );
 
   /// Phone screen → number → Send OTP.
@@ -258,12 +261,12 @@ void main() {
         ..answer(_sendPath, _mockSend())
         ..answer(_verifyPath, _newNumber());
       final service = CustomerAuthService(api);
-      await service.sendOtp(_phoneNo);
-      expect(api.bodiesFor(_sendPath).single, {'phone': _phoneNo, 'firebase': true});
-      final r = await service.verifyFirebaseToken(phone: _phoneNo, idToken: 'tok');
-      expect(api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'tok'});
-      expect(r, isA<NeedsSignup>());
-      expect((r as NeedsSignup).verificationToken, 'vt-1');
+      await service.sendOtp(_phoneNo, purpose: OtpPurpose.signup);
+      expect(api.bodiesFor(_sendPath).single, {'phone': _phoneNo, 'purpose': 'signup', 'firebase': true});
+      final r = await service.verifyFirebaseToken(phone: _phoneNo, idToken: 'tok', purpose: OtpPurpose.signup);
+      expect(api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'tok', 'purpose': 'signup'});
+      expect(r, isA<PhoneVerified>());
+      expect((r as PhoneVerified).verificationToken, 'vt-1');
     });
 
     test('a firebase answer without options is "could not send" — Firebase is never started', () async {
@@ -271,7 +274,7 @@ void main() {
       final fb = _FakePhoneAuth();
       final auth = AuthState(api: api, auth: CustomerAuthService(api));
       await expectLater(
-        requestOtp(auth, fb, _phoneNo),
+        requestOtp(auth, fb, _phoneNo, purpose: OtpPurpose.signup),
         throwsA(isA<ApiException>().having((e) => e.message, 'message', S.otpCouldNotSend)),
       );
       expect(fb.starts, isEmpty);
@@ -312,7 +315,7 @@ void main() {
         ..answer(_verifyPath, _newNumber());
       await host.sendFrom(tester);
 
-      expect(host.api.bodiesFor(_sendPath).single, {'phone': _phoneNo, 'firebase': true});
+      expect(host.api.bodiesFor(_sendPath).single, {'phone': _phoneNo, 'purpose': 'signup', 'firebase': true});
       expect(host.phoneAuth.starts, hasLength(1));
       final (options, phone, resendToken) = host.phoneAuth.starts.single;
       expect(phone, _phoneNo);
@@ -326,7 +329,7 @@ void main() {
       await _settle(tester);
 
       expect(host.phoneAuth.confirms, [('vid-1', '654321')]);
-      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'fb-id-token'});
+      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'fb-id-token', 'purpose': 'signup'});
       expect(host.phoneAuth.signOuts, 1, reason: 'the app keeps no Firebase session');
       expect(find.text(S.signupTitle), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -341,7 +344,7 @@ void main() {
         ..answer(_verifyPath, _newNumber());
       await host.sendFrom(tester);
 
-      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'auto-token'});
+      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'auto-token', 'purpose': 'signup'});
       expect(host.phoneAuth.confirms, isEmpty);
       expect(host.phoneAuth.signOuts, 1);
       expect(find.text(S.signupTitle), findsOneWidget);
@@ -350,7 +353,7 @@ void main() {
       await _dispose(tester);
     });
 
-    testWidgets('SMS read on the OTP screen → "Verifying automatically…" → logged in', (tester) async {
+    testWidgets('SMS read on the OTP screen → "Verifying automatically…" → name + password', (tester) async {
       final host = _OtpHost();
       final answer = Completer<Map<String, dynamic>>();
       host.api
@@ -363,15 +366,52 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.text(S.otpVerifyingAuto), findsOneWidget);
-      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'read-token'});
+      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'firebase_id_token': 'read-token', 'purpose': 'signup'});
 
-      answer.complete(_login());
+      answer.complete(_newNumber());
       await _settle(tester);
-      expect(host.auth.phase, AuthPhase.loggedIn);
-      expect(host.api.token, 'jwt-1');
+      expect(host.auth.phase, isNot(AuthPhase.loggedIn), reason: 'the number is only checked');
+      expect(host.api.token, isNull);
       expect(host.phoneAuth.confirms, isEmpty);
       expect(host.phoneAuth.signOuts, 1);
-      expect(find.byType(OtpScreen), findsNothing, reason: 'popped back to the root, which swaps to Home');
+      expect(find.byType(OtpScreen), findsNothing, reason: 'replaced by the signup screen');
+      expect(find.text(S.signupTitle), findsOneWidget);
+      expect(find.text(S.confirmPassword), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _dispose(tester);
+    });
+
+    testWidgets('Forgot password with Firebase: purpose reset on send + verify → the new password', (tester) async {
+      final host = _OtpHost(purpose: OtpPurpose.reset);
+      host.api
+        ..answer(_sendPath, _firebaseSend())
+        ..answer(_verifyPath, {'verification_token': 'vt-reset'});
+      await host.sendFrom(tester);
+      expect(host.api.bodiesFor(_sendPath).single, {'phone': _phoneNo, 'purpose': 'reset', 'firebase': true});
+      expect(find.textContaining('Test mode'), findsNothing);
+
+      await tester.enterText(find.byType(TextFormField), '765432');
+      await _settle(tester);
+      expect(host.phoneAuth.confirms, [('vid-1', '765432')]);
+      expect(host.api.bodiesFor(_verifyPath).single,
+          {'phone': _phoneNo, 'firebase_id_token': 'fb-id-token', 'purpose': 'reset'});
+      expect(host.phoneAuth.signOuts, 1);
+      expect(find.text(S.resetTitle), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _dispose(tester);
+    });
+
+    testWidgets('Forgot password auto-verified at send → straight to the new password', (tester) async {
+      final host = _OtpHost(purpose: OtpPurpose.reset);
+      host.phoneAuth.step = const PhoneAutoVerified(idToken: 'auto-token', phone: _phoneNo);
+      host.api
+        ..answer(_sendPath, _firebaseSend())
+        ..answer(_verifyPath, {'verification_token': 'vt-reset'});
+      await host.sendFrom(tester);
+      expect(host.api.bodiesFor(_verifyPath).single,
+          {'phone': _phoneNo, 'firebase_id_token': 'auto-token', 'purpose': 'reset'});
+      expect(find.byType(OtpScreen), findsNothing);
+      expect(find.text(S.resetTitle), findsOneWidget);
       expect(tester.takeException(), isNull);
       await _dispose(tester);
     });
@@ -517,7 +557,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text(S.verify));
       await _settle(tester);
-      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'code': '123456'});
+      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'code': '123456', 'purpose': 'signup'});
       expect(find.text(S.signupTitle), findsOneWidget);
       expect(host.phoneAuth.starts, isEmpty);
       expect(host.phoneAuth.confirms, isEmpty);
@@ -536,7 +576,7 @@ void main() {
 
       await tester.enterText(find.byType(TextFormField), '987654');
       await _settle(tester);
-      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'code': '987654'});
+      expect(host.api.bodiesFor(_verifyPath).single, {'phone': _phoneNo, 'code': '987654', 'purpose': 'signup'});
       expect(host.auth.phase, AuthPhase.loggedIn);
       expect(host.phoneAuth.starts, isEmpty);
       await _dispose(tester);

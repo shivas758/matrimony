@@ -21,7 +21,7 @@ import 'state/interests_state.dart';
 import 'state/masters_state.dart';
 import 'state/notifications_state.dart';
 import 'ui/screens/auth/blocked_screen.dart';
-import 'ui/screens/auth/phone_screen.dart';
+import 'ui/screens/auth/login_screen.dart';
 import 'ui/screens/home_shell.dart';
 import 'ui/screens/notifications/notifications_screen.dart';
 import 'ui/strings.dart';
@@ -102,7 +102,8 @@ class GandharvaApp extends StatelessWidget {
   }
 }
 
-/// Decides which screen to show: splash → phone (OTP login) → home. Guests,
+/// Decides which screen to show: splash → login (mobile + password; Create
+/// account and Forgot password by one-time code, SPEC §9.24 C) → home. Guests,
 /// pending, rejected and active customers all use Home (SPEC §9.12); only a
 /// suspended account gets the blocked screen. Also starts push (SPEC §9.16)
 /// once a customer is signed in, and unregisters it at logout.
@@ -177,7 +178,7 @@ class _RootState extends State<_Root> {
 
     return switch (auth.phase) {
       AuthPhase.starting => const _Splash(),
-      AuthPhase.loggedOut => const PhoneScreen(),
+      AuthPhase.loggedOut => const LoginScreen(),
       AuthPhase.loggedIn => auth.isSuspended ? const BlockedScreen() : const HomeShell(),
     };
   }

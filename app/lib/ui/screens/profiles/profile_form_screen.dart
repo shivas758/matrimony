@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,7 +8,6 @@ import 'package:provider/provider.dart';
 
 import '../../../config.dart';
 import '../../../models/master_data.dart';
-import '../../../models/parsed_profile.dart';
 import '../../../models/profile.dart';
 import '../../../services/api_client.dart';
 import '../../../services/profile_service.dart';
@@ -27,21 +25,23 @@ import '../../widgets/step_header.dart';
 part 'profile_form_fields.dart';
 part 'profile_form_steps.dart';
 
-/// Add or edit a profile (SPEC §5 screen 5) in four steps (SPEC §9.18 F):
+/// Edit a profile (SPEC §5 screen 5) in four steps (SPEC §9.18 F):
 /// Personal details → Professional details → Horoscope → Family & contact.
 /// Nothing is sent until Save. Pops `true` when saved.
+///
+/// Edit only: agents no longer add profiles — every profile comes from a
+/// family, through Wedbook Matrimony or the registration form (SPEC §9.24 A).
 ///
 /// The screen is split over three files of one library:
 ///  * this one — the form's state, validation, saving and the frame
 ///    (step header, the four pages, Back / Next / Save);
 ///  * `profile_form_steps.dart` — what each step shows;
-///  * `profile_form_fields.dart` — the field widgets and the AI import sheet.
+///  * `profile_form_fields.dart` — the field widgets.
 class ProfileFormScreen extends StatefulWidget {
-  const ProfileFormScreen({super.key, this.existing});
+  const ProfileFormScreen({super.key, required this.existing});
 
-  final Profile? existing;
-
-  bool get isEdit => existing != null;
+  /// The profile being edited, as its owner gets it (owner side).
+  final Profile existing;
 
   @override
   State<ProfileFormScreen> createState() => _ProfileFormScreenState();
@@ -54,15 +54,8 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
     for (final _ in ProfileFormStep.values) GlobalKey<FormState>(),
   ];
 
+  /// The step on screen; any step can be opened from the header.
   ProfileFormStep _step = ProfileFormStep.personal;
-
-  /// Index of the furthest step opened so far — a new profile moves forward
-  /// through Next, and the steps behind it are ticked in the header.
-  int _furthest = 0;
-
-  /// Every step may be opened from the header: always for an edit, and for a
-  /// new profile once the AI import has filled the whole form.
-  late bool _allStepsOpen = widget.isEdit;
 
   late final TextEditingController _name;
   late final TextEditingController _subcaste;
@@ -141,111 +134,86 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
   bool _busy = false;
   String? _error;
 
-  /// What the form held when it opened (after the defaults were applied) —
-  /// compared on the way out to ask before discarding changes.
+  /// What the form held when it opened — compared on the way out to ask
+  /// before discarding changes.
   String _pristine = '';
-
-  // AI import (SPEC §4 POST /profiles/parse). Hidden unless the server has a key.
-  bool _aiEnabled = false;
-  bool _aiBusy = false;
-  ParsedProfile? _lastParse;
 
   @override
   void initState() {
     super.initState();
     final p = widget.existing;
-    _name = TextEditingController(text: p?.fullName ?? '');
-    _subcaste = TextEditingController(text: p?.subcaste?.name ?? '');
-    _gothram = TextEditingController(text: p?.gothram ?? '');
-    _weight = TextEditingController(text: p?.weightKg?.toString() ?? '');
-    _eduDetails = TextEditingController(text: p?.educationDetails ?? '');
-    _profDetails = TextEditingController(text: p?.professionDetails ?? '');
-    _workPlace = TextEditingController(text: p?.workPlace ?? '');
-    _income = TextEditingController(text: p?.incomeText ?? '');
-    _nriPlace = TextEditingController(text: p?.nriPlace ?? '');
-    _city = TextEditingController(text: p?.city ?? '');
-    _state = TextEditingController(text: p?.state ?? '');
-    _about = TextEditingController(text: p?.about ?? '');
-    _family = TextEditingController(text: p?.familyDetails ?? '');
-    _fatherName = TextEditingController(text: p?.fatherName ?? '');
-    _fatherPhone = TextEditingController(text: p?.fatherPhone ?? '');
-    _motherName = TextEditingController(text: p?.motherName ?? '');
-    _motherPhone = TextEditingController(text: p?.motherPhone ?? '');
-    _contactName = TextEditingController(text: p?.contactName ?? '');
-    _contactPhone = TextEditingController(text: p?.contactPhone ?? '');
-    _birthPlace = TextEditingController(text: p?.birthPlace ?? '');
-    _siblingsCount = TextEditingController(text: p?.siblingsCount?.toString() ?? '');
-    _siblingsDetails = TextEditingController(text: p?.siblingsDetails ?? '');
-    _otherIncome = TextEditingController(text: p?.otherIncome ?? '');
-    _birthState = TextEditingController(text: p?.birthState ?? '');
-    _fatherOccupation = TextEditingController(text: p?.fatherOccupation ?? '');
-    _motherOccupation = TextEditingController(text: p?.motherOccupation ?? '');
-    _elderSisters = TextEditingController(text: _countText(p?.elderSisters));
-    _youngerSisters = TextEditingController(text: _countText(p?.youngerSisters));
-    _elderBrothers = TextEditingController(text: _countText(p?.elderBrothers));
-    _youngerBrothers = TextEditingController(text: _countText(p?.youngerBrothers));
-    _propertyShare = TextEditingController(text: p?.propertyShare ?? '');
-    _propertyDetails = TextEditingController(text: p?.propertyDetails ?? '');
-    for (final row in p?.educationLevels ?? const <EducationLevel>[]) {
+    _name = TextEditingController(text: p.fullName);
+    _subcaste = TextEditingController(text: p.subcaste?.name ?? '');
+    _gothram = TextEditingController(text: p.gothram ?? '');
+    _weight = TextEditingController(text: p.weightKg?.toString() ?? '');
+    _eduDetails = TextEditingController(text: p.educationDetails ?? '');
+    _profDetails = TextEditingController(text: p.professionDetails ?? '');
+    _workPlace = TextEditingController(text: p.workPlace ?? '');
+    _income = TextEditingController(text: p.incomeText ?? '');
+    _nriPlace = TextEditingController(text: p.nriPlace ?? '');
+    _city = TextEditingController(text: p.city ?? '');
+    _state = TextEditingController(text: p.state ?? '');
+    _about = TextEditingController(text: p.about ?? '');
+    _family = TextEditingController(text: p.familyDetails ?? '');
+    _fatherName = TextEditingController(text: p.fatherName ?? '');
+    _fatherPhone = TextEditingController(text: p.fatherPhone ?? '');
+    _motherName = TextEditingController(text: p.motherName ?? '');
+    _motherPhone = TextEditingController(text: p.motherPhone ?? '');
+    _contactName = TextEditingController(text: p.contactName ?? '');
+    _contactPhone = TextEditingController(text: p.contactPhone ?? '');
+    _birthPlace = TextEditingController(text: p.birthPlace ?? '');
+    _siblingsCount = TextEditingController(text: p.siblingsCount?.toString() ?? '');
+    _siblingsDetails = TextEditingController(text: p.siblingsDetails ?? '');
+    _otherIncome = TextEditingController(text: p.otherIncome ?? '');
+    _birthState = TextEditingController(text: p.birthState ?? '');
+    _fatherOccupation = TextEditingController(text: p.fatherOccupation ?? '');
+    _motherOccupation = TextEditingController(text: p.motherOccupation ?? '');
+    _elderSisters = TextEditingController(text: _countText(p.elderSisters));
+    _youngerSisters = TextEditingController(text: _countText(p.youngerSisters));
+    _elderBrothers = TextEditingController(text: _countText(p.elderBrothers));
+    _youngerBrothers = TextEditingController(text: _countText(p.youngerBrothers));
+    _propertyShare = TextEditingController(text: p.propertyShare ?? '');
+    _propertyDetails = TextEditingController(text: p.propertyDetails ?? '');
+    for (final row in p.educationLevels) {
       _eduLevelDetails[row.level]?.text = row.details ?? '';
       if (_eduLevelCountry.containsKey(row.level)) _eduLevelCountry[row.level] = row.country?.id;
     }
-    _existingPhotos = [...?p?.photos];
+    _existingPhotos = [...p.photos];
 
-    if (p != null) {
-      _gender = p.gender;
-      _nationalityId = p.nationality?.id;
-      _occupationTypeId = p.occupationType?.id;
-      _workCountryId = p.workCountry?.id;
-      _birthCountryId = p.birthCountry?.id;
-      _dob = p.dob;
-      _heightCm = p.heightCm;
-      _complexionId = p.complexion?.id;
-      _communityId = p.community?.id;
-      _subcasteId = p.subcaste?.id;
-      _educationId = p.education?.id;
-      _professionId = p.profession?.id;
-      _maritalStatusId = p.maritalStatus?.id;
-      _isNri = p.isNri;
-      _nriCountryId = p.nriCountry?.id;
-      _zodiacId = p.zodiac?.id;
-      _nakshatramId = p.nakshatram?.id;
-      _status = p.status.apiValue;
-      _birthTime = _parseTime(p.birthTime);
-      _religionId = p.religion?.id;
-      _motherTongueId = p.motherTongue?.id;
-      _languageIds.addAll(p.knownLanguages.map((l) => l.id));
-      _foodHabitId = p.foodHabit?.id;
-      _hasSiblings = p.hasSiblings;
-      // The family's saved setting — sent to the owner side only (SPEC §9.18 D / E).
-      _privacy = ProfilePrivacy.fromServer(
-        hiddenFields: p.hiddenFields,
-        audienceAll: p.audienceAll,
-        audienceCommunityIds: p.audienceCommunities.map((c) => c.id),
-      );
-    }
+    _gender = p.gender;
+    _nationalityId = p.nationality?.id;
+    _occupationTypeId = p.occupationType?.id;
+    _workCountryId = p.workCountry?.id;
+    _birthCountryId = p.birthCountry?.id;
+    _dob = p.dob;
+    _heightCm = p.heightCm;
+    _complexionId = p.complexion?.id;
+    _communityId = p.community?.id;
+    _subcasteId = p.subcaste?.id;
+    _educationId = p.education?.id;
+    _professionId = p.profession?.id;
+    _maritalStatusId = p.maritalStatus?.id;
+    _isNri = p.isNri;
+    _nriCountryId = p.nriCountry?.id;
+    _zodiacId = p.zodiac?.id;
+    _nakshatramId = p.nakshatram?.id;
+    _status = p.status.apiValue;
+    _birthTime = _parseTime(p.birthTime);
+    _religionId = p.religion?.id;
+    _motherTongueId = p.motherTongue?.id;
+    _languageIds.addAll(p.knownLanguages.map((l) => l.id));
+    _foodHabitId = p.foodHabit?.id;
+    _hasSiblings = p.hasSiblings;
+    // The family's saved setting — sent to the owner side only (SPEC §9.18 D / E).
+    _privacy = ProfilePrivacy.fromServer(
+      hiddenFields: p.hiddenFields,
+      audienceAll: p.audienceAll,
+      audienceCommunityIds: p.audienceCommunities.map((c) => c.id),
+    );
     _pristine = _snapshot();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final mastersState = context.read<MastersState>();
-      mastersState.load().then((_) {
-        // A new profile works in India unless the agent says otherwise
-        // (SPEC §9.7: countries start with India). Edits keep what was saved.
-        if (!mounted || widget.isEdit || _workCountryId != null) return;
-        final india = mastersState.data.indiaCountryId;
-        if (india != null) _applyDefault(() => _workCountryId = india);
-      });
-      // Default to the agent's only community so one-community agents skip a step.
-      final agent = context.read<AuthState>().agent;
-      if (_communityId == null && (agent?.communities.length ?? 0) == 1) {
-        _applyDefault(() => _communityId = agent!.communities.first.id);
-      }
-      if (!widget.isEdit) {
-        context.read<ProfileService>().aiEnabled().then((on) {
-          if (mounted) setState(() => _aiEnabled = on);
-        });
-      }
-    });
+    // The pickers need the master lists.
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<MastersState>().load());
   }
 
   @override
@@ -266,14 +234,6 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
   /// `setState` for the step builders, which live in an extension
   /// (profile_form_steps.dart) and so cannot call the protected method.
   void _set(VoidCallback fn) => setState(fn);
-
-  /// Applies a default the user did not choose (India, the only community)
-  /// without making an untouched form count as changed.
-  void _applyDefault(VoidCallback fn) {
-    final untouched = !_hasChanges;
-    setState(fn);
-    if (untouched) _pristine = _snapshot();
-  }
 
   /// A count field shows nothing for null; "0" is a real answer.
   static String _countText(int? n) => n == null ? '' : '$n';
@@ -382,165 +342,14 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
     if (picked != null && mounted) setState(() => _birthTime = picked);
   }
 
-  // ------------------------------------------------------------------ AI import
-
-  Future<void> _fillFromBiodata() async {
-    final input = await _AiImportSheet.show(context);
-    if (input == null || !mounted) return;
-    setState(() => _aiBusy = true);
-    try {
-      final result = await context
-          .read<ProfileService>()
-          .parseBioData(filePath: input.path, text: input.text);
-      if (!mounted) return;
-      _applyDraft(result);
-      showSnack(context, S.aiFilled);
-    } on ApiException catch (e) {
-      if (mounted) showSnack(context, e.message, error: true);
-    } finally {
-      if (mounted) setState(() => _aiBusy = false);
-    }
-  }
-
-  /// Pre-fills the form from the server's draft. Only touches fields the
-  /// draft actually contains, so a partial extraction never wipes typed input.
-  void _applyDraft(ParsedProfile r) {
-    final masters = context.read<MastersState>().data;
-    final agent = context.read<AuthState>().agent;
-    final allowed = (agent?.isAdmin ?? false)
-        ? masters.communities.map((c) => c.id).toSet()
-        : (agent?.communities ?? const []).map((c) => c.id).toSet();
-
-    setState(() {
-      final name = r.textField('full_name');
-      if (name != null) _name.text = name;
-      final gender = r.textField('gender');
-      if (gender == 'bride' || gender == 'groom') _gender = gender!;
-      final dob = r.textField('dob');
-      if (dob != null) _dob = DateTime.tryParse(dob) ?? _dob;
-      final height = r.intField('height_cm');
-      if (height != null) _heightCm = height;
-      final weight = r.intField('weight_kg');
-      if (weight != null) _weight.text = '$weight';
-      _complexionId = r.intField('complexion_id') ?? _complexionId;
-      if (r.draft.containsKey('is_nri')) _isNri = r.draft['is_nri'] == true;
-      _nriCountryId = r.intField('nri_country_id') ?? _nriCountryId;
-      // v2.1 registration-form keys — optional, ignored when absent.
-      _nationalityId = r.intField('nationality_id') ?? _nationalityId;
-      _occupationTypeId = r.intField('occupation_type_id') ?? _occupationTypeId;
-      _workCountryId = r.intField('work_country_id') ?? _workCountryId;
-      _birthCountryId = r.intField('birth_country_id') ?? _birthCountryId;
-      for (final (key, controller) in [
-        ('elder_sisters', _elderSisters),
-        ('younger_sisters', _youngerSisters),
-        ('elder_brothers', _elderBrothers),
-        ('younger_brothers', _youngerBrothers),
-      ]) {
-        final n = r.intField(key);
-        if (n != null) controller.text = '$n';
-      }
-      final levels = r.educationLevels;
-      if (levels.isNotEmpty) {
-        for (final row in levels) {
-          final level = row['level'] as String;
-          _eduLevelDetails[level]?.text = (row['details'] as String?) ?? '';
-          if (_eduLevelCountry.containsKey(level)) _eduLevelCountry[level] = row['country_id'] as int?;
-        }
-      }
-
-      final community = r.intField('community_id');
-      if (community != null && allowed.contains(community)) {
-        if (community != _communityId) {
-          _subcasteId = null;
-          _subcaste.clear();
-        }
-        _communityId = community;
-      }
-      final subcasteId = r.intField('subcaste_id');
-      final subcasteName = r.textField('subcaste_name');
-      if (subcasteId != null && masters.subcasteName(subcasteId) != null) {
-        _subcasteId = subcasteId;
-        _subcaste.text = masters.subcasteName(subcasteId)!;
-      } else if (subcasteName != null) {
-        _subcasteId = null; // new — created on save
-        _subcaste.text = subcasteName;
-      }
-
-      _educationId = r.intField('education_id') ?? _educationId;
-      _professionId = r.intField('profession_id') ?? _professionId;
-      _maritalStatusId = r.intField('marital_status_id') ?? _maritalStatusId;
-      _zodiacId = r.intField('zodiac_id') ?? _zodiacId;
-      _nakshatramId = r.intField('nakshatram_id') ?? _nakshatramId;
-      final birthTime = _parseTime(r.textField('birth_time'));
-      if (birthTime != null) _birthTime = birthTime;
-      _religionId = r.intField('religion_id') ?? _religionId;
-      _motherTongueId = r.intField('mother_tongue_id') ?? _motherTongueId;
-      _foodHabitId = r.intField('food_habit_id') ?? _foodHabitId;
-      final langs = r.draft['known_language_ids'];
-      if (langs is List && langs.isNotEmpty) {
-        _languageIds
-          ..clear()
-          ..addAll(langs.whereType<num>().map((e) => e.toInt()));
-      }
-      if (r.draft.containsKey('has_siblings')) _hasSiblings = r.draft['has_siblings'] as bool?;
-      final siblings = r.intField('siblings_count');
-      if (siblings != null) _siblingsCount.text = '$siblings';
-
-      for (final (key, controller) in [
-        ('birth_place', _birthPlace),
-        ('gothram', _gothram),
-        ('education_details', _eduDetails),
-        ('profession_details', _profDetails),
-        ('work_place', _workPlace),
-        ('income_text', _income),
-        ('nri_place', _nriPlace),
-        ('city', _city),
-        ('state', _state),
-        ('about', _about),
-        ('family_details', _family),
-        ('father_name', _fatherName),
-        ('father_phone', _fatherPhone),
-        ('mother_name', _motherName),
-        ('mother_phone', _motherPhone),
-        ('contact_name', _contactName),
-        ('contact_phone', _contactPhone),
-        ('siblings_details', _siblingsDetails),
-        ('other_income', _otherIncome),
-        ('birth_state', _birthState),
-        ('father_occupation', _fatherOccupation),
-        ('mother_occupation', _motherOccupation),
-        ('property_share', _propertyShare),
-        ('property_details', _propertyDetails),
-      ]) {
-        final v = r.textField(key);
-        if (v != null) controller.text = v;
-      }
-
-      _lastParse = r;
-      _error = null;
-      // The draft fills all four steps — let the agent jump to any of them
-      // to check the hints.
-      _allStepsOpen = true;
-    });
-  }
-
-  /// The raw text the AI import could not map for [key], if any.
-  String? _hint(String key) => _lastParse?.unmatched[key];
-
   // ------------------------------------------------------------------ steps
 
   /// Shows [step]. The keyboard goes away with the step it belonged to.
   void _goTo(ProfileFormStep step) {
     FocusManager.instance.primaryFocus?.unfocus();
     if (step == _step) return;
-    setState(() {
-      _step = step;
-      if (step.index > _furthest) _furthest = step.index;
-    });
+    setState(() => _step = step);
   }
-
-  /// New profile: the steps already opened. Edit (or after an AI import): all.
-  bool _canOpen(int index) => _allStepsOpen || index <= _furthest;
 
   /// Runs the validators of one step. On a failure the step is shown, the
   /// topmost field in error is scrolled into view and false is returned.
@@ -646,8 +455,8 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       'nri_country_id': _isNri ? _nriCountryId : null,
       'religion_id': _religionId,
       'mother_tongue_id': _motherTongueId,
-      // Multipart (create) takes a comma list; JSON (edit) takes an array so [] clears it.
-      'known_language_ids': widget.isEdit ? _languageIds.toList() : _languageIds.join(','),
+      // An array, so [] clears the saved languages.
+      'known_language_ids': _languageIds.toList(),
       'food_habit_id': _foodHabitId,
       'about': _about.text.trim(),
       // ---- personal details (PROTECTED on the server, SPEC §9.8): native
@@ -668,8 +477,8 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
       'mother_phone': _motherPhone.text.trim(),
       'contact_name': _contactName.text.trim(),
       'contact_phone': _contactPhone.text.trim(),
-      // Tri-state: multipart drops '' (= not recorded); JSON null clears it.
-      'has_siblings': widget.isEdit ? _hasSiblings : (_hasSiblings?.toString() ?? ''),
+      // Tri-state: null = not recorded.
+      'has_siblings': _hasSiblings,
       'siblings_count': siblingsCount,
       'siblings_details': hasSiblings ? _siblingsDetails.text.trim() : null,
       'elder_sisters': hasSiblings ? breakdown[0] : null,
@@ -713,13 +522,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
     // serves the list; an older one gets nothing it would not understand.
     final privacyKeys = masters.privacyFields.map((f) => f.key);
     if (privacyKeys.isNotEmpty) {
-      fields.addAll(
-        widget.isEdit
-            // JSON PATCH: real arrays and a real boolean.
-            ? _privacy.toJsonFields(privacyKeys, ownCommunityId: _communityId)
-            // Multipart POST: JSON array strings and "true" / "false".
-            : _privacy.toMultipartFields(privacyKeys, ownCommunityId: _communityId),
-      );
+      fields.addAll(_privacy.toJsonFields(privacyKeys, ownCommunityId: _communityId));
     }
 
     setState(() {
@@ -729,12 +532,8 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
 
     try {
       final service = context.read<ProfileService>();
-      if (widget.isEdit) {
-        await service.update(widget.existing!.id, fields);
-        await service.addPhotos(widget.existing!.id, _newPhotos.map((f) => f.path).toList());
-      } else {
-        await service.create(fields, _newPhotos.map((f) => f.path).toList());
-      }
+      await service.update(widget.existing.id, fields);
+      await service.addPhotos(widget.existing.id, _newPhotos.map((f) => f.path).toList());
       // A newly typed subcaste is now in the master list — refresh the cache.
       if (mounted) context.read<MastersState>().load(force: true);
       if (mounted) Navigator.of(context).pop(true);
@@ -823,7 +622,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
         if (!didPop) _leave();
       },
       child: Scaffold(
-        appBar: AppBar(title: Text(widget.isEdit ? S.editProfileTitle : S.newProfile)),
+        appBar: AppBar(title: const Text(S.editProfileTitle)),
         body: SafeArea(
           bottom: false,
           child: Column(
@@ -833,10 +632,9 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
                 current: _step.index,
                 completed: {
                   for (final s in ProfileFormStep.values)
-                    if (s != _step && (widget.isEdit || s.index < _furthest)) s.index,
+                    if (s != _step) s.index,
                 },
                 onStepTapped: _busy ? null : (i) => _goTo(ProfileFormStep.values[i]),
-                canTap: _canOpen,
               ),
               const Divider(height: 1),
               Expanded(
@@ -868,8 +666,8 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
     );
   }
 
-  /// Back / Next pinned under the form; the last step's button saves. An
-  /// edit can also save from any step.
+  /// Back / Next pinned under the form; the last step's button saves, and
+  /// Save is offered on every other step too.
   Widget _bottomBar(BuildContext context) {
     final theme = Theme.of(context);
     final last = _step.isLast;
@@ -921,7 +719,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
                     ),
                     const SizedBox(width: 10),
                   ],
-                  if (widget.isEdit && !last) ...[
+                  if (!last) ...[
                     Expanded(
                       child: FilledButton(
                         style: FilledButton.styleFrom(
@@ -943,7 +741,7 @@ class _ProfileFormScreenState extends State<ProfileFormScreen> {
                   ],
                   Expanded(
                     // The way forward gets the most room.
-                    flex: _step.isFirst || (widget.isEdit && !last) ? 1 : 2,
+                    flex: last ? 2 : 1,
                     child: FilledButton(
                       style: FilledButton.styleFrom(padding: tight),
                       onPressed: _busy ? null : (last ? _save : _next),

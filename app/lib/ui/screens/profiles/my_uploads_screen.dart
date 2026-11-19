@@ -8,9 +8,10 @@ import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 import 'profile_detail_screen.dart';
-import 'profile_form_screen.dart';
 
-/// My uploads with status chips and quick status changes (SPEC §5 screen 6).
+/// My uploads with status chips and quick status changes (SPEC §5 screen 6) —
+/// my clients' profiles. There is no Add button: families add their own
+/// profiles (SPEC §9.24 A).
 class MyUploadsScreen extends StatefulWidget {
   const MyUploadsScreen({super.key});
 
@@ -103,16 +104,6 @@ class _MyUploadsScreenState extends State<MyUploadsScreen> {
       appBar: AppBar(
         title: Text('${S.myUploads}${_profiles.isNotEmpty ? ' (${_profiles.length})' : ''}'),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final created = await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (_) => const ProfileFormScreen()),
-          );
-          if (created == true) _load();
-        },
-        icon: const Icon(Icons.add_rounded),
-        label: const Text(S.addProfile),
-      ),
       body: Column(
         // Keeps the horizontal chip bar full-width instead of centred.
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -159,17 +150,27 @@ class _MyUploadsScreenState extends State<MyUploadsScreen> {
       return ErrorState(message: _error!, onRetry: _load);
     }
     if (_profiles.isEmpty) {
-      return const EmptyState(
-        icon: Icons.folder_open_rounded,
-        title: 'You have not added any profiles yet',
-        message: S.noProfilesHint,
+      // Profiles come from families, not from the agent (SPEC §9.24 A).
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          children: [
+            _statusFilter == null
+                ? const EmptyState(
+                    icon: Icons.folder_open_rounded,
+                    title: S.noUploads,
+                    message: S.noUploadsHint,
+                  )
+                : const EmptyState(icon: Icons.filter_list_off_rounded, title: S.noMatches),
+          ],
+        ),
       );
     }
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(0, 8, 0, 96),
+        padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
         itemCount: _profiles.length,
         separatorBuilder: (_, _) => const Divider(height: 1, indent: 88),
         itemBuilder: (_, i) {

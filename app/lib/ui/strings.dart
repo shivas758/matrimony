@@ -26,9 +26,6 @@ class S {
   static const newPassword = 'New password';
   static const confirmPassword = 'Confirm new password';
   static const forgotPassword = 'Forgot password?';
-  static const forgotPasswordBody =
-      'Enter your registered mobile number. The admin will be notified, verify it is you, '
-      'and send you a temporary password on WhatsApp or by phone.';
   static const forgotPasswordSend = 'Ask admin to reset';
   static const forgotPasswordSent =
       'Request sent. The admin will contact you with a temporary password.';
@@ -61,10 +58,12 @@ class S {
   static const clearAll = 'Clear all';
   static const apply = 'Show results';
   static const noProfiles = 'No profiles yet';
-  static const noProfilesHint = 'Add the first profile with the + button.';
+  // SPEC §9.24 A: agents no longer add profiles — families do.
+  static const noProfilesHint =
+      'Profiles are added by families — in the $customerAppName app or through your '
+      'registration link.';
   static const noMatches = 'No profiles match these filters';
   static const noMatchesHint = 'Try widening the age range or clearing a filter.';
-  static const addProfile = 'Add profile';
   static const savePreset = 'Save these filters';
   static const presets = 'Saved filters';
 
@@ -130,8 +129,7 @@ class S {
   static const location = 'Location';
   static const starRasi = 'Star / Rasi';
 
-  // ---- profile form
-  static const newProfile = 'New profile';
+  // ---- profile form (edit only, SPEC §9.24 A)
   static const editProfileTitle = 'Edit profile';
   static const dob = 'Date of birth';
   static const photos = 'Photos';
@@ -146,21 +144,11 @@ class S {
   static const save = 'Save';
   static const saving = 'Saving…';
 
-  // ---- subcaste + AI import
+  // ---- subcaste
   static const subcaste = 'Subcaste';
   static const subcasteHint = 'Type to search, or add a new one';
   static const subcasteNeedsCommunity = 'Select a community first';
   static const subcasteNew = 'New — will be added to the list when you save';
-  static const fillFromBiodata = 'Fill from bio-data';
-  static const aiImportBody =
-      'Upload a PDF or photo of the bio-data, or paste its text. The AI reads it and fills the '
-      'form for you to check. The document is sent to the AI service and is not stored on the server.';
-  static const aiPasteHint = 'Paste the bio-data text here';
-  static const aiPickFile = 'Choose PDF or photo';
-  static const aiUseText = 'Use pasted text';
-  static const aiParsing = 'Reading the bio-data…';
-  static const aiFilled = 'Fields filled — please check every field before saving';
-  static const aiUnmatchedPrefix = 'Not matched, pick manually: ';
 
   // ---- birth details (horoscope)
   static const birthTime = 'Birth time';
@@ -320,6 +308,8 @@ class S {
   static const testModeHint = 'Test mode — enter';
   static const changeNumber = 'Change number';
   static const phoneVerified = 'Mobile number verified';
+  static const phoneIsLoginId = 'This is your login ID';
+  static const phoneInvalid = 'Enter a valid 10-digit mobile number';
   static const selectOneCommunity = 'Select at least one community';
 
   // ---- v2.1 clients (SPEC §9.5 / §9.11)
@@ -557,7 +547,7 @@ class S {
   static const nativeState = 'Native state';
   static const contactPerson = 'Contact person';
   static const parents = 'Parents';
-  static const aiCheckSteps = 'Could not match everything — please check: ';
+  static const clearTime = 'Clear time';
 
   // ---- v3.0 privacy card (SPEC §9.18 D / E)
   static const privacy = 'Privacy';
@@ -918,4 +908,30 @@ class S {
       what.isEmpty ? 'Search' : 'Search ${what.toLowerCase()}';
   static const noListMatches = 'Nothing matches your search';
   static const pickNone = 'None';
+
+  // ---- v3.5 My uploads without an Add button (SPEC §9.24 A)
+  static const noUploads = 'No client profiles yet';
+  static const noUploadsHint =
+      'Your clients add their own profiles in the $customerAppName app or through your '
+      'registration link.';
+
+  // ---- v3.5 forgot password by OTP (SPEC §9.24 D)
+  static const resetPasswordTitle = 'Forgot password';
+  static const resetOtpBody =
+      'Enter your registered mobile number. We send a one-time code by SMS to confirm it is you.';
+  static const newPasswordStepTitle = 'Choose a new password';
+  static const newPasswordStepBody =
+      'Use 6 to 100 characters. You are logged in as soon as it is saved.';
+  static const passwordLengthRule = 'Use 6 to 100 characters';
+  static const passwordsDontMatch = 'Passwords do not match';
+  static const saveAndLogin = 'Save and log in';
+  static const backToLogin = 'Back to login';
+  static const passwordResetDone = 'Password changed — you are logged in';
+  static const noAccountForNumber = 'No account with this mobile number';
+  static const resetStartAgain = 'That took too long — please start again.';
+  static const cantGetCode = "Can't get the code? Ask the admin";
+  static const askAdminTitle = 'Ask the admin?';
+  static String askAdminBody(String phone) =>
+      'The admin is told that +91 $phone needs a new password. They check it is you and send '
+      'you a temporary password on WhatsApp or by phone.';
 }

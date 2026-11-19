@@ -1,185 +1,7 @@
 part of 'profile_form_screen.dart';
 
-// The building blocks of the profile form: the AI import banner and sheet,
-// and the field widgets the four steps (profile_form_steps.dart) are made of.
-
-// ==================================================================== AI import
-
-class _AiBanner extends StatelessWidget {
-  const _AiBanner({required this.busy, required this.onTap});
-
-  final bool busy;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.primaryContainer.withValues(alpha: 0.5),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: busy ? null : onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              busy
-                  ? const SizedBox(
-                      width: 22, height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    )
-                  : Icon(Icons.auto_fix_high_rounded, color: scheme.primary),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      busy ? S.aiParsing : S.fillFromBiodata,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'PDF, photo, or pasted text',
-                      style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              if (!busy) const Icon(Icons.chevron_right_rounded),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _WarningList extends StatelessWidget {
-  const _WarningList({required this.warnings});
-
-  final List<String> warnings;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.tertiaryContainer.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final w in warnings)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline_rounded, size: 16, color: scheme.onTertiaryContainer),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(w, style: const TextStyle(fontSize: 13))),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Bottom sheet: choose a file or paste text. Returns one of the two.
-class _AiImportSheet extends StatefulWidget {
-  const _AiImportSheet();
-
-  static Future<({String? path, String? text})?> show(BuildContext context) =>
-      showModalBottomSheet<({String? path, String? text})>(
-        context: context,
-        isScrollControlled: true,
-        useSafeArea: true,
-        showDragHandle: true,
-        builder: (_) => const _AiImportSheet(),
-      );
-
-  @override
-  State<_AiImportSheet> createState() => _AiImportSheetState();
-}
-
-class _AiImportSheetState extends State<_AiImportSheet> {
-  final _text = TextEditingController();
-
-  @override
-  void dispose() {
-    _text.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickFile() async {
-    // file_picker ≥ 12: static call, empty list means the user cancelled.
-    final files = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'txt'],
-    );
-    final path = files.isEmpty ? null : files.first.path;
-    if (path != null && mounted) Navigator.pop(context, (path: path, text: null));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(S.fillFromBiodata, style: theme.textTheme.titleLarge),
-          const SizedBox(height: 8),
-          Text(
-            S.aiImportBody,
-            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.outline),
-          ),
-          const SizedBox(height: 20),
-          OutlinedButton.icon(
-            onPressed: _pickFile,
-            icon: const Icon(Icons.upload_file_rounded),
-            label: const Text(S.aiPickFile),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              const Expanded(child: Divider()),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text('or', style: TextStyle(color: theme.colorScheme.outline)),
-              ),
-              const Expanded(child: Divider()),
-            ],
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _text,
-            maxLines: 6,
-            minLines: 4,
-            decoration: const InputDecoration(hintText: S.aiPasteHint, alignLabelWithHint: true),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _text.text.trim().isEmpty
-                ? null
-                : () => Navigator.pop(context, (path: null, text: _text.text)),
-            child: const Text(S.aiUseText),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// The building blocks of the profile form: the field widgets the four steps
+// (profile_form_steps.dart) are made of.
 
 // ==================================================================== fields
 
@@ -223,14 +45,12 @@ class _SubcasteField extends StatefulWidget {
     required this.isNew,
     required this.onSelected,
     required this.onTyped,
-    this.helper,
   });
 
   final TextEditingController controller;
   final List<Subcaste> options;
   final bool enabled;
   final bool isNew;
-  final String? helper;
   final ValueChanged<Subcaste> onSelected;
   final ValueChanged<String> onTyped;
 
@@ -249,11 +69,7 @@ class _SubcasteFieldState extends State<_SubcasteField> {
 
   @override
   Widget build(BuildContext context) {
-    final helper = widget.helper != null
-        ? '${S.aiUnmatchedPrefix}${widget.helper}'
-        : widget.isNew
-            ? S.subcasteNew
-            : null;
+    final helper = widget.isNew ? S.subcasteNew : null;
 
     return RawAutocomplete<Subcaste>(
       textEditingController: widget.controller,
@@ -413,7 +229,6 @@ class _MasterDropdown extends StatelessWidget {
     required this.items,
     required this.value,
     required this.onChanged,
-    this.helper,
     this.helperText,
     this.validator,
   });
@@ -424,10 +239,7 @@ class _MasterDropdown extends StatelessWidget {
   final int? value;
   final ValueChanged<int?> onChanged;
 
-  /// Raw text the AI import could not map — shown so the agent can pick manually.
-  final String? helper;
-
-  /// Plain guidance under the field, shown when there is no AI hint.
+  /// Plain guidance under the field.
   final String? helperText;
 
   /// Set for a required field (the community).
@@ -439,7 +251,7 @@ class _MasterDropdown extends StatelessWidget {
         icon: icon,
         options: masterOptions(items),
         value: value,
-        helperText: helper == null ? helperText : '${S.aiUnmatchedPrefix}$helper',
+        helperText: helperText,
         validator: validator,
         onChanged: onChanged,
       );
@@ -453,7 +265,6 @@ class _LanguageChips extends StatelessWidget {
     required this.selected,
     required this.onToggle,
     required this.onReplace,
-    this.helper,
   });
 
   final List<MasterItem> items;
@@ -462,17 +273,14 @@ class _LanguageChips extends StatelessWidget {
 
   /// Long list: the picker's whole new selection.
   final ValueChanged<Set<int>> onReplace;
-  final String? helper;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final helperText = helper == null ? null : '${S.aiUnmatchedPrefix}$helper';
     if (isLongList(items.length)) {
       return MultiPickerField(
         label: S.knownLanguages,
         icon: Icons.translate_rounded,
-        helperText: helperText,
         selectedLabels: [
           for (final item in items)
             if (selected.contains(item.id)) item.name,
@@ -492,8 +300,6 @@ class _LanguageChips extends StatelessWidget {
       decoration: InputDecoration(
         labelText: S.knownLanguages,
         prefixIcon: const Icon(Icons.translate_rounded),
-        helperText: helperText,
-        helperMaxLines: 2,
         contentPadding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
       ),
       child: items.isEmpty
@@ -524,7 +330,6 @@ class _PersonRow extends StatelessWidget {
     required this.phoneLabel,
     this.occupationController,
     this.occupationLabel,
-    this.phoneHelper,
   });
 
   final TextEditingController nameController;
@@ -535,7 +340,6 @@ class _PersonRow extends StatelessWidget {
   final String nameLabel;
   final String phoneLabel;
   final String? occupationLabel;
-  final String? phoneHelper;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -573,7 +377,6 @@ class _PersonRow extends StatelessWidget {
             decoration: InputDecoration(
               labelText: phoneLabel,
               prefixIcon: const Icon(Icons.phone_outlined),
-              helperText: phoneHelper == null ? null : '${S.aiUnmatchedPrefix}$phoneHelper',
             ),
           ),
         ],

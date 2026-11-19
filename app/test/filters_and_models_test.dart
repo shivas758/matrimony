@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:matrimony_agents/models/contact_request.dart';
 import 'package:matrimony_agents/models/hold_request.dart';
 import 'package:matrimony_agents/models/master_data.dart';
-import 'package:matrimony_agents/models/parsed_profile.dart';
 import 'package:matrimony_agents/models/profile.dart';
 import 'package:matrimony_agents/state/profile_filters.dart';
 
@@ -198,8 +197,6 @@ void main() {
       expect(m.occupationTypes.length, 2);
       expect(m.occupationTypeName(4), 'Business');
       expect(m.occupationTypeName(99), isNull);
-      expect(m.indiaCountryId, 1);
-      expect(MasterData.empty.indiaCountryId, isNull);
       expect(MasterData.empty.occupationTypes, isEmpty);
     });
   });
@@ -487,45 +484,6 @@ void main() {
     test('unknown status falls back to active', () {
       final p = Profile.fromJson(base()..['status'] = 'something_new');
       expect(p.status, ProfileStatus.active);
-    });
-  });
-
-  group('ParsedProfile (AI import draft)', () {
-    test('v2.1 keys are optional and the education table is normalised', () {
-      final r = ParsedProfile.fromJson({
-        'draft': {
-          'full_name': 'Ravi',
-          'nationality_id': 1,
-          'occupation_type_id': '3',
-          'elder_sisters': 2,
-          'education_levels': [
-            {'level': 'post_graduation', 'details': 'M.Tech', 'country_id': 2},
-            {'level': 'graduation', 'details': 'B.Tech', 'country_id': '1'},
-            {'level': 'phd', 'details': 'ignored'},
-            'garbage',
-          ],
-        },
-        'unmatched': {'work_country': 'Dubai'},
-        'warnings': [],
-      });
-      expect(r.intField('nationality_id'), 1);
-      expect(r.intField('occupation_type_id'), 3, reason: 'numeric strings are accepted');
-      expect(r.intField('elder_sisters'), 2);
-      expect(r.intField('work_country_id'), isNull, reason: 'absent keys are ignored');
-      expect(r.has('work_country_id'), isFalse);
-      expect(r.textField('property_share'), isNull);
-      final levels = r.educationLevels;
-      expect(levels.map((e) => e['level']), ['graduation', 'post_graduation']);
-      expect(levels.first['details'], 'B.Tech');
-      expect(levels.first['country_id'], 1);
-      expect(levels.last['country_id'], 2);
-      expect(r.unmatched['work_country'], 'Dubai');
-    });
-
-    test('a draft without education_levels yields an empty table', () {
-      final r = ParsedProfile.fromJson({'draft': {'full_name': 'Ravi'}});
-      expect(r.educationLevels, isEmpty);
-      expect(ParsedProfile.fromJson({'draft': {'education_levels': 'nope'}}).educationLevels, isEmpty);
     });
   });
 

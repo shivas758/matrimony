@@ -14,7 +14,7 @@ import 'package:gandharva/services/profile_service.dart';
 import 'package:gandharva/state/auth_state.dart';
 import 'package:gandharva/state/masters_state.dart';
 import 'package:gandharva/ui/screens/agent/change_agent_screen.dart';
-import 'package:gandharva/ui/screens/auth/phone_screen.dart';
+import 'package:gandharva/ui/screens/auth/login_screen.dart';
 import 'package:gandharva/ui/screens/browse/profile_card.dart';
 import 'package:gandharva/ui/screens/browse/profile_detail_screen.dart';
 import 'package:gandharva/ui/screens/get_started/get_started_screen.dart';
@@ -395,9 +395,9 @@ void main() {
       expect(find.text('ID GN-KA1A-A001'), findsOneWidget);
       expect(find.text(S.agentCode), findsOneWidget);
       expect(find.text('KA1A'), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Wedbook Matrimony · v3.4.0'), 300,
+      await tester.scrollUntilVisible(find.text('Wedbook Matrimony · v3.5.0'), 300,
           scrollable: find.byType(Scrollable).first);
-      expect(find.text('Wedbook Matrimony · v3.4.0'), findsOneWidget);
+      expect(find.text('Wedbook Matrimony · v3.5.0'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -1027,10 +1027,10 @@ void main() {
       expect(contrast(AppColors.goldDark, Colors.white), greaterThan(4.5));
     });
 
-    testWidgets('the phone screen shows the logo on the wine header', (tester) async {
+    testWidgets('the login screen shows the logo on the wine header', (tester) async {
       await _phone(tester);
       final host = _Host(guest);
-      await tester.pumpWidget(host.wrap(const PhoneScreen()));
+      await tester.pumpWidget(host.wrap(const LoginScreen()));
       final logo = tester.widget<AppLogo>(find.byType(AppLogo));
       expect(logo.onDark, isTrue, reason: 'a gold rim on the wine header');
       expect(find.text(S.appIntro), findsOneWidget);

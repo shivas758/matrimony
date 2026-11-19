@@ -102,14 +102,9 @@ class ApiClient {
 
   Future<Map<String, dynamic>> delete(String path) => _send(() => _dio.delete(path));
 
-  /// [receiveTimeout] overrides the default for slow endpoints (AI import
-  /// can take 30–60 s on a large PDF).
-  Future<Map<String, dynamic>> postForm(String path, FormData form, {Duration? receiveTimeout}) =>
-      _send(() => _dio.post(
-            path,
-            data: form,
-            options: receiveTimeout == null ? null : Options(receiveTimeout: receiveTimeout),
-          ));
+  /// Multipart — photo uploads.
+  Future<Map<String, dynamic>> postForm(String path, FormData form) =>
+      _send(() => _dio.post(path, data: form));
 
   /// Raw bytes — used for the downloadable masked profile card.
   Future<List<int>> postBytes(String path, {Object? body}) async {

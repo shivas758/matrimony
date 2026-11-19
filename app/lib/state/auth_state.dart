@@ -91,6 +91,22 @@ class AuthState extends ChangeNotifier {
     _startPolling();
   }
 
+  /// "Forgot password?" by OTP (SPEC §9.24 D): sets the new password and the
+  /// answer is a login — the agent lands exactly as after [login].
+  Future<void> resetPassword({
+    required String phone,
+    required String phoneVerificationToken,
+    required String newPassword,
+  }) async {
+    final result = await _auth.resetPassword(
+      phone: phone,
+      phoneVerificationToken: phoneVerificationToken,
+      newPassword: newPassword,
+    );
+    _set(AuthPhase.loggedIn, result.agent);
+    _startPolling();
+  }
+
   Future<void> signup({
     required String fullName,
     required String phone,

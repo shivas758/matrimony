@@ -57,8 +57,9 @@ Left menu: **Policy and programs → App content** (also reachable from the Dash
 ### 2.2 App access
 - Choose **All or some functionality in my app is restricted** → **Add instructions** and copy
   the username, password and instructions for that app from `store/review-logins.txt`:
-  - **Wedbook Matrimony** — Username `6000000001`, Password: see the file (the fixed OTP,
-    `OTP_REVIEW_CODE`; no SMS is sent to this test number). The account is approved and paid, so the reviewer can browse, open profiles
+  - **Wedbook Matrimony** — Username `6000000001`, Password: see the file (since 3.5.0 customers log
+    in with mobile number + password, SPEC §9.24; builds before 3.5.0 used the fixed OTP,
+    `OTP_REVIEW_CODE`). The account is approved and paid, so the reviewer can browse, open profiles
     and send interests.
   - **Wedbook Agent** — Username `6000000002`, Password: see the file. The demo agent has 8 demo
     profiles and one demo client.
@@ -114,8 +115,8 @@ Click **Start**, then:
 1. **Data collection and security**
    - Does your app collect or share any of the required user data types? → **Yes**
    - Is all of the user data collected by your app encrypted in transit? → **Yes**
-   - Account creation: Wedbook Matrimony → **Username and other authentication** (mobile number
-     + OTP). Wedbook Agent → **Username and password** (mobile number + password).
+   - Account creation: both apps → **Username and password** (mobile number + password; the number
+     is verified by OTP at signup and for Forgot password?, SPEC §9.24).
    - Delete account URL:
      `https://matrimony-backend.duckdns.org/delete-account/matrimony` (Matrimony) or
      `https://matrimony-backend.duckdns.org/delete-account/agent` (Agent).

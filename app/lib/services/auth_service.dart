@@ -57,6 +57,10 @@ class OtpSendResult {
   }
 }
 
+/// Which one-time code the OTP routes send and check: the signup one
+/// (SPEC §9.1) or the "Forgot password?" one (SPEC §9.24 D).
+enum OtpPurpose { signup, reset }
+
 class AuthService {
   AuthService(this._api);
 
@@ -75,9 +79,56 @@ class AuthService {
   /// (SPEC §9.19 A) — then the phone sends the SMS itself, with the options
   /// in the answer. A firebase answer without complete options is unusable:
   /// `otp_provider_error` with a plain "could not send" message.
-  Future<OtpSendResult> sendSignupOtp(String phone) async {
+  Future<OtpSendResult> sendSignupOtp(String phone) => _sendOtp(phone);
+
+  /// Step 2: checks the code and returns the short-lived verification token
+  /// that [signup] must present (`invalid_otp`, `otp_expired`, `too_many_attempts`).
+  Future<String> verifySignupOtp(String phone, String code) =>
+      _verifyOtp({'phone': phone, 'code': code});
+
+  /// Step 2 with Firebase phone auth: the server checks the Firebase ID
+  /// token instead of a code and answers the same verification token
+  /// (`invalid_firebase_token`, `phone_mismatch`, `otp_provider_mismatch`).
+  Future<String> verifySignupFirebase(String phone, String firebaseIdToken) =>
+      _verifyOtp({'phone': phone, 'firebase_id_token': firebaseIdToken});
+
+  // ---- "Forgot password?" by OTP (SPEC §9.24 D)
+
+  /// Step 1: like [sendSignupOtp] with `purpose: 'reset'` — `404
+  /// account_not_found` when the number is not an agent (before any SMS).
+  Future<OtpSendResult> sendResetOtp(String phone) => _sendOtp(phone, purpose: 'reset');
+
+  /// Step 2: the reset code → the verification token for [resetPassword].
+  Future<String> verifyResetOtp(String phone, String code) =>
+      _verifyOtp({'phone': phone, 'code': code, 'purpose': 'reset'});
+
+  /// Step 2 with Firebase phone auth, as [verifySignupFirebase].
+  Future<String> verifyResetFirebase(String phone, String firebaseIdToken) =>
+      _verifyOtp({'phone': phone, 'firebase_id_token': firebaseIdToken, 'purpose': 'reset'});
+
+  /// Step 3: the new password; answers `{token, agent}` exactly like [login]
+  /// (`must_change_password` is cleared). `400 phone_not_verified` when the
+  /// 15-minute verification token has lapsed.
+  Future<AuthResult> resetPassword({
+    required String phone,
+    required String phoneVerificationToken,
+    required String newPassword,
+  }) async {
+    final json = await _api.post('/auth/reset-password', body: {
+      'phone': phone,
+      'phone_verification_token': phoneVerificationToken,
+      'new_password': newPassword,
+    });
+    return _store(json);
+  }
+
+  Future<OtpSendResult> _sendOtp(String phone, {String? purpose}) async {
     final result = OtpSendResult.fromJson(
-      await _api.post('/auth/otp/send', body: {'phone': phone, 'firebase': true}),
+      await _api.post('/auth/otp/send', body: {
+        'phone': phone,
+        'purpose': ?purpose,
+        'firebase': true,
+      }),
     );
     if (result.isFirebase && result.firebase == null) {
       throw ApiException('otp_provider_error', S.otpSendFailed);
@@ -85,21 +136,8 @@ class AuthService {
     return result;
   }
 
-  /// Step 2: checks the code and returns the short-lived verification token
-  /// that [signup] must present (`invalid_otp`, `otp_expired`, `too_many_attempts`).
-  Future<String> verifySignupOtp(String phone, String code) async {
-    final json = await _api.post('/auth/otp/verify', body: {'phone': phone, 'code': code});
-    return '${json['verification_token']}';
-  }
-
-  /// Step 2 with Firebase phone auth: the server checks the Firebase ID
-  /// token instead of a code and answers the same verification token
-  /// (`invalid_firebase_token`, `phone_mismatch`, `otp_provider_mismatch`).
-  Future<String> verifySignupFirebase(String phone, String firebaseIdToken) async {
-    final json = await _api.post(
-      '/auth/otp/verify',
-      body: {'phone': phone, 'firebase_id_token': firebaseIdToken},
-    );
+  Future<String> _verifyOtp(Map<String, Object> body) async {
+    final json = await _api.post('/auth/otp/verify', body: body);
     return '${json['verification_token']}';
   }
 
@@ -149,8 +187,9 @@ class AuthService {
         'new_password': next,
       });
 
-  /// "Forgot password?" — files a request the admin settles with a temporary
-  /// password. Always succeeds from the app's point of view (SPEC §4 Auth).
+  /// "Can't get the code? Ask the admin" (SPEC §9.24 D) — files a request the
+  /// admin settles with a temporary password. Always succeeds from the app's
+  /// point of view (SPEC §4 Auth).
   Future<void> forgotPassword(String phone) =>
       _api.post('/auth/forgot-password', body: {'phone': phone});
 

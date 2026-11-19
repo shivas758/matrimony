@@ -8,14 +8,58 @@ class S {
   static const appTagline = 'Matrimony';
   static const appIntro = "Your agent's app for finding a match";
 
-  // ---- phone screen
+  // ---- log in: mobile + password, the app's entry (SPEC §9.24 C)
   static const phone = 'Mobile number';
-  static const phoneTitle = 'Log in or sign up';
-  static const phoneBody = 'We will send a one-time code to your mobile number. No password needed.';
   static const phoneInvalid = 'Enter your 10-digit mobile number';
+  static const loginTitle = 'Log in';
+  static const loginBody = 'With your mobile number and password.';
+  static const password = 'Password';
+  static const passwordRequired = 'Enter your password';
+  static const showPassword = 'Show password';
+  static const hidePassword = 'Hide password';
+  static const logIn = 'Log in';
+  static const forgotPassword = 'Forgot password?';
+  static const newHere = 'New here?';
+  static const loginFooter =
+      'Creating an account or resetting your password sends a one-time code to your mobile number.';
+  static const errBadCredentials = 'Mobile number or password is incorrect';
+  static const setPasswordFirst = "Set a password for this number first — we'll send you a code";
+
+  // ---- the mobile number before a one-time code: Create account / Forgot password
+  static const signupPhoneBody = 'We will send a one-time code to check that this number is yours.';
+  static const resetPhoneTitle = 'Forgot password';
+  static const resetPhoneBody =
+      'Enter your registered mobile number. We will send a one-time code, then you choose a new password.';
   static const sendOtp = 'Send OTP';
-  static const phoneFooter =
-      'New here? Use the same button — we will only ask for your name next.';
+  static const logInWithNumber = 'Log in with this number';
+  static const errAccountNotFound = 'No account with this mobile number';
+
+  // ---- passwords (6–100 characters, SPEC §9.24 C)
+  static const passwordHelper = 'At least 6 characters';
+  static const confirmPassword = 'Confirm password';
+  static const passwordTooShort = 'Use at least 6 characters';
+  static const passwordTooLong = 'Use at most 100 characters';
+  static const passwordsDoNotMatch = 'Passwords do not match';
+
+  // ---- Forgot password: the new password (SPEC §9.24 C)
+  static const resetTitle = 'Choose a new password';
+  static const resetBody = 'Your number is verified. Choose a new password — you are logged in straight after.';
+  static const newPassword = 'New password';
+  static const saveAndLogIn = 'Save and log in';
+
+  // ---- More → Change password / Set a password (SPEC §9.24 C)
+  static const changePassword = 'Change password';
+  static const changePasswordHint = 'The password you log in with';
+  static const changePasswordBody = 'Enter your current password, then the new one twice.';
+  static const setPassword = 'Set a password';
+  static const setPasswordHint = 'Log in with your mobile number and a password';
+  static const setPasswordBody =
+      'Choose a password. From now on you log in with your mobile number and this password.';
+  static const currentPassword = 'Current password';
+  static const errCurrentPasswordWrong = 'Current password is incorrect';
+  static const savePassword = 'Save password';
+  static const passwordChanged = 'Password changed';
+  static const passwordSet = 'Password set';
 
   // ---- OTP screen
   static const otpTitle = 'Enter the code';
@@ -43,7 +87,7 @@ class S {
   // ---- signup
   static const signupTitle = 'Create your account';
   static const signupBody =
-      'This number is new to Wedbook Matrimony. Tell us your name and start looking around.';
+      'Your number is verified. Tell us your name and choose a password — you log in to Wedbook Matrimony with your mobile number and this password.';
   static const yourNumber = 'Your number';
   static const fullName = 'Full name';
   static const fullNameHelper = 'As the family knows you';
@@ -95,8 +139,8 @@ class S {
   static const changeAgentHint = 'Your current agent has to approve the move.';
   static String changeAgentPending(String name) => 'Waiting for approval to move to $name';
   static const logout = 'Logout';
-  static const logoutConfirm = 'You will need a new one-time code to log in again.';
-  static const version = 'v3.4.0';
+  static const logoutConfirm = 'You can log in again with your mobile number and password.';
+  static const version = 'v3.5.0';
   static const accountStatus = 'Account';
 
   // ---- customer statuses
@@ -428,7 +472,7 @@ class S {
   static const errOtpCooldown = 'Please wait a little before asking for another code.';
   static const errOtpLimit = 'Too many codes requested. Please try again after an hour.';
   static const errPhoneNotVerified = 'Your number check has expired. Please start again.';
-  static const errPhoneTaken = 'This number is already registered. Log in with it instead.';
+  static const errPhoneTaken = 'This number is already registered — log in with your password';
   static const errAgentNotFound = 'No agent found with that mobile number or code. Check with your agent.';
   static const errAgentNotActive = "That agent's account is not active yet. Check with your agent.";
   static const errNetwork = 'Cannot reach the server. Check your internet connection.';
@@ -749,6 +793,10 @@ class S {
   static const selectHint = 'Select';
   static String selectedCount(int n) => '$n selected';
   static const chooseCommunities = 'Choose communities';
+
+  // ---- Browse filters: long lists as picker fields (v3.5.0 — SPEC §9.24 B)
+  static const anyValue = 'Any';
+  static String removeValue(String name) => 'Remove $name';
 
   // ---- account deletion (SPEC §9.20 F)
   static const deleteAccount = 'Delete my account';

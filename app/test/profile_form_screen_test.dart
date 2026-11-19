@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matrimony_agents/models/agent.dart';
 import 'package:matrimony_agents/models/master_data.dart';
-import 'package:matrimony_agents/models/parsed_profile.dart';
 import 'package:matrimony_agents/models/profile.dart';
 import 'package:matrimony_agents/services/api_client.dart';
 import 'package:matrimony_agents/services/auth_service.dart';
@@ -114,33 +113,16 @@ class _FakeProfiles extends ProfileService {
   _FakeProfiles(this.data) : super(ApiClient());
 
   MasterData data;
-  Map<String, dynamic>? created;
   int? updatedId;
   Map<String, dynamic>? updated;
   ApiException? failure;
   Profile? detailProfile;
 
-  /// What the AI import answers; null = the server has no AI key.
-  ParsedProfile? aiDraft;
-
   @override
   Future<MasterData> masters() async => data;
 
   @override
-  Future<bool> aiEnabled() async => aiDraft != null;
-
-  @override
-  Future<ParsedProfile> parseBioData({String? filePath, String? text}) async => aiDraft!;
-
-  @override
   Future<Profile> detail(int id) async => detailProfile!;
-
-  @override
-  Future<Profile> create(Map<String, dynamic> fields, List<String> photoPaths) async {
-    if (failure != null) throw failure!;
-    created = Map.of(fields);
-    return Profile.fromJson({'id': 99, 'full_name': fields['full_name'], 'gender': fields['gender']});
-  }
 
   @override
   Future<Profile> update(int id, Map<String, dynamic> fields) async {
@@ -308,13 +290,13 @@ Widget _app(_Harness h, Widget home) => MultiProvider(
       child: MaterialApp(theme: AppTheme.light(), home: home),
     );
 
-/// Pumps a page with an "open" button and opens the profile form from it.
+/// Pumps a page with an "open" button and opens the profile form — always
+/// on an existing profile (edit only, SPEC §9.24 A) — from it.
 Future<_Harness> _openForm(
   WidgetTester tester, {
   Profile? existing,
   MasterData? masters,
   Agent? agent,
-  ParsedProfile? aiDraft,
   Size size = const Size(360, 780),
   double textScale = 1,
 }) async {
@@ -324,7 +306,8 @@ Future<_Harness> _openForm(
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearAllTestValues);
 
-  final profiles = _FakeProfiles(masters ?? _masters())..aiDraft = aiDraft;
+  final profiles = _FakeProfiles(masters ?? _masters());
+  final profile = existing ?? _existing();
   final h = _Harness(profiles, _FakeAuth(agent ?? _agent(), profiles));
   await tester.pumpWidget(
     _app(
@@ -335,7 +318,7 @@ Future<_Harness> _openForm(
             child: TextButton(
               onPressed: () async {
                 h.popped = await Navigator.of(context).push<bool>(
-                  MaterialPageRoute(builder: (_) => ProfileFormScreen(existing: existing)),
+                  MaterialPageRoute(builder: (_) => ProfileFormScreen(existing: profile)),
                 );
               },
               child: const Text('open'),
@@ -370,47 +353,48 @@ String _stepLine(int n) => 'STEP $n OF 4';
 
 void main() {
   group('Profile form — four steps (SPEC §9.18 F)', () {
-    testWidgets('new profile: Next validates step 1 and shows what is missing', (tester) async {
-      // Two communities, so nothing is pre-selected.
-      await _openForm(tester, agent: _agent(communities: [1, 2]));
+    testWidgets('edit only (SPEC §9.24 A): "Edit profile", no bio-data import, every step open',
+        (tester) async {
+      await _openForm(tester);
+      expect(find.text(S.editProfileTitle), findsOneWidget);
+      expect(find.text('New profile'), findsNothing);
+      expect(find.text('Fill from bio-data'), findsNothing, reason: 'the AI import went with Add');
       expect(find.text(_stepLine(1)), findsOneWidget);
+      // A step never reached through Next opens from the header at once.
+      await tester.tap(find.text('Family &\ncontact'));
+      await tester.pumpAndSettle();
+      expect(find.text(_stepLine(4)), findsOneWidget);
+    });
+
+    testWidgets('Next validates step 1 and shows what is missing', (tester) async {
+      await _openForm(tester);
       expect(find.text('Personal details'), findsOneWidget);
-      // A new profile has only Next on the first step.
-      expect(_button('Next'), findsOneWidget);
-      expect(_button('Save'), findsNothing);
       expect(find.widgetWithText(OutlinedButton, 'Back'), findsNothing);
 
+      await tester.enterText(find.widgetWithText(TextFormField, 'Full name *'), ' ');
       await tester.tap(_button('Next'));
       await tester.pumpAndSettle();
 
       expect(find.text(_stepLine(1)), findsOneWidget, reason: 'still on step 1');
       expect(find.text(S.fullNameRequired), findsOneWidget);
-      expect(find.text(S.dobRequired), findsOneWidget);
-      expect(find.text(S.communityRequired), findsOneWidget);
       expect(find.text(S.checkHighlighted), findsOneWidget);
     });
 
-    testWidgets('new profile: walk the steps, input survives, Save sends the privacy fields',
-        (tester) async {
+    testWidgets('walk the steps with Next, input survives, Save sends the changes', (tester) async {
       final h = await _openForm(tester);
-
-      await tester.enterText(find.widgetWithText(TextFormField, 'Full name *'), 'Sravani Reddy');
-      await _tap(tester, _field('Date of birth *'));
-      await tester.tap(find.text('OK'));
-      await tester.pumpAndSettle();
 
       await tester.tap(_button('Next'));
       await tester.pumpAndSettle();
       expect(find.text(_stepLine(2)), findsOneWidget);
       expect(find.text('Professional details'), findsOneWidget);
-      expect(find.text(S.onRequestWorkNote), findsOneWidget, reason: 'the on-request note moved here');
+      expect(find.text(S.onRequestWorkNote), findsOneWidget, reason: 'the on-request note lives here');
       await tester.enterText(find.widgetWithText(TextFormField, 'Income'), '8 LPA');
 
       await tester.tap(_button('Next'));
       await tester.pumpAndSettle();
       expect(find.text(_stepLine(3)), findsOneWidget);
       expect(find.text(S.onRequestBirthNote), findsOneWidget);
-      await tester.enterText(find.widgetWithText(TextFormField, 'Gothram'), 'Bharadwaja');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Gothram'), 'Kashyapa');
 
       // Back keeps what was typed on both steps.
       await tester.tap(find.widgetWithText(OutlinedButton, 'Back'));
@@ -419,14 +403,14 @@ void main() {
       expect(find.text('8 LPA'), findsOneWidget);
       await tester.tap(_button('Next'));
       await tester.pumpAndSettle();
-      expect(find.text('Bharadwaja'), findsOneWidget);
+      expect(find.text('Kashyapa'), findsOneWidget);
 
       await tester.tap(_button('Next'));
       await tester.pumpAndSettle();
       expect(find.text(_stepLine(4)), findsOneWidget);
       expect(find.text(S.onRequestFamilyNote), findsOneWidget);
       expect(_button('Next'), findsNothing, reason: 'the last step saves');
-      expect(find.text(S.profileStatus.toUpperCase()), findsNothing, reason: 'status is edit-only');
+      expect(find.text(S.profileStatus.toUpperCase()), findsOneWidget);
 
       // The Privacy card: always-shown line, sections, switches.
       expect(find.text(S.privacy), findsOneWidget);
@@ -442,78 +426,19 @@ void main() {
       await tester.tap(_button('Save'));
       await tester.pumpAndSettle();
 
-      final sent = h.profiles.created!;
-      expect(sent['full_name'], 'Sravani Reddy');
+      final sent = h.profiles.updated!;
+      expect(h.profiles.updatedId, 12);
+      expect(sent['full_name'], 'Sravani Venkata Lakshmi Reddy');
       expect(sent['gender'], 'bride');
-      expect(sent['dob'], matches(RegExp(r'^\d{4}-\d{2}-\d{2}$')));
-      expect(sent['community_id'], 1, reason: "the agent's only community is pre-selected");
-      expect(sent['work_country_id'], 1, reason: 'a new profile works in India by default');
+      expect(sent['community_id'], 1);
+      expect(sent['work_country_id'], 2, reason: 'the saved work country is kept');
       expect(sent['income_text'], '8 LPA');
-      expect(sent['gothram'], 'Bharadwaja');
-      // Multipart create: JSON array strings and "true" / "false".
-      expect(sent['hidden_fields'], '["income"]');
-      expect(sent['audience_all'], 'true');
-      expect(sent['audience_community_ids'], '[]');
-      expect(h.popped, isTrue);
-    });
-
-    testWidgets('new profile: a step not reached yet cannot be opened from the header',
-        (tester) async {
-      await _openForm(tester);
-      await tester.tap(find.text('Family &\ncontact'));
-      await tester.pumpAndSettle();
-      expect(find.text(_stepLine(1)), findsOneWidget);
-    });
-
-    testWidgets('AI import: fills all steps, says which to check, and opens them from the header',
-        (tester) async {
-      final h = await _openForm(
-        tester,
-        aiDraft: ParsedProfile.fromJson(const {
-          'draft': {
-            'full_name': 'Kiran Kumar',
-            'gender': 'groom',
-            'dob': '1995-03-02',
-            'income_text': '15 LPA',
-            'gothram': 'Kashyapa',
-            'father_name': 'Raghava Rao',
-          },
-          'unmatched': {'zodiac': 'Simha', 'father_phone': '98480 xxxxx'},
-          'warnings': ['The date of birth was hard to read — please check it.'],
-        }),
-      );
-      expect(find.text(S.fillFromBiodata), findsOneWidget, reason: 'the banner is on step 1');
-
-      await tester.tap(find.text(S.fillFromBiodata));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField).last, 'Name: Kiran Kumar …');
-      await tester.pumpAndSettle();
-      await tester.tap(_button(S.aiUseText));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Kiran Kumar'), findsOneWidget);
-      expect(find.text('The date of birth was hard to read — please check it.'), findsOneWidget);
-      expect(find.text('${S.aiCheckSteps}Horoscope, Family & contact.'), findsOneWidget);
-
-      // Every step can now be opened to look at the hints.
-      await tester.tap(find.text('Horoscope'));
-      await tester.pumpAndSettle();
-      expect(find.text(_stepLine(3)), findsOneWidget);
-      expect(find.text('Kashyapa'), findsOneWidget);
-      expect(find.text('${S.aiUnmatchedPrefix}Simha'), findsOneWidget);
-
-      await tester.tap(find.text('Family &\ncontact'));
-      await tester.pumpAndSettle();
-      expect(find.text('Raghava Rao'), findsOneWidget);
-      expect(find.text('${S.aiUnmatchedPrefix}98480 xxxxx'), findsOneWidget);
-
-      // Saving from the last step still checks step 1 — and it is complete.
-      await tester.tap(_button('Save'));
-      await tester.pumpAndSettle();
-      expect(h.profiles.created?['full_name'], 'Kiran Kumar');
-      expect(h.profiles.created?['gender'], 'groom');
-      expect(h.profiles.created?['dob'], '1995-03-02');
-      expect(h.profiles.created?['income_text'], '15 LPA');
+      expect(sent['gothram'], 'Kashyapa');
+      expect(sent['has_siblings'], isTrue);
+      // JSON PATCH: real arrays and a real boolean.
+      expect(sent['hidden_fields'], ['name', 'income']);
+      expect(sent['audience_all'], isTrue);
+      expect(sent['audience_community_ids'], isEmpty);
       expect(h.popped, isTrue);
     });
 
@@ -628,7 +553,7 @@ void main() {
 
     testWidgets('leaving: an untouched form closes; unsaved changes ask first', (tester) async {
       final h = await _openForm(tester);
-      // Untouched (the defaults the app applied do not count).
+      // Untouched.
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(h.popped, isNull);
@@ -672,40 +597,26 @@ void main() {
     });
 
     testWidgets('narrow phone, large text: every step lays out without overflow', (tester) async {
-      for (final existing in [_existing(), null]) {
-        await _openForm(
-          tester,
-          existing: existing,
-          size: const Size(320, 568),
-          textScale: 1.3,
-          agent: _agent(communities: [1, 2, 3], admin: true),
-        );
-        if (existing == null) {
-          // Reach every step of a new profile through Next.
-          await tester.enterText(find.widgetWithText(TextFormField, 'Full name *'), 'Sravani');
-          await _tap(tester, _field('Date of birth *'));
-          await tester.tap(find.text('OK'));
-          await tester.pumpAndSettle();
-          await _tap(tester, _field('Community *'));
-          await tester.tap(find.text('Kamma').last);
+      await _openForm(
+        tester,
+        size: const Size(320, 568),
+        textScale: 1.3,
+        agent: _agent(communities: [1, 2, 3], admin: true),
+      );
+      for (var n = 1; n <= 4; n++) {
+        expect(find.text(_stepLine(n)), findsOneWidget);
+        // Scroll the whole step past the viewport.
+        await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -6000));
+        await tester.pumpAndSettle();
+        if (n < 4) {
+          await tester.tap(_button('Next'));
           await tester.pumpAndSettle();
         }
-        for (var n = 1; n <= 4; n++) {
-          expect(find.text(_stepLine(n)), findsOneWidget);
-          // Scroll the whole step past the viewport.
-          await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -6000));
-          await tester.pumpAndSettle();
-          if (n < 4) {
-            await tester.tap(_button('Next'));
-            await tester.pumpAndSettle();
-          }
-        }
-        // "Selected communities" opens the chip picker.
-        await _tap(tester, find.byKey(const ValueKey('audience-selected')));
-        expect(find.byType(FilterChip), findsWidgets);
-        expect(tester.takeException(), isNull);
-        await tester.pumpWidget(const SizedBox());
       }
+      // "Selected communities" opens the chip picker.
+      await _tap(tester, find.byKey(const ValueKey('audience-selected')));
+      expect(find.byType(FilterChip), findsWidgets);
+      expect(tester.takeException(), isNull);
     });
   });
 
@@ -763,11 +674,6 @@ void main() {
       expect(find.byType(DropdownButtonFormField<int>), findsWidgets);
       expect(find.byType(MasterSelectField), findsWidgets);
 
-      await tester.enterText(find.widgetWithText(TextFormField, 'Full name *'), 'Sravani Reddy');
-      await _tap(tester, _field('Date of birth *'));
-      await tester.tap(find.text('OK'));
-      await tester.pumpAndSettle();
-
       // Community (10 for an admin): the sheet, searched, picked.
       await _tap(tester, _field('Community *'));
       expect(find.byType(PickerSheet), findsOneWidget);
@@ -782,26 +688,21 @@ void main() {
       expect(find.byType(PickerSheet), findsNothing);
       expect(find.text('Padmasali'), findsOneWidget);
 
-      // Languages known (10): the multi picker instead of chips.
+      // Languages known (10): the multi picker instead of chips — the saved
+      // Telugu and English stay ticked, Hindi is added.
+      expect(find.text('Telugu, English'), findsOneWidget);
       await _tap(tester, _field(S.knownLanguages));
       expect(find.byType(CheckboxListTile), findsWidgets);
       await tester.enterText(
         find.descendant(of: find.byType(PickerSheet), matching: find.byType(TextField)),
-        'tel',
+        'hin',
       );
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('pick-1')));
-      await tester.pump();
-      await tester.enterText(
-        find.descendant(of: find.byType(PickerSheet), matching: find.byType(TextField)),
-        'eng',
-      );
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('pick-2')));
+      await tester.tap(find.byKey(const ValueKey('pick-3')));
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, S.done));
       await tester.pumpAndSettle();
-      expect(find.text('Telugu, English'), findsOneWidget);
+      expect(find.text('Telugu, English, Hindi'), findsOneWidget);
 
       // Step 3: rasi (12 signs) through the picker.
       await tester.tap(_button('Next'));
@@ -818,7 +719,8 @@ void main() {
       await _tap(tester, find.byKey(const ValueKey('pick-5')));
       expect(find.text('Rasi 5 / Sign 5'), findsOneWidget);
 
-      // Step 4: the audience communities (9 others) get a search field.
+      // Step 4: the audience communities (9 others) get a search field; the
+      // saved Kamma stays picked.
       await tester.tap(_button('Next'));
       await tester.pumpAndSettle();
       await _tap(tester, find.byKey(const ValueKey('audience-selected')));
@@ -826,16 +728,19 @@ void main() {
       expect(find.descendant(of: audience, matching: find.byType(TextField)), findsOneWidget);
       await tester.enterText(find.descendant(of: audience, matching: find.byType(TextField)), 'red');
       await tester.pump();
-      expect(find.descendant(of: audience, matching: find.byType(FilterChip)), findsOneWidget);
+      // The match, plus the saved pick that a search never hides.
+      expect(find.descendant(of: audience, matching: find.byType(FilterChip)), findsNWidgets(2));
+      expect(find.widgetWithText(FilterChip, 'Kamma'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, 'Kapu'), findsNothing);
       await _tap(tester, find.widgetWithText(FilterChip, 'Reddy'));
 
       await tester.tap(_button('Save'));
       await tester.pumpAndSettle();
-      final sent = h.profiles.created!;
+      final sent = h.profiles.updated!;
       expect(sent['community_id'], 9);
-      expect(sent['known_language_ids'], '1,2');
+      expect(sent['known_language_ids'], [1, 2, 3]);
       expect(sent['zodiac_id'], 5);
-      expect(sent['audience_community_ids'], '[1]');
+      expect(sent['audience_community_ids'], [1, 2]);
       expect(tester.takeException(), isNull);
     });
   });

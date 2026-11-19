@@ -280,15 +280,6 @@ class MasterData {
   String? occupationTypeName(int? id) => _nameOf(occupationTypes, id);
   String? nakshatramName(int? id) => _nameOf(nakshatrams, id);
 
-  /// The id of "India" in [countries] — the default work country / nationality
-  /// on a new profile. Null until the masters have loaded.
-  int? get indiaCountryId {
-    for (final c in countries) {
-      if (c.name.trim().toLowerCase() == 'india') return c.id;
-    }
-    return null;
-  }
-
   String? subcasteName(int? id) {
     if (id == null) return null;
     for (final s in subcastes) {

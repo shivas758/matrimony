@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { many, one, query } from '../lib/db.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
+import { config } from '../lib/config.js';
 import {
   PROFILE_SELECT,
   agentAccessIds,
@@ -96,9 +97,17 @@ profilesRouter.get(
 
 // ---------------------------------------------------------------- create
 
-// POST /api/profiles (multipart: fields + photos[])
+// POST /api/profiles (multipart: fields + photos[]) — switched off since v2.14
+// (SPEC §9.24 A): every profile comes from a family. Refused before multer
+// stores any photo, also for admins and older app versions.
+const agentUploadsOn = (req, res, next) =>
+  config.agents.profileUploads
+    ? next()
+    : next(forbidden('add_profile_disabled', 'Profiles are added by families in the Wedbook Matrimony app'));
+
 profilesRouter.post(
   '/',
+  agentUploadsOn,
   upload.array('photos', MAX_PHOTOS),
   asyncHandler(async (req, res) => {
     const body = await prepareProfileBody(req.body, { multipart: true });

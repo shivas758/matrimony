@@ -718,3 +718,12 @@ CREATE TABLE gift_codes (
   profile_name TEXT
 );
 CREATE INDEX idx_gift_codes_agent ON gift_codes(agent_id, status);
+
+-- ===== Customer passwords, OTP password reset (SPEC §9.24) =====
+-- Wedbook Matrimony logs in with mobile + password (bcrypt); NULL = not set yet (web-form
+-- customers, apps before 3.5.0) — they set one through "Forgot password?" (OTP).
+ALTER TABLE customers ADD COLUMN password_hash TEXT;
+ALTER TABLE customers ADD COLUMN password_set_at TIMESTAMPTZ;
+ALTER TABLE otp_codes DROP CONSTRAINT otp_codes_purpose_check;
+ALTER TABLE otp_codes ADD CONSTRAINT otp_codes_purpose_check
+  CHECK (purpose IN ('agent_signup','customer_login','agent_reset','customer_reset'));

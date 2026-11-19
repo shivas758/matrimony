@@ -25,12 +25,15 @@ class ApiException implements Exception {
   /// first (SPEC §9.12). Never log out for it.
   bool get isUnlockRequired => code == 'unlock_required';
 
+  /// A wrong mobile number / password (login) or a wrong current password
+  /// (change password) — `401 bad_credentials` (SPEC §9.24 C). The token is
+  /// fine: never log out for it.
+  bool get isBadCredentials => code == 'bad_credentials';
+
   /// The server no longer accepts our token — the app must log out.
   bool get isAuthProblem =>
-      status == 401 ||
-      code == 'invalid_token' ||
-      code == 'missing_token' ||
-      code == 'unknown_customer';
+      !isBadCredentials &&
+      (status == 401 || code == 'invalid_token' || code == 'missing_token' || code == 'unknown_customer');
 
   @override
   String toString() => message;

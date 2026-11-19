@@ -457,6 +457,10 @@ String friendlyMessage(ApiException e) => switch (e.code) {
       'otp_limit' => S.errOtpLimit,
       'phone_not_verified' => S.errPhoneNotVerified,
       'phone_taken' => S.errPhoneTaken,
+      // Passwords (SPEC §9.24 C).
+      'bad_credentials' => S.errBadCredentials,
+      'password_not_set' => S.setPasswordFirst,
+      'account_not_found' => S.errAccountNotFound,
       'agent_not_found' => S.errAgentNotFound,
       'agent_not_active' => S.errAgentNotActive,
       // "This number cannot take customers…" — the server words it.

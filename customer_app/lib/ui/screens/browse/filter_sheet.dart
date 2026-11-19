@@ -9,12 +9,15 @@ import '../../strings.dart';
 import '../../widgets/common.dart';
 import '../../widgets/searchable_list.dart';
 
-/// Bottom sheet with the age / height sliders and the multi-select chips
-/// (SPEC §9.11 Gandharva 3). Community chips are my agent's communities —
-/// the server never shows anything outside them anyway. A chip group longer
-/// than eight gets a search field above it, and the countries open a picker
-/// with a search box (SPEC §9.23 E) — [SearchableChipGroup] /
-/// [MultiPickerField].
+/// Bottom sheet with the age / height sliders and the multi-choice filters
+/// (SPEC §9.11 Gandharva 3). The communities on offer are my agent's — the
+/// server never shows anything outside them anyway. Every list in the
+/// profile form's format (SPEC §9.24 B, [FilterChoiceGroup]): up to eight
+/// values as chips; a longer one (community, subcaste, education,
+/// profession, …) is one picker field — "Any" or the chosen values as
+/// removable chips — that opens the picker sheet with a search box,
+/// checkboxes and Done; the countries always open the picker. So the sheet
+/// scrolls a screen or two at most, however long the master lists are.
 class FilterSheet extends StatefulWidget {
   const FilterSheet({super.key, required this.initial, required this.communities, this.guest = false});
 
@@ -56,10 +59,15 @@ class _FilterSheetState extends State<FilterSheet> {
     super.dispose();
   }
 
-  Set<int> _toggle(Set<int> current, int id) {
-    final next = {...current};
-    next.contains(id) ? next.remove(id) : next.add(id);
-    return next;
+  /// New communities; a subcaste belongs to one community, so any whose
+  /// community is no longer in scope is dropped.
+  void _setCommunities(Set<int> next, List<MasterItem> offered, MasterData masters) {
+    final inScope = next.isEmpty ? offered.map((c) => c.id).toSet() : next;
+    final stillValid = masters.subcastesForAny(inScope).map((s) => s.id).toSet();
+    setState(() => _f = _f.copyWith(
+          communityIds: next,
+          subcasteIds: _f.subcasteIds.where(stillValid.contains).toSet(),
+        ));
   }
 
   String get _ageTitle => _f.isAgeDefault
@@ -139,24 +147,16 @@ class _FilterSheetState extends State<FilterSheet> {
                       )),
                 ),
                 const SizedBox(height: 12),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.community,
+                  icon: Icons.groups_rounded,
                   options: pickOptionsOf(communities),
                   selected: _f.communityIds,
-                  onToggle: (id) => setState(() {
-                    final next = _toggle(_f.communityIds, id);
-                    // A subcaste belongs to one community: drop any whose
-                    // community is no longer in scope.
-                    final inScope = next.isEmpty ? communities.map((c) => c.id).toSet() : next;
-                    final stillValid = masters.subcastesForAny(inScope).map((s) => s.id).toSet();
-                    _f = _f.copyWith(
-                      communityIds: next,
-                      subcasteIds: _f.subcasteIds.where(stillValid.contains).toSet(),
-                    );
-                  }),
+                  onChanged: (next) => _setCommunities(next, communities, masters),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.subcaste,
+                  icon: Icons.account_tree_outlined,
                   options: [
                     for (final s in subcastes)
                       PickOption(
@@ -167,64 +167,63 @@ class _FilterSheetState extends State<FilterSheet> {
                       ),
                   ],
                   selected: _f.subcasteIds,
-                  onToggle: (id) =>
-                      setState(() => _f = _f.copyWith(subcasteIds: _toggle(_f.subcasteIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(subcasteIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.education,
+                  icon: Icons.school_rounded,
                   options: pickOptionsOf(masters.educations),
                   selected: _f.educationIds,
-                  onToggle: (id) =>
-                      setState(() => _f = _f.copyWith(educationIds: _toggle(_f.educationIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(educationIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.profession,
+                  icon: Icons.work_outline_rounded,
                   options: pickOptionsOf(masters.professions),
                   selected: _f.professionIds,
-                  onToggle: (id) =>
-                      setState(() => _f = _f.copyWith(professionIds: _toggle(_f.professionIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(professionIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.occupationType,
+                  icon: Icons.badge_outlined,
                   options: pickOptionsOf(masters.occupationTypes),
                   selected: _f.occupationTypeIds,
-                  onToggle: (id) => setState(
-                      () => _f = _f.copyWith(occupationTypeIds: _toggle(_f.occupationTypeIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(occupationTypeIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.maritalStatus,
+                  icon: Icons.favorite_border_rounded,
                   options: pickOptionsOf(masters.maritalStatuses),
                   selected: _f.maritalStatusIds,
-                  onToggle: (id) => setState(
-                      () => _f = _f.copyWith(maritalStatusIds: _toggle(_f.maritalStatusIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(maritalStatusIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.religion,
+                  icon: Icons.temple_hindu_rounded,
                   options: pickOptionsOf(masters.religions),
                   selected: _f.religionIds,
-                  onToggle: (id) =>
-                      setState(() => _f = _f.copyWith(religionIds: _toggle(_f.religionIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(religionIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.motherTongue,
+                  icon: Icons.record_voice_over_outlined,
                   options: pickOptionsOf(masters.languages),
                   selected: _f.motherTongueIds,
-                  onToggle: (id) => setState(
-                      () => _f = _f.copyWith(motherTongueIds: _toggle(_f.motherTongueIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(motherTongueIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.foodHabit,
+                  icon: Icons.restaurant_rounded,
                   options: pickOptionsOf(masters.foodHabits),
                   selected: _f.foodHabitIds,
-                  onToggle: (id) =>
-                      setState(() => _f = _f.copyWith(foodHabitIds: _toggle(_f.foodHabitIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(foodHabitIds: next)),
                 ),
-                SearchableChipGroup(
+                FilterChoiceGroup(
                   title: S.complexion,
+                  icon: Icons.face_rounded,
                   options: pickOptionsOf(masters.complexions),
                   selected: _f.complexionIds,
-                  onToggle: (id) =>
-                      setState(() => _f = _f.copyWith(complexionIds: _toggle(_f.complexionIds, id))),
+                  onChanged: (next) => setState(() => _f = _f.copyWith(complexionIds: next)),
                 ),
                 // Work country — the public coarse location (SPEC §9.8).
                 if (masters.countries.isNotEmpty) ...[
@@ -235,6 +234,7 @@ class _FilterSheetState extends State<FilterSheet> {
                     title: S.workCountry,
                     options: pickOptionsOf(masters.countries),
                     selected: _f.workCountryIds,
+                    removableChips: true,
                     onChanged: (next) => setState(() => _f = _f.copyWith(workCountryIds: next)),
                   ),
                   const SizedBox(height: 20),
@@ -263,6 +263,7 @@ class _FilterSheetState extends State<FilterSheet> {
                     title: S.nriCountry,
                     options: pickOptionsOf(masters.countries),
                     selected: _f.countryIds,
+                    removableChips: true,
                     onChanged: (next) => setState(() => _f = _f.copyWith(countryIds: next)),
                   ),
                 ],

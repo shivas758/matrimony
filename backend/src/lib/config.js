@@ -162,5 +162,8 @@ export const config = {
   agents: {
     approvalClients: Math.max(1, Number(process.env.APPROVAL_CLIENTS || 10)),
     giftCodesPerAgent: Math.max(0, Number(process.env.GIFT_CODES_PER_AGENT || 10)),
+    // SPEC §9.24 A: profiles come from families; POST /api/profiles is off
+    // unless AGENT_PROFILE_UPLOADS=true (the test suite, test/seed-demo.mjs).
+    profileUploads: bool(process.env.AGENT_PROFILE_UPLOADS, false),
   },
 };

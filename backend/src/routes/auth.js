@@ -4,7 +4,7 @@ import { many, one, tx } from '../lib/db.js';
 import {
   checkPhoneVerification, hashPassword, signPhoneVerification, signToken, verifyPassword,
 } from '../lib/auth.js';
-import { asyncHandler, badRequest, conflict, unauthorized } from '../lib/errors.js';
+import { asyncHandler, badRequest, conflict, notFound, unauthorized } from '../lib/errors.js';
 import { parse, passwordSchema, phoneSchema } from '../lib/validate.js';
 import { requireAuth } from '../middleware/auth.js';
 import { AGENT_SELECT, agentPublic } from '../lib/serialize.js';
@@ -17,25 +17,47 @@ import { config } from '../lib/config.js';
 export const authRouter = Router();
 
 const OTP_PURPOSE = 'agent_signup';
+/** "Forgot password?" codes (SPEC §9.24 D). */
+const RESET_PURPOSE = 'agent_reset';
 
-// POST /api/auth/otp/send {phone, firebase?} — first step of agent signup
-// (SPEC §9.1 / §9.19 A). A number that is already an agent gets 409 so the app
-// can point to Login — before any SMS is sent, by us or by Firebase.
+/** `purpose` of the OTP routes: 'signup' (the default) | 'reset'. */
+const otpPurpose = z.object({ purpose: z.enum(['signup', 'reset']).optional() });
+
+const noAccount = () => notFound('account_not_found', 'No account with this mobile number');
+
+// POST /api/auth/otp/send {phone, purpose?, firebase?} — first step of agent
+// signup (SPEC §9.1 / §9.19 A) or, with purpose 'reset', of "Forgot password?"
+// (SPEC §9.24 D). Signup: a number that is already an agent gets 409 so the app
+// can point to Login; reset: a number that is not an agent gets 404 — both
+// before any SMS is sent, by us or by Firebase.
 authRouter.post(
   '/otp/send',
   asyncHandler(async (req, res) => {
     const { phone, firebase } = parse(otpSendSchema, req.body ?? {});
+    const { purpose } = parse(otpPurpose, req.body ?? {});
     const existing = await one('SELECT id FROM agents WHERE phone = $1', [phone]);
+    if (purpose === 'reset') {
+      if (!existing) throw noAccount();
+      return res.json(await startOtp(phone, RESET_PURPOSE, { app: 'agent', firebase }));
+    }
     if (existing) throw conflict('phone_taken', 'This mobile number is already registered');
     res.json(await startOtp(phone, OTP_PURPOSE, { app: 'agent', firebase }));
   }),
 );
 
-// POST /api/auth/otp/verify {phone, code | firebase_id_token} → {verification_token} for /signup.
+// POST /api/auth/otp/verify {phone, code | firebase_id_token, purpose?} →
+// {verification_token} for /signup (or, with purpose 'reset', for /reset-password).
 authRouter.post(
   '/otp/verify',
   asyncHandler(async (req, res) => {
     const body = parse(otpVerifySchema, req.body ?? {});
+    const { purpose } = parse(otpPurpose, req.body ?? {});
+    if (purpose === 'reset') {
+      // Checked before the code so a wrong number never burns an attempt.
+      if (!(await one('SELECT id FROM agents WHERE phone = $1', [body.phone]))) throw noAccount();
+      await checkOtp(body.phone, RESET_PURPOSE, body);
+      return res.json({ verification_token: signPhoneVerification(body.phone, RESET_PURPOSE) });
+    }
     await checkOtp(body.phone, OTP_PURPOSE, body);
     res.json({ verification_token: signPhoneVerification(body.phone, OTP_PURPOSE) });
   }),
@@ -146,6 +168,47 @@ authRouter.post(
     await refreshAgentApproval(login.id);
     const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [login.id]);
 
+    res.json({
+      token: signToken(agent),
+      agent: agentPublic(agent, await agentCommunities(agent.id)),
+    });
+  }),
+);
+
+const resetSchema = z.object({
+  phone: phoneSchema,
+  phone_verification_token: z.string().optional(),
+  new_password: passwordSchema,
+});
+
+// POST /api/auth/reset-password {phone, phone_verification_token, new_password}
+// → {token, agent} like login: "Forgot password?" after the reset OTP (SPEC
+// §9.24 D). Clears must_change_password and closes the agent's pending admin
+// reset requests (they are settled now).
+authRouter.post(
+  '/reset-password',
+  asyncHandler(async (req, res) => {
+    const body = parse(resetSchema, req.body ?? {});
+    if (!checkPhoneVerification(body.phone_verification_token, body.phone, RESET_PURPOSE)) {
+      throw badRequest('phone_not_verified', 'Verify your mobile number with the OTP first');
+    }
+    const password_hash = await hashPassword(body.new_password);
+    const id = await tx(async (client) => {
+      const { rows } = await client.query(
+        `UPDATE agents SET password_hash = $2, must_change_password = FALSE WHERE phone = $1 RETURNING id`,
+        [body.phone, password_hash],
+      );
+      if (!rows.length) throw noAccount();
+      await client.query(
+        `UPDATE password_reset_requests SET status = 'approved', decided_at = now()
+          WHERE agent_id = $1 AND status = 'pending'`,
+        [rows[0].id],
+      );
+      return rows[0].id;
+    });
+    await ensureInitialGiftCodes(id);
+    await refreshAgentApproval(id);
+    const agent = await one(`${AGENT_SELECT} WHERE a.id = $1`, [id]);
     res.json({
       token: signToken(agent),
       agent: agentPublic(agent, await agentCommunities(agent.id)),

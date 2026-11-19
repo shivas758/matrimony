@@ -32,7 +32,7 @@ class AppConfig {
   static const String appName = 'Wedbook Agent';
 
   /// Shown on the More screen. Keep in step with `version:` in pubspec.yaml.
-  static const String appVersion = '3.4.0';
+  static const String appVersion = '3.5.0';
 
   /// How long an approved contact stays visible — mirrors the server default.
   static const int contactAccessDays = 15;

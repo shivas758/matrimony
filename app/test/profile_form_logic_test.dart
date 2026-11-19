@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:matrimony_agents/state/profile_form_logic.dart';
 
@@ -90,7 +88,7 @@ void main() {
       expect(ProfileFormStep.forField('123'), isNull);
     });
 
-    test('firstFor picks the earliest step; stepsFor lists them in order', () {
+    test('firstFor picks the earliest step', () {
       expect(
         ProfileFormStep.firstFor(['contact_phone', 'zodiac_id', 'income_text']),
         ProfileFormStep.professional,
@@ -98,10 +96,6 @@ void main() {
       expect(ProfileFormStep.firstFor(['father_phone']), ProfileFormStep.family);
       expect(ProfileFormStep.firstFor(['nonsense']), isNull);
       expect(ProfileFormStep.firstFor(const []), isNull);
-      expect(
-        ProfileFormStep.stepsFor(['mother_phone', 'nakshatram', 'father_phone', 'bogus']),
-        [ProfileFormStep.horoscope, ProfileFormStep.family],
-      );
     });
   });
 
@@ -227,23 +221,6 @@ void main() {
         'hidden_fields': <String>[],
         'audience_all': false,
         'audience_community_ids': <int>[],
-      });
-    });
-
-    test('multipart POST fields: JSON array strings and true / false', () {
-      final p = const ProfilePrivacy().withShown('name', false).withMode(AudienceMode.all);
-      final fields = p.toMultipartFields(known, ownCommunityId: 1);
-      expect(fields['hidden_fields'], '["name"]');
-      expect(jsonDecode(fields['hidden_fields']!), ['name']);
-      expect(fields['audience_all'], 'true');
-      expect(fields['audience_community_ids'], '[]');
-
-      // "Show everything" is sent explicitly, not left out.
-      final plain = const ProfilePrivacy().toMultipartFields(known);
-      expect(plain, {
-        'hidden_fields': '[]',
-        'audience_all': 'false',
-        'audience_community_ids': '[]',
       });
     });
   });

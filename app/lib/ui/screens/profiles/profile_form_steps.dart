@@ -8,12 +8,6 @@ part of 'profile_form_screen.dart';
 /// An extension rather than more methods on the State, so the long builders
 /// sit in their own file; they change state through [_ProfileFormScreenState._set].
 extension _ProfileFormSteps on _ProfileFormScreenState {
-  /// A hint under a field: the AI import's unmatched text, else [fallback].
-  String? _helper(String key, [String? fallback]) {
-    final hint = _hint(key);
-    return hint == null ? fallback : '${S.aiUnmatchedPrefix}$hint';
-  }
-
   // ================================================================== 1. Personal
 
   /// Step 1 — name, gender, date of birth, marital status, religion,
@@ -25,33 +19,13 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
     MasterData masters,
     List<MasterItem> allowedCommunities,
   ) {
-    final theme = Theme.of(context);
     final subcasteOptions = masters.subcastesFor(_communityId);
     final typedSubcaste = _subcaste.text.trim();
     final subcasteIsNew = _subcasteId == null &&
         typedSubcaste.isNotEmpty &&
         !subcasteOptions.any((s) => s.name.toLowerCase() == typedSubcaste.toLowerCase());
-    // Steps on which the AI import left something unmatched.
-    final toCheck = _lastParse == null
-        ? const <ProfileFormStep>[]
-        : ProfileFormStep.stepsFor(_lastParse!.unmatched.keys);
 
     return [
-      if (_aiEnabled) ...[
-        _AiBanner(busy: _aiBusy, onTap: _fillFromBiodata),
-        if (_lastParse != null && _lastParse!.warnings.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          _WarningList(warnings: _lastParse!.warnings),
-        ],
-        if (toCheck.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Text(
-            '${S.aiCheckSteps}${toCheck.map((s) => s.title).join(', ')}.',
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-          ),
-        ],
-        const SizedBox(height: 16),
-      ],
       const SectionHeader(S.photos),
       _PhotoStrip(
         existing: _existingPhotos,
@@ -102,7 +76,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.favorite_border_rounded,
         items: masters.maritalStatuses,
         value: _maritalStatusId,
-        helper: _hint('marital_status'),
         onChanged: (v) => _set(() => _maritalStatusId = v),
       ),
       const SizedBox(height: 16),
@@ -111,7 +84,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.temple_hindu_rounded,
         items: masters.religions,
         value: _religionId,
-        helper: _hint('religion'),
         onChanged: (v) => _set(() => _religionId = v),
       ),
       const SizedBox(height: 16),
@@ -120,7 +92,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.groups_rounded,
         items: allowedCommunities,
         value: _communityId,
-        helper: _hint('community'),
         // Checked against the state, not the menu's own value: the list may
         // still be loading when the community is already known.
         validator: (_) => _communityId == null ? S.communityRequired : null,
@@ -139,7 +110,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         options: subcasteOptions,
         enabled: _communityId != null,
         isNew: subcasteIsNew,
-        helper: _hint('subcaste'),
         onSelected: (s) => _set(() {
           _subcasteId = s.id;
           _subcaste.text = s.name;
@@ -152,14 +122,12 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.record_voice_over_outlined,
         items: masters.languages,
         value: _motherTongueId,
-        helper: _hint('mother_tongue'),
         onChanged: (v) => _set(() => _motherTongueId = v),
       ),
       const SizedBox(height: 16),
       _LanguageChips(
         items: masters.languages,
         selected: _languageIds,
-        helper: _hint('known_languages'),
         onToggle: (id) => _set(() {
           _languageIds.contains(id) ? _languageIds.remove(id) : _languageIds.add(id);
         }),
@@ -210,7 +178,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.face_rounded,
         items: masters.complexions,
         value: _complexionId,
-        helper: _hint('complexion'),
         onChanged: (v) => _set(() => _complexionId = v),
       ),
       const SizedBox(height: 16),
@@ -219,7 +186,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.restaurant_rounded,
         items: masters.foodHabits,
         value: _foodHabitId,
-        helper: _hint('food_habit'),
         onChanged: (v) => _set(() => _foodHabitId = v),
       ),
       const SizedBox(height: 16),
@@ -228,7 +194,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.flag_outlined,
         items: masters.countries,
         value: _nationalityId,
-        helper: _hint('nationality'),
         onChanged: (v) => _set(() => _nationalityId = v),
       ),
       const _Section(S.about),
@@ -260,7 +225,7 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
       Padding(
         padding: const EdgeInsets.only(bottom: 12, left: 4),
         child: Text(
-          _helper('education_levels', S.educationLevelsHint)!,
+          S.educationLevelsHint,
           style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
         ),
       ),
@@ -280,7 +245,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.school_rounded,
         items: masters.educations,
         value: _educationId,
-        helper: _hint('education'),
         onChanged: (v) => _set(() => _educationId = v),
       ),
       const SizedBox(height: 12),
@@ -301,7 +265,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.badge_outlined,
         items: masters.occupationTypes,
         value: _occupationTypeId,
-        helper: _hint('occupation_type'),
         onChanged: (v) => _set(() => _occupationTypeId = v),
       ),
       const SizedBox(height: 16),
@@ -310,7 +273,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.work_outline_rounded,
         items: masters.professions,
         value: _professionId,
-        helper: _hint('profession'),
         onChanged: (v) => _set(() => _professionId = v),
       ),
       const SizedBox(height: 12),
@@ -353,7 +315,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.public_rounded,
         items: masters.countries,
         value: _workCountryId,
-        helper: _hint('work_country'),
         helperText: S.workCountryHint,
         onChanged: (v) => _set(() => _workCountryId = v),
       ),
@@ -375,7 +336,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         contentPadding: EdgeInsets.zero,
         controlAffinity: ListTileControlAffinity.leading,
         title: const Text('NRI — lives or works abroad'),
-        subtitle: _hint('nri_country') == null ? null : Text(_helper('nri_country')!),
         value: _isNri,
         onChanged: (v) => _set(() => _isNri = v ?? false),
       ),
@@ -409,14 +369,12 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
   /// Step 3 — star (nakshatram), rasi, gothram, birth time, birth place*,
   /// birth state*, birth country*. (* = on request.)
   List<Widget> _horoscopeStep(BuildContext context, MasterData masters) {
-    final theme = Theme.of(context);
     return [
       _MasterDropdown(
         label: S.nakshatram,
         icon: Icons.auto_awesome_rounded,
         items: masters.nakshatrams,
         value: _nakshatramId,
-        helper: _hint('nakshatram'),
         onChanged: (v) => _set(() => _nakshatramId = v),
       ),
       const SizedBox(height: 16),
@@ -426,7 +384,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.brightness_5_rounded,
         items: [for (final z in masters.zodiacSigns) MasterItem(id: z.id, name: z.label)],
         value: _zodiacId,
-        helper: _hint('zodiac'),
         onChanged: (v) => _set(() => _zodiacId = v),
       ),
       const SizedBox(height: 16),
@@ -447,26 +404,15 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         hint: 'Select time',
         onTap: _pickBirthTime,
       ),
-      if (_birthTime != null || _hint('birth_time') != null)
+      if (_birthTime != null)
         Padding(
           padding: const EdgeInsets.only(top: 6, left: 4),
-          child: Row(
-            children: [
-              if (_hint('birth_time') != null)
-                Expanded(
-                  child: Text(
-                    _helper('birth_time')!,
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-                  ),
-                )
-              else
-                const Spacer(),
-              if (_birthTime != null)
-                TextButton(
-                  onPressed: () => _set(() => _birthTime = null),
-                  child: const Text('Clear time'),
-                ),
-            ],
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => _set(() => _birthTime = null),
+              child: const Text(S.clearTime),
+            ),
           ),
         ),
       const _Section(S.birthPlace),
@@ -476,12 +422,10 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
       TextFormField(
         controller: _birthPlace,
         textCapitalization: TextCapitalization.words,
-        decoration: InputDecoration(
+        decoration: const InputDecoration(
           labelText: S.birthPlace,
           hintText: 'Town / city of birth',
-          prefixIcon: const Icon(Icons.location_on_outlined),
-          helperText: _helper('birth_place'),
-          helperMaxLines: 2,
+          prefixIcon: Icon(Icons.location_on_outlined),
         ),
       ),
       const SizedBox(height: 12),
@@ -499,7 +443,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         icon: Icons.flag_outlined,
         items: masters.countries,
         value: _birthCountryId,
-        helper: _hint('birth_country'),
         onChanged: (v) => _set(() => _birthCountryId = v),
       ),
     ];
@@ -510,7 +453,7 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
   /// Step 4 — father and mother (name, occupation, phone)*, siblings*,
   /// family details*, property share / details*, native place (city,
   /// state)*, contact person (name, phone)* — every field on request — then
-  /// the status (edit only) and the Privacy card.
+  /// the status and the Privacy card.
   List<Widget> _familyStep(BuildContext context, MasterData masters) {
     final theme = Theme.of(context);
     return [
@@ -524,7 +467,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         nameLabel: S.fatherName,
         phoneLabel: S.fatherPhone,
         occupationLabel: S.fatherOccupation,
-        phoneHelper: _hint('father_phone'),
       ),
       const SizedBox(height: 16),
       _PersonRow(
@@ -534,7 +476,6 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
         nameLabel: S.motherName,
         phoneLabel: S.motherPhone,
         occupationLabel: S.motherOccupation,
-        phoneHelper: _hint('mother_phone'),
       ),
       const _Section(S.siblings),
       SegmentedButton<int>(
@@ -676,27 +617,24 @@ extension _ProfileFormSteps on _ProfileFormScreenState {
           FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
           LengthLimitingTextInputFormatter(15),
         ],
-        decoration: InputDecoration(
+        decoration: const InputDecoration(
           labelText: S.contactPersonPhone,
-          prefixIcon: const Icon(Icons.phone_rounded),
-          helperText: _helper('contact_phone'),
+          prefixIcon: Icon(Icons.phone_rounded),
         ),
       ),
-      if (widget.isEdit) ...[
-        const _Section(S.profileStatus),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            for (final s in ProfileStatus.values)
-              ChoiceChip(
-                label: Text(s.label),
-                selected: _status == s.apiValue,
-                onSelected: (_) => _set(() => _status = s.apiValue),
-              ),
-          ],
-        ),
-      ],
+      const _Section(S.profileStatus),
+      Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final s in ProfileStatus.values)
+            ChoiceChip(
+              label: Text(s.label),
+              selected: _status == s.apiValue,
+              onSelected: (_) => _set(() => _status = s.apiValue),
+            ),
+        ],
+      ),
       // The Privacy card (SPEC §9.18 D / E). The list of switchable details
       // comes from the server; an older one sends none and the card is left out.
       if (masters.privacyFields.isNotEmpty) ...[

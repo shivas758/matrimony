@@ -38,7 +38,7 @@ import 'package:gandharva/state/home_tab.dart';
 import 'package:gandharva/state/interests_state.dart';
 import 'package:gandharva/state/masters_state.dart';
 import 'package:gandharva/state/notifications_state.dart';
-import 'package:gandharva/ui/screens/auth/phone_screen.dart';
+import 'package:gandharva/ui/screens/auth/login_screen.dart';
 import 'package:gandharva/ui/screens/browse/profile_detail_screen.dart';
 import 'package:gandharva/ui/screens/home_shell.dart';
 import 'package:gandharva/ui/screens/my_profile/privacy_screen.dart';
@@ -827,9 +827,9 @@ void main() {
       final me = Customer.fromJson(_meJson());
 
       // 1 — sign in with the mobile number.
-      await tester.pumpWidget(app(null, const PhoneScreen()));
+      await tester.pumpWidget(app(null, const LoginScreen()));
       await settle();
-      await tester.enterText(find.byType(TextFormField), '9876543210');
+      await tester.enterText(find.byType(TextFormField).first, '9876543210');
       FocusManager.instance.primaryFocus?.unfocus();
       await shoot('01_login.png');
 

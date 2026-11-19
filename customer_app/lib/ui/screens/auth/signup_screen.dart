@@ -6,12 +6,14 @@ import '../../../state/auth_state.dart';
 import '../../strings.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/password_field.dart';
 import '../../widgets/terms_consent.dart';
 
-/// Step 3, new numbers only: just the name (SPEC §9.12). The account starts
-/// as a guest and lands on Home; the agent is chosen later from Get started.
-/// The verified phone is shown read-only; the verification token from the
-/// OTP step travels with the request. *Create account* works only once the
+/// Create account, step 3 (after the one-time code): the name and a
+/// password + confirmation (SPEC §9.12 / §9.24 C). The account starts as a
+/// guest and lands on Home; the agent is chosen later from Get started. The
+/// verified phone is shown read-only; the verification token from the OTP
+/// step travels with the request. *Create account* works only once the
 /// Terms & Privacy box is ticked; the signup then says `accepted_terms: true`
 /// (SPEC §9.22 C).
 class SignupScreen extends StatefulWidget {
@@ -27,6 +29,8 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
+  final _password = TextEditingController();
+  final _confirm = TextEditingController();
   bool _busy = false;
   String? _error;
 
@@ -39,6 +43,8 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   void dispose() {
     _name.dispose();
+    _password.dispose();
+    _confirm.dispose();
     super.dispose();
   }
 
@@ -58,6 +64,7 @@ class _SignupScreenState extends State<SignupScreen> {
       await context.read<AuthState>().signup(
             fullName: _name.text.trim(),
             phone: widget.phone,
+            password: _password.text,
             verificationToken: widget.verificationToken,
             acceptedTerms: true,
           );
@@ -78,6 +85,7 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final enabled = !_busy && !_expired;
 
     return Scaffold(
       appBar: AppBar(title: const Text(S.signupTitle)),
@@ -89,87 +97,81 @@ class _SignupScreenState extends State<SignupScreen> {
               constraints: const BoxConstraints(maxWidth: 480),
               child: Form(
                 key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      S.signupBody,
-                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.outline),
-                    ),
-                    const SizedBox(height: 20),
-                    // Verified number — read-only, with a tick.
-                    SurfaceCard(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.verified_rounded, color: AppColors.success),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  S.yourNumber,
-                                  style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.outline),
-                                ),
-                                Text(
-                                  '+91 ${widget.phone}',
-                                  style: theme.textTheme.titleMedium?.copyWith(color: AppColors.wine),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                child: AutofillGroup(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        S.signupBody,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.outline),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    TextFormField(
-                      controller: _name,
-                      autofocus: true,
-                      textCapitalization: TextCapitalization.words,
-                      textInputAction: TextInputAction.done,
-                      autofillHints: const [AutofillHints.name],
-                      onFieldSubmitted: (_) => _submit(),
-                      decoration: const InputDecoration(
-                        labelText: S.fullName,
-                        helperText: S.fullNameHelper,
-                        prefixIcon: Icon(Icons.person_rounded),
+                      const SizedBox(height: 20),
+                      VerifiedNumberCard(phone: widget.phone),
+                      const SizedBox(height: 20),
+                      TextFormField(
+                        controller: _name,
+                        autofocus: true,
+                        enabled: enabled,
+                        textCapitalization: TextCapitalization.words,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.name],
+                        decoration: const InputDecoration(
+                          labelText: S.fullName,
+                          helperText: S.fullNameHelper,
+                          prefixIcon: Icon(Icons.person_rounded),
+                        ),
+                        validator: (v) => (v ?? '').trim().length < 2 ? S.fullNameInvalid : null,
                       ),
-                      validator: (v) => (v ?? '').trim().length < 2 ? S.fullNameInvalid : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TermsConsent(
-                      value: _agreed,
-                      enabled: !_busy && !_expired,
-                      onChanged: (v) => setState(() {
-                        _agreed = v;
-                        if (v && _error == S.termsRequired) _error = null;
-                      }),
-                    ),
-                    if (_error != null) ...[
+                      const SizedBox(height: 14),
+                      PasswordField(
+                        controller: _password,
+                        label: S.password,
+                        helperText: S.passwordHelper,
+                        enabled: enabled,
+                        newPassword: true,
+                        validator: validateNewPassword,
+                      ),
+                      const SizedBox(height: 14),
+                      PasswordField(
+                        controller: _confirm,
+                        label: S.confirmPassword,
+                        icon: Icons.lock_outline_rounded,
+                        enabled: enabled,
+                        newPassword: true,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _submit(),
+                        validator: confirmPasswordValidator(_password),
+                      ),
+                      const SizedBox(height: 12),
+                      TermsConsent(
+                        value: _agreed,
+                        enabled: enabled,
+                        onChanged: (v) => setState(() {
+                          _agreed = v;
+                          if (v && _error == S.termsRequired) _error = null;
+                        }),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 16),
+                        ErrorBanner(message: _error!),
+                      ],
+                      const SizedBox(height: 24),
+                      if (_expired)
+                        const StartAgainButton()
+                      else
+                        FilledButton(
+                          // Only once the terms are accepted (SPEC §9.22 C).
+                          onPressed: _busy || !_agreed ? null : _submit,
+                          child: _busy ? const ButtonSpinner() : const Text(S.createAccount),
+                        ),
                       const SizedBox(height: 16),
-                      ErrorBanner(message: _error!),
-                    ],
-                    const SizedBox(height: 24),
-                    if (_expired)
-                      FilledButton.icon(
-                        onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
-                        icon: const Icon(Icons.restart_alt_rounded),
-                        label: const Text(S.startAgain),
-                      )
-                    else
-                      FilledButton(
-                        // Only once the terms are accepted (SPEC §9.22 C).
-                        onPressed: _busy || !_agreed ? null : _submit,
-                        child: _busy ? const ButtonSpinner() : const Text(S.createAccount),
+                      Text(
+                        S.signupNote,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
                       ),
-                    const SizedBox(height: 16),
-                    Text(
-                      S.signupNote,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -178,4 +180,54 @@ class _SignupScreenState extends State<SignupScreen> {
       ),
     );
   }
+}
+
+/// The number the one-time code checked — read-only, with a tick (Create
+/// account and Forgot password).
+class VerifiedNumberCard extends StatelessWidget {
+  const VerifiedNumberCard({super.key, required this.phone});
+
+  final String phone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Row(
+        children: [
+          const Icon(Icons.verified_rounded, color: AppColors.success),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  S.yourNumber,
+                  style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.outline),
+                ),
+                Text(
+                  '+91 $phone',
+                  style: theme.textTheme.titleMedium?.copyWith(color: AppColors.wine),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Start again" — the 15-minute verification token lapsed (`400
+/// phone_not_verified`): back to the login screen.
+class StartAgainButton extends StatelessWidget {
+  const StartAgainButton({super.key});
+
+  @override
+  Widget build(BuildContext context) => FilledButton.icon(
+        onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+        icon: const Icon(Icons.restart_alt_rounded),
+        label: const Text(S.startAgain),
+      );
 }

@@ -74,7 +74,8 @@ const authLimiter = rateLimit({
 app.use(
   [
     '/api/auth/login', '/api/auth/signup', '/api/auth/change-password', '/api/auth/forgot-password',
-    '/api/auth/otp', '/api/customer/auth/otp', '/api/customer/auth/signup',
+    '/api/auth/otp', '/api/auth/reset-password', '/api/customer/auth/otp', '/api/customer/auth/signup',
+    '/api/customer/auth/login', '/api/customer/auth/reset-password', '/api/customer/auth/change-password',
   ],
   authLimiter,
 );

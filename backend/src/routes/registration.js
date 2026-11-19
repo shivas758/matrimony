@@ -476,7 +476,7 @@ const takenPage = (agent, phone) =>
     body: `<div class="notice"><div class="icon">✓</div>
 <h1>This number is already registered</h1>
 <p><b>+91 ${esc(phone)}</b> already has a Wedbook Matrimony account.</p>
-<p>Open the <b>Wedbook Matrimony</b> app and log in with this number — you will get a one-time code by SMS. Your profile is under <b>My profile</b> there.</p>
+<p>Open the <b>Wedbook Matrimony</b> app and log in with this number and your password. Forgot it, or never set one? Tap <b>Forgot password?</b> — you will get a one-time code by SMS. Your profile is under <b>My profile</b> there.</p>
 <p>Questions? Call ${esc(agent.full_name)} on <a href="tel:+91${esc(agent.phone)}">+91 ${esc(agent.phone)}</a>.</p></div>`,
   });
 
@@ -500,7 +500,7 @@ const thanksPage = (agent, name, phone) =>
     }. They will check your details and approve your account.</p>
 <ol class="steps">
   <li>Install the <b>Wedbook Matrimony</b> app.</li>
-  <li>Log in with <b>+91 ${esc(phone)}</b> — you will receive a one-time code by SMS.</li>
+  <li>Tap <b>Forgot password?</b>, enter <b>+91 ${esc(phone)}</b>, type the one-time code you receive by SMS and choose your password. After that you log in with your number and that password.</li>
   <li>Pay the <b>₹${esc(String(config.payments.profileFeeInr))}</b> registration fee in the app (My profile) — your profile becomes visible to others only after that.</li>
   <li>Once ${esc(agent.full_name)} approves you, browse profiles and mark the ones you like.</li>
 </ol>

@@ -484,22 +484,32 @@ void main() {
       return (host, auth);
     }
 
+    /// Name + password + confirmation (SPEC §9.24 C).
+    Future<void> fillIn(WidgetTester tester) async {
+      await tester.enterText(find.widgetWithText(TextFormField, S.fullName), 'Srinivasa Reddy');
+      await tester.enterText(find.widgetWithText(TextFormField, S.password), 'secret12');
+      await tester.enterText(find.widgetWithText(TextFormField, S.confirmPassword), 'secret12');
+      await tester.pump();
+    }
+
     testWidgets('Create account stays off until the box is ticked; then accepted_terms is sent', (tester) async {
       final (host, auth) = await render(tester);
       expect(find.textContaining('I agree to the'), findsOneWidget);
-      await tester.enterText(find.byType(TextFormField), 'Srinivasa Reddy');
-      await tester.pump();
+      await fillIn(tester);
       expect(_enabled(tester, S.createAccount), isFalse);
 
+      await tester.ensureVisible(find.byType(Checkbox));
       await tester.tap(find.byType(Checkbox));
       await tester.pump();
       expect(_enabled(tester, S.createAccount), isTrue);
+      await tester.ensureVisible(find.text(S.createAccount));
       await tester.tap(find.text(S.createAccount));
       await _settle(tester);
 
       expect(host.api.bodiesFor('POST', signupPath).single, {
         'full_name': 'Srinivasa Reddy',
         'phone': '9876543210',
+        'password': 'secret12',
         'phone_verification_token': 'vt-1',
         'accepted_terms': true,
       });
@@ -526,12 +536,15 @@ void main() {
 
     testWidgets('"Done" on the keyboard before ticking asks for it, sends nothing', (tester) async {
       final (host, _) = await render(tester);
-      await tester.enterText(find.byType(TextFormField), 'Srinivasa Reddy');
+      await fillIn(tester);
+      // "Done" on the last field (the confirmation).
+      await tester.showKeyboard(find.widgetWithText(TextFormField, S.confirmPassword));
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await _settle(tester);
       expect(find.text(S.termsRequired), findsOneWidget);
       expect(host.api.bodiesFor('POST', signupPath), isEmpty);
 
+      await tester.ensureVisible(find.byType(Checkbox));
       await tester.tap(find.byType(Checkbox));
       await tester.pump();
       expect(find.text(S.termsRequired), findsNothing);

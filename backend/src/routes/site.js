@@ -148,7 +148,7 @@ siteRouter.get('/', send('/', 'Home', () => `
   <section class="card">
     <h2 style="margin-top:0">How it works</h2>
     <ol class="steps">
-      <li>Install Wedbook Matrimony and sign in with your mobile number and a one-time code (OTP).</li>
+      <li>Install Wedbook Matrimony, verify your mobile number with a one-time code (OTP) and choose a password.</li>
       <li>Look around as a guest: photos, age, job, community and package.</li>
       <li>Choose your marriage bureau agent and register your profile.</li>
       <li>Pay the one-time registration fee of ${rupees(fee())} in the app.</li>
@@ -234,8 +234,9 @@ siteRouter.get('/terms', send('/terms', 'Terms & Conditions', () => `
   <p>Profiles may only be created for people of legal marriageable age under Indian law, by the person
   themselves or by a parent or guardian with their consent.</p>
   <h3>3. Your account</h3>
-  <p>You sign in with your mobile number and a one-time code. One account can hold one profile. Keep your
-  phone secure; you are responsible for activity on your account.</p>
+  <p>You sign in with your mobile number and your password; a one-time code verifies your number when you sign up
+  or reset the password. One account can hold one profile. Keep your password and phone secure; you are
+  responsible for activity on your account.</p>
   <h3>4. Profile content</h3>
   <p>Information and photos must be true, your own (or used with consent) and not misleading. Your agent
   reviews and approves profiles. We may hide or remove a profile, or suspend an account, that breaks these
@@ -289,7 +290,8 @@ const POLICY = {
     deletion: '/delete-account/matrimony',
     collect: `
     <ul>
-      <li><b>Account:</b> your mobile number and name. You sign in with a one-time code (OTP); there is no password.</li>
+      <li><b>Account:</b> your mobile number, name and password (stored only as a one-way hash). Your number is verified
+      with a one-time code (OTP) when you sign up or reset your password.</li>
       <li><b>Your matrimony profile</b> (entered by you or your marriage bureau agent): name, gender, date and time of
       birth, height, complexion, marital status, religion, community and sub-caste, gothram, star and raasi, education,
       profession and income, work country, native place, family details (parents, siblings, property), contact

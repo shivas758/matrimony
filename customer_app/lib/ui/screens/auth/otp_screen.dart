@@ -13,9 +13,10 @@ import '../../theme.dart';
 import '../../widgets/common.dart';
 import 'otp_flow.dart';
 
-/// Step 2: the 6-digit code (SPEC §9.11 Gandharva 1). A known number logs in
-/// straight away; a new one continues to the signup screen with the
-/// verification token.
+/// Step 2 of Create account and Forgot password: the 6-digit code (SPEC
+/// §9.24 C). The verified number continues — with its verification token —
+/// to the name + password screen ([OtpPurpose.signup]) or to the new
+/// password ([OtpPurpose.reset]).
 ///
 /// With Firebase phone auth ([firebase] set, SPEC §9.19 A) the code came
 /// from Firebase: *Verify* confirms it with Firebase and sends the resulting
@@ -23,10 +24,19 @@ import 'otp_flow.dart';
 /// screen then continues on its own ("Verifying automatically…"). No
 /// test-mode hint in that mode.
 class OtpScreen extends StatefulWidget {
-  const OtpScreen({super.key, required this.phone, required this.initial, this.firebase});
+  const OtpScreen({
+    super.key,
+    required this.phone,
+    required this.initial,
+    required this.purpose,
+    this.firebase,
+  });
 
   /// 10-digit number the code was sent to.
   final String phone;
+
+  /// What the code is for — sent with the verify (and every resend).
+  final OtpPurpose purpose;
 
   /// The send response — carries the mock code in test mode and the resend delay.
   final OtpSent initial;
@@ -116,10 +126,9 @@ class _OtpScreenState extends State<OtpScreen> {
     try {
       final result = await context
           .read<AuthState>()
-          .verifyOtp(phone: widget.phone, code: _code.text.trim());
+          .verifyOtp(phone: widget.phone, code: _code.text.trim(), purpose: widget.purpose);
       if (!mounted) return;
-      // Logged in: the root swaps to Home (or the blocked screen) underneath this route.
-      continueAfterVerify(Navigator.of(context), widget.phone, result, replace: true);
+      continueAfterVerify(Navigator.of(context), widget.phone, widget.purpose, result, replace: true);
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = friendlyMessage(e));
     } finally {
@@ -142,9 +151,9 @@ class _OtpScreenState extends State<OtpScreen> {
     try {
       final token = _idToken ?? await gateway.confirmCode(session.verificationId, code ?? '');
       _idToken = token;
-      final result = await verifyFirebaseIdToken(auth, gateway, widget.phone, token);
+      final result = await verifyFirebaseIdToken(auth, gateway, widget.phone, token, purpose: widget.purpose);
       if (!mounted) return;
-      continueAfterVerify(nav, widget.phone, result, replace: true);
+      continueAfterVerify(nav, widget.phone, widget.purpose, result, replace: true);
     } on PhoneAuthFailure catch (e) {
       if (mounted) setState(() => _error = phoneAuthMessage(e));
     } on ApiException catch (e) {
@@ -176,7 +185,13 @@ class _OtpScreenState extends State<OtpScreen> {
     try {
       // Firebase mode resends with Firebase's resend token; the server may
       // also have switched provider between two sends.
-      final request = await requestOtp(auth, gateway, widget.phone, resendToken: _session?.resendToken);
+      final request = await requestOtp(
+        auth,
+        gateway,
+        widget.phone,
+        purpose: widget.purpose,
+        resendToken: _session?.resendToken,
+      );
       if (!mounted) return;
       switch (request) {
         case OtpCodeNeeded(:final sent, :final session):
@@ -188,7 +203,7 @@ class _OtpScreenState extends State<OtpScreen> {
           _startCountdown(sent.retryAfter);
           showSnack(context, S.otpResent);
         case OtpAutoVerified(:final result):
-          continueAfterVerify(nav, widget.phone, result, replace: true);
+          continueAfterVerify(nav, widget.phone, widget.purpose, result, replace: true);
       }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = friendlyMessage(e));

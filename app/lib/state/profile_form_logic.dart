@@ -1,8 +1,6 @@
-import 'dart:convert';
-
 import '../ui/strings.dart';
 
-/// The four steps of the Add / Edit profile form (SPEC §9.18 F). Pure data,
+/// The four steps of the Edit profile form (SPEC §9.18 F). Pure data,
 /// so "which step does this field live on" is testable without widgets.
 enum ProfileFormStep {
   personal(S.stepPersonal, S.stepPersonalShort),
@@ -131,8 +129,8 @@ enum ProfileFormStep {
     return null;
   }
 
-  /// The earliest step among [apiKeys] (server field errors, AI import
-  /// hints …); null when none of them belongs to a step.
+  /// The earliest step among [apiKeys] (server field errors); null when none
+  /// of them belongs to a step.
   static ProfileFormStep? firstFor(Iterable<String> apiKeys) {
     ProfileFormStep? first;
     for (final key in apiKeys) {
@@ -140,16 +138,6 @@ enum ProfileFormStep {
       if (step != null && (first == null || step.index < first.index)) first = step;
     }
     return first;
-  }
-
-  /// Every step that owns at least one of [apiKeys], in step order.
-  static List<ProfileFormStep> stepsFor(Iterable<String> apiKeys) {
-    final found = <ProfileFormStep>{};
-    for (final key in apiKeys) {
-      final step = forField(key);
-      if (step != null) found.add(step);
-    }
-    return [for (final step in values) if (found.contains(step)) step];
   }
 }
 
@@ -257,14 +245,6 @@ class ProfilePrivacy {
         'hidden_fields': hiddenKeys(knownKeys),
         'audience_all': audienceAll,
         'audience_community_ids': audienceIds(ownCommunityId: ownCommunityId),
-      };
-
-  /// The same as strings for the multipart `POST /profiles`: JSON array
-  /// strings and `true` / `false`.
-  Map<String, String> toMultipartFields(Iterable<String> knownKeys, {int? ownCommunityId}) => {
-        'hidden_fields': jsonEncode(hiddenKeys(knownKeys)),
-        'audience_all': '$audienceAll',
-        'audience_community_ids': jsonEncode(audienceIds(ownCommunityId: ownCommunityId)),
       };
 
   /// How many details are switched off among [knownKeys] — for a summary line.

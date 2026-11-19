@@ -241,6 +241,8 @@ const baseEnv = (port) => ({
   PUBLIC_BASE_URL: `http://127.0.0.1:${port}`,
   UPLOADS_DIR: join(tmp, 'uploads'),
   PUSH_PROVIDER: 'off',
+  // Some sections add profiles as agents, which production refuses (SPEC §9.24 A).
+  AGENT_PROFILE_UPLOADS: 'true',
   OTP_REVIEW_PHONE: REVIEW_PHONE,
   OTP_REVIEW_CODE: REVIEW_CODE,
   SITE_BUSINESS_NAME: 'Test Bureau Pvt Ltd',
@@ -370,6 +372,15 @@ try {
   const login = await api('POST', '/api/customer/auth/otp/verify', null, { phone: `+91${cPhone}`, firebase_id_token: idToken(cPhone) });
   check('next login with a fresh token → token', true, typeof login.body?.token === 'string');
   check('… same customer', signup.body?.customer?.id, login.body?.customer?.id);
+  // Forgot password? through Firebase (SPEC §9.24 C / D): the app verifies, the server checks the token.
+  const fr = await api('POST', '/api/customer/auth/otp/send', null, { phone: cPhone, purpose: 'reset', firebase: true });
+  check('customer reset send → firebase options, nothing sent', ['firebase', false], [fr.body?.provider, fr.body?.sent]);
+  const frv = await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, purpose: 'reset', firebase_id_token: idToken(cPhone) });
+  assertTrue('… a Firebase token proves the number for the reset', typeof frv.body?.verification_token === 'string' && !frv.body?.token);
+  const frs = await api('POST', '/api/customer/auth/reset-password', null, { phone: cPhone, phone_verification_token: frv.body?.verification_token, new_password: 'fire1234' });
+  check('… reset-password → logged in', signup.body?.customer?.id, frs.body?.customer?.id);
+  check('… the password logs in', 200, (await api('POST', '/api/customer/auth/login', null, { phone: cPhone, password: 'fire1234' })).status);
+  check('a token for another number cannot reset', 'phone_mismatch', (await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, purpose: 'reset', firebase_id_token: idToken(randomPhone()) })).body?.error);
   check('certificates came from the cache', 1, certFetches);
 
   const bad = async (label, token, code = 'invalid_firebase_token', phone = cPhone) => {
@@ -553,6 +564,30 @@ try {
   check('the delivered code verifies → new: true', true, sVerify.body?.new);
   const aPhone2 = randomPhone();
   check('agent signup send works too (any app version)', 200, (await sx('POST', '/api/auth/otp/send', null, { phone: aPhone2 })).status);
+  // Forgot password? through StartMessaging (SPEC §9.24 C / D) — the owner's provider.
+  const smSignup = await sx('POST', '/api/customer/auth/signup', null, { full_name: 'SM Customer', phone: sPhone, password: 'smpass12', phone_verification_token: sVerify.body?.verification_token });
+  check('customer signup with a password 201', [201, true], [smSignup.status, smSignup.body?.customer?.has_password]);
+  const callsBefore = sm.calls.length;
+  check('reset for an unknown number → 404, no SMS', ['account_not_found', callsBefore], [(await sx('POST', '/api/customer/auth/otp/send', null, { phone: randomPhone(), purpose: 'reset' })).body?.error, sm.calls.length]);
+  const sr = await sx('POST', '/api/customer/auth/otp/send', null, { phone: sPhone, purpose: 'reset', firebase: true });
+  const srCall = sm.calls.at(-1);
+  check('customer reset → StartMessaging sends a code', [200, 'startmessaging', `+91${sPhone}`, callsBefore + 1], [sr.status, sr.body?.provider, srCall?.body?.phoneNumber, sm.calls.length]);
+  const srv = await sx('POST', '/api/customer/auth/otp/verify', null, { phone: sPhone, purpose: 'reset', code: srCall?.body?.variables?.otp });
+  const srs = await sx('POST', '/api/customer/auth/reset-password', null, { phone: sPhone, phone_verification_token: srv.body?.verification_token, new_password: 'smreset1' });
+  check('… the delivered code resets the password', [200, true], [srs.status, typeof srs.body?.token === 'string']);
+  check('… and it logs in', 200, (await sx('POST', '/api/customer/auth/login', null, { phone: sPhone, password: 'smreset1' })).status);
+  const smAgentPhone = randomPhone();
+  const smAgentOtp = await sx('POST', '/api/auth/otp/verify', null, { phone: aPhone2, code: sm.calls.find((c) => c.body?.phoneNumber === `+91${aPhone2}`)?.body?.variables?.otp });
+  const smAgent = await sx('POST', '/api/auth/signup', null, { full_name: 'SM Agent', phone: aPhone2, password: 'agentsm1', community_ids: [COMM], phone_verification_token: smAgentOtp.body?.verification_token });
+  check('agent signed up through StartMessaging', 201, smAgent.status);
+  check('agent reset for an unknown number → 404', 'account_not_found', (await sx('POST', '/api/auth/otp/send', null, { phone: smAgentPhone, purpose: 'reset' })).body?.error);
+  const ar = await sx('POST', '/api/auth/otp/send', null, { phone: aPhone2, purpose: 'reset' });
+  const arCall = sm.calls.at(-1);
+  check('agent reset → StartMessaging sends a code', [200, `+91${aPhone2}`], [ar.status, arCall?.body?.phoneNumber]);
+  const arv = await sx('POST', '/api/auth/otp/verify', null, { phone: aPhone2, purpose: 'reset', code: arCall?.body?.variables?.otp });
+  const ars = await sx('POST', '/api/auth/reset-password', null, { phone: aPhone2, phone_verification_token: arv.body?.verification_token, new_password: 'agentsm2' });
+  check('… the delivered code resets the agent password', [200, smAgent.body?.agent?.id], [ars.status, ars.body?.agent?.id]);
+  check('… and it logs in', 200, (await sx('POST', '/api/auth/login', null, { phone: aPhone2, password: 'agentsm2' })).status);
   sm.fail = true;
   const sBad = await sx('POST', '/api/customer/auth/otp/send', null, { phone: randomPhone() });
   check('StartMessaging refuses → 503 otp_provider_error', [503, 'otp_provider_error'], [sBad.status, sBad.body?.error]);

@@ -11,14 +11,16 @@ import '../widgets/common.dart';
 import '../widgets/delete_account.dart';
 import '../widgets/notification_bell.dart';
 import 'agent/change_agent_screen.dart';
+import 'auth/change_password_screen.dart';
 import 'blocks/blocked_profiles_screen.dart';
 import 'get_started/get_started_screen.dart';
 
 /// More: who I am (with my ID once I have one, tap to copy), my agent (with
 /// their agent code and Call) — or *Choose your agent* → Get started while I
-/// have none —, Change agent (active accounts only), Blocked profiles
-/// (SPEC §9.22 B), Delete my account (SPEC §9.20 F), Logout, version (SPEC
-/// §9.11 Gandharva 6 / §9.12 / §9.18).
+/// have none —, Change agent (active accounts only), Change password / Set a
+/// password (SPEC §9.24 C), Blocked profiles (SPEC §9.22 B), Delete my
+/// account (SPEC §9.20 F), Logout, version (SPEC §9.11 Gandharva 6 / §9.12 /
+/// §9.18).
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
@@ -99,6 +101,27 @@ class MoreScreen extends StatelessWidget {
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ChangeAgentScreen()),
                   ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            // Change password, or Set a password while the account has none
+            // (SPEC §9.24 C).
+            if (customer != null) ...[
+              SurfaceCard(
+                padding: EdgeInsets.zero,
+                child: ListTile(
+                  leading: Icon(
+                    customer.hasPassword ? Icons.password_rounded : Icons.key_rounded,
+                    color: AppColors.wineLight,
+                  ),
+                  title: Text(
+                    customer.hasPassword ? S.changePassword : S.setPassword,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(customer.hasPassword ? S.changePasswordHint : S.setPasswordHint),
+                  trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+                  onTap: () => ChangePasswordScreen.open(context),
                 ),
               ),
               const SizedBox(height: 16),

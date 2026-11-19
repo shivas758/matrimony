@@ -10,6 +10,8 @@
  * (one active with a profile, one still pending) so both apps have data.
  * Needs the mock OTP provider (the default) — signups go through the OTP
  * round trip like the apps do; set OTP_CODE if the mock code was changed.
+ * The API must run with AGENT_PROFILE_UPLOADS=true: agents add the profiles here,
+ * which the API refuses by default since v2.14 (SPEC §9.24 A).
  */
 
 import sharp from 'sharp';

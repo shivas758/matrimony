@@ -6,7 +6,8 @@ import '../services/customer_auth_service.dart';
 
 enum AuthPhase { starting, loggedOut, loggedIn }
 
-/// Holds the signed-in customer and drives the phone → OTP → signup flow.
+/// Holds the signed-in customer and drives login (mobile + password) and the
+/// one-time-code flows of Create account and Forgot password (SPEC §9.24 C).
 class AuthState extends ChangeNotifier {
   AuthState({required ApiClient api, required CustomerAuthService auth})
       : _api = api,
@@ -52,42 +53,88 @@ class AuthState extends ChangeNotifier {
     }
   }
 
-  /// Step 1 — ask the server for a code. The screen shows [OtpSent.mockCode]
-  /// in test mode and counts down [OtpSent.retryAfter] before "Resend".
-  Future<OtpSent> sendOtp(String phone) => _auth.sendOtp(phone);
+  /// Log in with mobile + password (SPEC §9.24 C) — the root swaps to Home
+  /// (or the blocked screen when suspended). Throws [ApiException]:
+  /// `bad_credentials`, `password_not_set`, …
+  Future<void> login({required String phone, required String password}) async {
+    final result = await _auth.login(phone: phone, password: password);
+    _set(AuthPhase.loggedIn, result.customer);
+  }
 
-  /// Step 2 — a known number logs in here (the root swaps to Home, or the
-  /// blocked screen when suspended); a new number returns [NeedsSignup] with the
-  /// verification token the signup screen must carry.
-  Future<OtpVerifyResult> verifyOtp({required String phone, required String code}) async {
-    final result = await _auth.verifyOtp(phone: phone, code: code);
+  /// Create account / Forgot password, step 1 — ask the server for a code
+  /// for [purpose]. The screen shows [OtpSent.mockCode] in test mode and
+  /// counts down [OtpSent.retryAfter] before "Resend".
+  Future<OtpSent> sendOtp(String phone, {required OtpPurpose purpose}) =>
+      _auth.sendOtp(phone, purpose: purpose);
+
+  /// Step 2 — the code checks the number: [PhoneVerified] with the token the
+  /// signup / new-password screen must carry. (Only a server older than
+  /// v2.14 logs a known number in here instead.)
+  Future<OtpVerifyResult> verifyOtp({
+    required String phone,
+    required String code,
+    required OtpPurpose purpose,
+  }) async {
+    final result = await _auth.verifyOtp(phone: phone, code: code, purpose: purpose);
     if (result is LoggedIn) _set(AuthPhase.loggedIn, result.customer);
     return result;
   }
 
   /// Step 2 with Firebase phone auth (SPEC §9.19 A): the ID token instead of
   /// the code — same answers as [verifyOtp].
-  Future<OtpVerifyResult> verifyFirebaseToken({required String phone, required String idToken}) async {
-    final result = await _auth.verifyFirebaseToken(phone: phone, idToken: idToken);
+  Future<OtpVerifyResult> verifyFirebaseToken({
+    required String phone,
+    required String idToken,
+    required OtpPurpose purpose,
+  }) async {
+    final result = await _auth.verifyFirebaseToken(phone: phone, idToken: idToken, purpose: purpose);
     if (result is LoggedIn) _set(AuthPhase.loggedIn, result.customer);
     return result;
   }
 
-  /// Step 3 (new numbers only) — just the name: the account starts as a
-  /// guest and lands on Home straight away (SPEC §9.12).
+  /// Create account, step 3 — name + password: the account starts as a
+  /// guest and lands on Home straight away (SPEC §9.12 / §9.24 C).
   Future<void> signup({
     required String fullName,
     required String phone,
+    required String password,
     required String verificationToken,
     bool acceptedTerms = false,
   }) async {
     final result = await _auth.signup(
       fullName: fullName,
       phone: phone,
+      password: password,
       verificationToken: verificationToken,
       acceptedTerms: acceptedTerms,
     );
     _set(AuthPhase.loggedIn, result.customer);
+  }
+
+  /// Forgot password, step 3 — the new password; logged in straight after.
+  Future<void> resetPassword({
+    required String phone,
+    required String verificationToken,
+    required String newPassword,
+  }) async {
+    final result = await _auth.resetPassword(
+      phone: phone,
+      verificationToken: verificationToken,
+      newPassword: newPassword,
+    );
+    _set(AuthPhase.loggedIn, result.customer);
+  }
+
+  /// More → Change password / Set a password ([currentPassword] null). The
+  /// account has a password afterwards. Throws [ApiException]
+  /// (`bad_credentials` for a wrong current password).
+  Future<void> changePassword({String? currentPassword, required String newPassword}) async {
+    await _auth.changePassword(currentPassword: currentPassword, newPassword: newPassword);
+    final c = _customer;
+    if (_phase == AuthPhase.loggedIn && c != null && !c.hasPassword) {
+      _customer = c.copyWith(hasPassword: true);
+      notifyListeners();
+    }
   }
 
   /// Re-reads the customer (`/customer/auth/me`) — after every action that

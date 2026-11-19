@@ -1008,7 +1008,8 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('Browse filters: the community chips get a search field', (tester) async {
+    testWidgets('Browse filters: ten communities are a picker field with a search box (SPEC §9.24 B)',
+        (tester) async {
       await _phone(tester);
       final host = _Host(guestWithProfileJson(), masters: longMastersJson());
       await tester.pumpWidget(host.wrap(
@@ -1017,11 +1018,15 @@ void main() {
       // Browse loads the masters before it opens the sheet.
       await tester.element(find.byType(FilterSheet)).read<MastersState>().load();
       await tester.pump();
-      await _scrollTo(tester, find.text(S.searchIn(S.community)));
+      expect(find.widgetWithText(FilterChip, 'Lingayat'), findsNothing, reason: 'no wall of chips');
+      final field = find.byType(MultiPickerField).first;
+      await _scrollTo(tester, field);
+      await tester.tap(field);
+      await tester.pumpAndSettle();
       await tester.enterText(find.widgetWithText(TextField, S.searchIn(S.community)), 'lin');
       await tester.pump();
-      expect(find.widgetWithText(FilterChip, 'Lingayat'), findsOneWidget);
-      expect(find.widgetWithText(FilterChip, 'Kamma'), findsNothing);
+      expect(find.widgetWithText(CheckboxListTile, 'Lingayat'), findsOneWidget);
+      expect(find.widgetWithText(CheckboxListTile, 'Kamma'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 

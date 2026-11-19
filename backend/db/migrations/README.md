@@ -60,6 +60,10 @@ Applied so far:
   provider `gift`, `profiles.uploaded_by` nullable (+ `profiles_owner_check`), the demo trigger
   falls back to the customer's flag. Data: first run turns `pending` agents `active`; every run
   approves admins, demo agents and agents with 10 live clients
+- `016_customer_passwords_otp_reset.sql` — customer passwords, OTP password reset (SPEC §9.24):
+  `customers.password_hash` / `password_set_at`, otp purposes `agent_reset` / `customer_reset`
+  (a `DO` block that never narrows a later form). Data: first run only, every existing customer
+  gets the password `123456`
 
 **Re-runs:** `deploy/update.sh` applies every file on every deploy, in order. A migration must never
 *narrow* something a later one widened: 007 and 011 only touch the payments checks while those are

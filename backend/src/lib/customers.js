@@ -12,7 +12,7 @@ import { issueMissingProfileCodes } from './codes.js';
 import { liveClientsSql, refreshAgentApproval } from './agentApproval.js';
 
 export const CUSTOMER_COLUMNS = `id, full_name, phone, agent_id, status, source, phone_verified_at,
-  approved_by, approved_at, last_login_at, created_at, updated_at`;
+  approved_by, approved_at, last_login_at, created_at, updated_at, (password_hash IS NOT NULL) AS has_password`;
 
 /** Customer routes serve photos from their own endpoint (SPEC §9.9). */
 export const CUSTOMER_PHOTO_BASE = '/api/customer/photos';
@@ -145,6 +145,8 @@ export async function loadCustomerMe(customerId) {
         }
       : null,
   });
+  // SPEC §9.24 C: false for web-form customers and accounts from apps before 3.5.0.
+  out.has_password = Boolean(customer.has_password);
   // SPEC §9.12: guest mode until linked + registered + paid + approved.
   out.access = approved && paid ? 'full' : 'guest';
   // The customer's ID = the ID of their (one) profile (SPEC §9.18 C); null

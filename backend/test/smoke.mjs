@@ -10,7 +10,9 @@
  * scope, interests, agent change, the registration form, the new profile
  * fields and the admin customer screens; steps 42–46 cover SPEC §9.18: agent
  * codes, customer IDs, the privacy toggles, the community audience and the
- * four-step registration form).
+ * four-step registration form; step 47 SPEC §9.23; step 48 SPEC §9.24 customer passwords and
+ * OTP password resets). The API must run with AGENT_PROFILE_UPLOADS=true (most steps add
+ * profiles as agents, which production refuses since v2.14).
  * Safe to re-run: it creates its own agents/customers/profiles with random
  * phones and tolerates rows left by earlier runs. Needs the mock OTP provider
  * (OTP_PROVIDER=mock with OTP_MOCK_ECHO on, the default) — or set OTP_CODE to
@@ -3024,6 +3026,110 @@ async function main() {
   for (let i = 0; i < 10; i++) await api('POST', `/api/customer/my-profiles/${zp.body?.profile?.id}/gift-code`, z.body?.token, { code: 'WB-ZZZZZZ' });
   check('the 11th wrong code 429', 'too_many_attempts', (await api('POST', `/api/customer/my-profiles/${zp.body?.profile?.id}/gift-code`, z.body?.token, { code: 'WB-ZZZZZZ' })).body?.error);
 
+  }
+  {
+    step('48. Customer passwords, OTP password reset for customers and agents (SPEC §9.24 C / D)');
+    const otherCode = (send) => (codeFrom(send) === '000000' ? '111111' : '000000');
+
+    // ---- create account: OTP once (purpose signup), then a password
+    const cPhone = randomPhone('8');
+    const sSend = await api('POST', '/api/customer/auth/otp/send', null, { phone: cPhone, purpose: 'signup' });
+    check('signup OTP send 200', 200, sSend.status);
+    check('an unknown purpose 400', 400, (await api('POST', '/api/customer/auth/otp/send', null, { phone: cPhone, purpose: 'hack' })).status);
+    const sVer = await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, code: codeFrom(sSend), purpose: 'signup' });
+    assertTrue('signup verify → a verification token, no session', sVer.body?.verification_token && !sVer.body?.token);
+    const signupBody = { full_name: 'Pass Word', phone: cPhone, phone_verification_token: sVer.body?.verification_token, accepted_terms: true };
+    check('a 5-character password 400', 400, (await api('POST', '/api/customer/auth/signup', null, { ...signupBody, password: '12345' })).status);
+    const sUp = await api('POST', '/api/customer/auth/signup', null, { ...signupBody, password: 'secret12' });
+    check('signup with a password 201', 201, sUp.status);
+    check('… has_password', true, sUp.body?.customer?.has_password);
+    const C_ID = sUp.body?.customer?.id;
+    check('signup OTP for a registered number 409 before any SMS', 'phone_taken', (await api('POST', '/api/customer/auth/otp/send', null, { phone: cPhone, purpose: 'signup' })).body?.error);
+    check('… and its verify 409 too', 'phone_taken', (await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, code: '123456', purpose: 'signup' })).body?.error);
+
+    // ---- log in with mobile + password
+    const li = await api('POST', '/api/customer/auth/login', null, { phone: `+91 ${cPhone}`, password: 'secret12' });
+    check('login with the password 200 (+91 accepted)', 200, li.status);
+    check('… the same customer, has_password', `${C_ID}|true`, `${li.body?.customer?.id}|${li.body?.customer?.has_password}`);
+    const CT = li.body?.token;
+    check('… the token opens /me', C_ID, (await api('GET', '/api/customer/auth/me', CT)).body?.customer?.id);
+    check('… but not agent routes', 401, (await api('GET', '/api/profiles', CT)).status);
+    check('a wrong password 401', 'bad_credentials', (await api('POST', '/api/customer/auth/login', null, { phone: cPhone, password: 'nope123' })).body?.error);
+    check('an unknown number 401 (same answer)', 'bad_credentials', (await api('POST', '/api/customer/auth/login', null, { phone: randomPhone('8'), password: 'secret12' })).body?.error);
+    check('no password 400', 400, (await api('POST', '/api/customer/auth/login', null, { phone: cPhone })).status);
+    check('an agent password does not open a customer account', 401, (await api('POST', '/api/customer/auth/login', null, { phone: ADMIN_PHONE, password: ADMIN_PASS })).status);
+
+    step('48b. Customer change password and Forgot password? by OTP (SPEC §9.24 C)');
+    // ---- change password (More → Change password)
+    check('change password needs a customer token', 401, (await api('POST', '/api/customer/auth/change-password', null, { current_password: 'secret12', new_password: 'newpass1' })).status);
+    check('… an agent token is refused', 401, (await api('POST', '/api/customer/auth/change-password', ADMIN, { current_password: 'secret12', new_password: 'newpass1' })).status);
+    check('a wrong current password 401', 'bad_credentials', (await api('POST', '/api/customer/auth/change-password', CT, { current_password: 'wrong12', new_password: 'newpass1' })).body?.error);
+    check('… no current password 400', 400, (await api('POST', '/api/customer/auth/change-password', CT, { new_password: 'newpass1' })).status);
+    check('… a too-short new one 400', 400, (await api('POST', '/api/customer/auth/change-password', CT, { current_password: 'secret12', new_password: 'abc' })).status);
+    check('change password 200', true, (await api('POST', '/api/customer/auth/change-password', CT, { current_password: 'secret12', new_password: 'newpass1' })).body?.ok);
+    check('the old password stops working', 401, (await api('POST', '/api/customer/auth/login', null, { phone: cPhone, password: 'secret12' })).status);
+    check('the new one works', 200, (await api('POST', '/api/customer/auth/login', null, { phone: cPhone, password: 'newpass1' })).status);
+
+    // ---- forgot password: OTP (purpose reset) → new password → logged in
+    check('reset OTP for an unknown number 404 before any SMS', 'account_not_found', (await api('POST', '/api/customer/auth/otp/send', null, { phone: randomPhone('8'), purpose: 'reset' })).body?.error);
+    check('… its verify 404 too', 'account_not_found', (await api('POST', '/api/customer/auth/otp/verify', null, { phone: randomPhone('8'), code: '123456', purpose: 'reset' })).body?.error);
+    const rSend = await api('POST', '/api/customer/auth/otp/send', null, { phone: cPhone, purpose: 'reset' });
+    check('reset OTP send 200', 200, rSend.status);
+    check('a second code within 30 s 429', 'otp_cooldown', (await api('POST', '/api/customer/auth/otp/send', null, { phone: cPhone, purpose: 'reset' })).body?.error);
+    check('a signup token cannot reset a password', 'phone_not_verified', (await api('POST', '/api/customer/auth/reset-password', null, { phone: cPhone, phone_verification_token: sVer.body?.verification_token, new_password: 'hacked1' })).body?.error);
+    check('a reset code is not a signup code', 'phone_taken', (await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, code: codeFrom(rSend), purpose: 'signup' })).body?.error);
+    check('a wrong reset code 400', 'invalid_otp', (await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, code: otherCode(rSend), purpose: 'reset' })).body?.error);
+    const rVer = await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, code: codeFrom(rSend), purpose: 'reset' });
+    assertTrue('reset verify → a verification token, no session', rVer.body?.verification_token && !rVer.body?.token);
+    check('… the code is single-use', 'otp_expired', (await api('POST', '/api/customer/auth/otp/verify', null, { phone: cPhone, code: codeFrom(rSend), purpose: 'reset' })).body?.error);
+    check('… the token is for that number only', 'phone_not_verified', (await api('POST', '/api/customer/auth/reset-password', null, { phone: randomPhone('8'), phone_verification_token: rVer.body?.verification_token, new_password: 'resetpw1' })).body?.error);
+    check('… not for agents', 'phone_not_verified', (await api('POST', '/api/auth/reset-password', null, { phone: cPhone, phone_verification_token: rVer.body?.verification_token, new_password: 'resetpw1' })).body?.error);
+    check('… a too-short new password 400', 400, (await api('POST', '/api/customer/auth/reset-password', null, { phone: cPhone, phone_verification_token: rVer.body?.verification_token, new_password: '123' })).status);
+    const rSet = await api('POST', '/api/customer/auth/reset-password', null, { phone: cPhone, phone_verification_token: rVer.body?.verification_token, new_password: 'resetpw1' });
+    check('reset-password 200, logged in as that customer', `200|${C_ID}`, `${rSet.status}|${rSet.body?.customer?.id}`);
+    check('… the session works', 200, (await api('GET', '/api/customer/auth/me', rSet.body?.token)).status);
+    check('… the new password works', 200, (await api('POST', '/api/customer/auth/login', null, { phone: cPhone, password: 'resetpw1' })).status);
+    check('… the previous one does not', 401, (await api('POST', '/api/customer/auth/login', null, { phone: cPhone, password: 'newpass1' })).status);
+
+    step('48c. Accounts without a password; agents’ Forgot password? by OTP (SPEC §9.24 C / D)');
+    // ---- an account without a password (web form, apps before 3.5.0)
+    const old = await signupCustomer({ full_name: 'Old App', phone: randomPhone('9') });
+    check('an old-app signup has no password', '201|false', `${old.status}|${old.body?.customer?.has_password}`);
+    const oldPhone = old.body?.customer?.phone;
+    check('its login 409 password_not_set', 'password_not_set', (await api('POST', '/api/customer/auth/login', null, { phone: oldPhone, password: 'anything' })).body?.error);
+    check('it may set one without a current password', true, (await api('POST', '/api/customer/auth/change-password', old.body?.token, { new_password: 'first12' })).body?.ok);
+    check('… then has_password', true, (await api('GET', '/api/customer/auth/me', old.body?.token)).body?.customer?.has_password);
+    check('… and logs in with it', 200, (await api('POST', '/api/customer/auth/login', null, { phone: oldPhone, password: 'first12' })).status);
+    // (The OTP login of apps before 3.5.0 — no purpose — is what customerOtp() does in steps 28+.)
+
+    // ---- agents: Forgot password? by OTP (purpose reset)
+    const raPhone = randomPhone('9');
+    const ra = await signupAgent({ full_name: 'Reset Agent', phone: raPhone, password: 'agentpw1', community_ids: [COMM_A], accepted_terms: true });
+    check('agent signed up', 201, ra.status);
+    check('agent reset OTP for an unknown number 404', 'account_not_found', (await api('POST', '/api/auth/otp/send', null, { phone: randomPhone('9'), purpose: 'reset' })).body?.error);
+    check('… the signup OTP still refuses a registered number', 'phone_taken', (await api('POST', '/api/auth/otp/send', null, { phone: raPhone })).body?.error);
+    check('the old admin request is still filed', true, (await api('POST', '/api/auth/forgot-password', null, { phone: raPhone })).body?.ok);
+    const pendingReq = (await api('GET', '/api/admin/password-resets?status=pending', ADMIN)).body?.password_resets?.find((r) => r.agent_phone === raPhone);
+    assertTrue('… the admin sees it pending', pendingReq);
+    const aSend = await api('POST', '/api/auth/otp/send', null, { phone: raPhone, purpose: 'reset' });
+    check('agent reset OTP send 200', 200, aSend.status);
+    check('a wrong code 400', 'invalid_otp', (await api('POST', '/api/auth/otp/verify', null, { phone: raPhone, code: otherCode(aSend), purpose: 'reset' })).body?.error);
+    const aVer = await api('POST', '/api/auth/otp/verify', null, { phone: raPhone, code: codeFrom(aSend), purpose: 'reset' });
+    assertTrue('agent reset verify → a verification token', aVer.body?.verification_token);
+    check('… not usable for a customer reset', 'phone_not_verified', (await api('POST', '/api/customer/auth/reset-password', null, { phone: raPhone, phone_verification_token: aVer.body?.verification_token, new_password: 'agentpw2' })).body?.error);
+    check('… nor for an agent signup', 'phone_not_verified', (await api('POST', '/api/auth/signup', null, { full_name: 'Dup', phone: raPhone, password: 'agentpw2', community_ids: [COMM_A], phone_verification_token: aVer.body?.verification_token })).body?.error);
+    const aSet = await api('POST', '/api/auth/reset-password', null, { phone: raPhone, phone_verification_token: aVer.body?.verification_token, new_password: 'agentpw2' });
+    check('agent reset-password 200, logged in as that agent', `200|${ra.body?.agent?.id}`, `${aSet.status}|${aSet.body?.agent?.id}`);
+    check('… must_change_password false', false, aSet.body?.agent?.must_change_password);
+    check('… the session works', 200, (await api('GET', '/api/auth/me', aSet.body?.token)).status);
+    check('… the new password logs in', 200, (await api('POST', '/api/auth/login', null, { phone: raPhone, password: 'agentpw2' })).status);
+    check('… the old one does not', 401, (await api('POST', '/api/auth/login', null, { phone: raPhone, password: 'agentpw1' })).status);
+    check('… the pending admin request is closed', 'approved', (await api('GET', '/api/admin/password-resets', ADMIN)).body?.password_resets?.find((r) => r.id === pendingReq?.id)?.status);
+    check('a temporary password still forces a change after an OTP reset', true, await (async () => {
+      await api('POST', `/api/admin/agents/${ra.body?.agent?.id}/reset-password`, ADMIN, { temporary_password: 'temp1234' });
+      const t = await api('POST', '/api/auth/login', null, { phone: raPhone, password: 'temp1234' });
+      return t.body?.agent?.must_change_password === true;
+    })());
   }
   // ---------------------------------------------------------------- summary
   const total = pass + failures.length;

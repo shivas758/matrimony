@@ -5,9 +5,9 @@ import '../strings.dart';
 import '../theme.dart';
 import 'common.dart';
 
-/// Search inside long lists of master values (SPEC §9.23 E) — one widget set
-/// for the Browse filter sheet, the four-step profile form and the privacy
-/// audience:
+/// Search inside long lists of master values (SPEC §9.23 E / §9.24 B) — one
+/// widget set for the Browse filter sheet, the four-step profile form and
+/// the privacy audience:
 ///
 /// * [SearchableChipGroup] — filter chips with a search field above them once
 ///   there are more than [kSearchableAfter]; selected chips always stay.
@@ -15,6 +15,8 @@ import 'common.dart';
 ///   [showSingleChoicePicker] (search on top, tap to pick).
 /// * [MultiPickerField] — a multi choice: the field opens
 ///   [showMultiChoicePicker] (search on top, checkboxes, Done).
+/// * [FilterChoiceGroup] — a Browse filter: chips for a short list, a
+///   [MultiPickerField] with removable chips for a long one.
 ///
 /// Matching is case-insensitive, anywhere in the name — and in an option's
 /// [PickOption.keywords] (a subcaste is also found by its community's name).
@@ -409,7 +411,9 @@ class SearchablePickerField extends StatelessWidget {
 }
 
 /// A multi choice of a long list: the picked names (or [hint]) in a field
-/// that opens [showMultiChoicePicker].
+/// that opens [showMultiChoicePicker]. With [removableChips] (the Browse
+/// filters, SPEC §9.24 B) the picked values show as small chips, each with
+/// its own ×, and a × at the end of the field clears them all.
 class MultiPickerField extends StatelessWidget {
   const MultiPickerField({
     super.key,
@@ -420,6 +424,7 @@ class MultiPickerField extends StatelessWidget {
     required this.hint,
     this.icon,
     this.label,
+    this.removableChips = false,
   });
 
   /// The sheet's title.
@@ -433,11 +438,15 @@ class MultiPickerField extends StatelessWidget {
   /// The field's own label, when it has one.
   final String? label;
 
+  /// Picked values as removable chips instead of one comma-separated line.
+  final bool removableChips;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final names = [for (final o in options) if (selected.contains(o.id)) o.label];
-    final empty = names.isEmpty;
+    final picked = [for (final o in options) if (selected.contains(o.id)) o];
+    final empty = picked.isEmpty;
+    final chips = removableChips && !empty;
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: () async {
@@ -448,15 +457,100 @@ class MultiPickerField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: icon == null ? null : Icon(icon),
-          suffixIcon: const Icon(Icons.arrow_drop_down_rounded),
+          suffixIcon: chips
+              ? IconButton(
+                  tooltip: S.clear,
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => onChanged(<int>{}),
+                )
+              : const Icon(Icons.arrow_drop_down_rounded),
         ),
-        child: Text(
-          empty ? hint : names.join(', '),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: empty ? theme.colorScheme.outline : null),
-        ),
+        child: chips
+            ? Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  // Tapping a chip itself opens the picker (the field's tap);
+                  // its × removes just that value.
+                  for (final o in picked)
+                    InputChip(
+                      label: Text(o.label),
+                      onDeleted: () => onChanged({...selected}..remove(o.id)),
+                      deleteButtonTooltipMessage: S.removeValue(o.label),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                ],
+              )
+            : Text(
+                empty ? hint : picked.map((o) => o.label).join(', '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: empty ? theme.colorScheme.outline : null),
+              ),
       ),
+    );
+  }
+}
+
+/// One multi-choice filter of the Browse sheet (SPEC §9.24 B), in the
+/// profile form's format: up to [kSearchableAfter] values stay plain chips
+/// ([SearchableChipGroup]); a longer list is one compact
+/// [MultiPickerField] — "Any" or the chosen values as removable chips — that
+/// opens the picker sheet (search, checkboxes, Clear all, Done), so the
+/// filter sheet no longer grows with the master lists. An empty list shows
+/// nothing.
+class FilterChoiceGroup extends StatelessWidget {
+  const FilterChoiceGroup({
+    super.key,
+    required this.title,
+    required this.options,
+    required this.selected,
+    required this.onChanged,
+    this.icon,
+    this.hint = S.anyValue,
+  });
+
+  /// The section heading and the picker sheet's title.
+  final String title;
+  final List<PickOption> options;
+  final Set<int> selected;
+
+  /// The whole new selection.
+  final ValueChanged<Set<int>> onChanged;
+
+  /// The picker field's icon (long lists only).
+  final IconData? icon;
+
+  /// What the picker field reads while nothing is chosen.
+  final String hint;
+
+  @override
+  Widget build(BuildContext context) {
+    if (options.isEmpty) return const SizedBox.shrink();
+    if (!isLongList(options.length)) {
+      return SearchableChipGroup(
+        title: title,
+        options: options,
+        selected: selected,
+        onToggle: (id) => onChanged(selected.contains(id) ? ({...selected}..remove(id)) : {...selected, id}),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader(title),
+        MultiPickerField(
+          title: title,
+          hint: hint,
+          icon: icon,
+          options: options,
+          selected: selected,
+          onChanged: onChanged,
+          removableChips: true,
+        ),
+        const SizedBox(height: 20),
+      ],
     );
   }
 }

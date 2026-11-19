@@ -136,10 +136,10 @@ Notifications (v1 = in-app polling)
 ## 5. Flutter app screens
 
 1. **Splash / auto-login**
-2. **Login** (phone + password, **Forgot password?** → enter phone → "the admin will contact you with a temporary password") · **Signup** (details + multi-select community chips) · **Pending approval screen** · **Set new password screen** — shown instead of Home whenever `must_change_password` is true (temporary password + new password + confirm; logout is the only other action).
+2. **Login** (phone + password, **Forgot password?** → enter phone → "the admin will contact you with a temporary password"; since v2.14 an OTP reset, §9.24 D) · **Signup** (details + multi-select community chips) · **Pending approval screen** · **Set new password screen** — shown instead of Home whenever `must_change_password` is true (temporary password + new password + confirm; logout is the only other action).
 3. **Home: Profile list** — card grid (photo, name, age with the DOB in brackets — "27 yrs (12 Apr 1998)", height as 5' 3", community, work place / NRI country, NRI badge, "On hold" chip when the profile is held for me); filter bar → **Filter sheet**: gender toggle, AGE RANGE SLIDER, HEIGHT RANGE SLIDER (labels in feet/inches, sent as cm), multi-select chips for community/subcaste (subcaste chips show only for the selected communities)/education/profession/marital status/complexion/religion/mother tongue/languages known/food habit, NRI switch + multi-select country picker (shown when NRI is on), zodiac & nakshatram dropdowns, place text. Saveable filter presets (local).
 4. **Profile detail** — collapsing photo header with the name, a chip row (gender, age + DOB, community, NRI, status), an at-a-glance tile grid, then cards: Details (age, DOB, height as feet/inches + cm, weight, complexion, marital status, religion, community, subcaste, gothram, mother tongue, languages known, food habit, education + details, profession + details, work place, NRI country/place, income), Horoscope (star, rasi, date of birth, birth time in 12-hour form, birth place), Family (siblings count + siblings details, family details), About; contact section shows Request Contact / Pending / **personal details** (native place, father & mother name/phone, contact person) + days-left countdown per access state. Buttons: **Share** opens a sheet with three ways to send — *WhatsApp message + link* (share_url + summary text via `url_launcher` → `https://wa.me/?text=...`), *PDF bio-data* (POST share {method:'pdf'} → temp file → system share sheet, so the agent picks WhatsApp and it arrives as a document), *Photo card* (masked JPEG) — and Shortlist. App-bar menu: **Request hold** (any agent) / **Put on hold** (uploader, admin), **Cancel hold request**, **Release hold** (holder, uploader, admin), **Delete profile** (uploader, admin — confirmation dialog). A hold banner above the buttons shows the current state: my pending ask, "on hold for your client", or (uploader/admin) who holds it and how many asks are waiting.
-5. **Add/Edit profile** — form with dropdowns from /masters, DOB picker, height picker (feet/inches shown first), weight, complexion, marital status, **religion**, **mother tongue**, **languages known** (multi-select chips), **food habit**, gothram, education + description, profession + description, work place, NRI checkbox that reveals country dropdown + place, a **Siblings** block (Not recorded / No / Yes; Yes reveals the count and a description that stays in-app), a Horoscope block with nakshatram, rasi, **birth time** (time picker, sent as "HH:MM") and **birth place** (free text), multi-photo upload, and a **Personal details** block (native place city/state, father & mother name/phone, contact person name/phone) marked "visible only after approval". **Subcaste** is an autocomplete scoped to the chosen community: pick an existing one or type a new one, which is created on save. A **Fill from bio-data** button at the top takes a PDF, a photo, or pasted text, calls POST /profiles/parse, and pre-fills every field it could match; values that did not match a master row appear as hints beside the field. The agent reviews everything and saves as usual — the AI never writes to the database.
+5. **Add/Edit profile** (since v2.14 **Edit** only — agents no longer add profiles, §9.24 A) — form with dropdowns from /masters, DOB picker, height picker (feet/inches shown first), weight, complexion, marital status, **religion**, **mother tongue**, **languages known** (multi-select chips), **food habit**, gothram, education + description, profession + description, work place, NRI checkbox that reveals country dropdown + place, a **Siblings** block (Not recorded / No / Yes; Yes reveals the count and a description that stays in-app), a Horoscope block with nakshatram, rasi, **birth time** (time picker, sent as "HH:MM") and **birth place** (free text), multi-photo upload, and a **Personal details** block (native place city/state, father & mother name/phone, contact person name/phone) marked "visible only after approval". **Subcaste** is an autocomplete scoped to the chosen community: pick an existing one or type a new one, which is created on save. A **Fill from bio-data** button at the top takes a PDF, a photo, or pasted text, calls POST /profiles/parse, and pre-fills every field it could match; values that did not match a master row appear as hints beside the field. The agent reviews everything and saves as usual — the AI never writes to the database.
 6. **My uploads** — list with status chips (age + DOB on each row); change status (active/on hold/engaged/married/hidden). Delete lives on the detail screen's menu.
 7. **Requests** — tabs: Inbox (approve/reject) and Sent (status + expiry). Each tab lists **hold requests** first (inbox: Put on hold / Reject, Release hold; sent: Cancel, Release when it is mine) and contact requests below; the tab badge counts both.
 8. **Shortlists** — grouped by client label.
@@ -215,7 +215,7 @@ Playfair Display, same files as Mediator.
 ### 9.1 OTP (mock now, real SMS later — Firebase phone auth since v2.9, §9.19 A)
 
 Both apps verify the mobile number with a one-time code **at signup**. Agents keep their password
-login; customers have no password — every login is phone + OTP.
+login; customers have no password — every login is phone + OTP. *(Since v2.14 customers have a password too and both apps reset forgotten passwords by OTP — §9.24.)*
 
 - `otp_codes` rows: `phone`, `purpose` (`agent_signup` | `customer_login`), `code_hash`
   (sha256 of `JWT_SECRET + phone + purpose + code`), `expires_at` (5 min), `attempts` (max 5),
@@ -1460,6 +1460,93 @@ NRI / birth / education), star, rasi, languages known, audience communities — 
   approves the ones to keep by hand (**Approve now**).
 - A gift code is spent on one profile; a customer who later deletes it pays for a new one.
 - Store builds (`STORE=play`): gift codes still work (no money involved).
+
+### 9.24 No agent uploads, picker filters, customer passwords, OTP password reset (v2.14)
+
+Owner's requests of 2026-11-19. Where earlier sections say otherwise — §5 screens 2 / 3 / 5 / 6,
+§9.1 "customers have no password", CLAUDE.md rule 2 "forgotten passwords are reset only by an
+admin" — this wins. Apps: **Wedbook Agent 3.5.0+17**, **Wedbook Matrimony 3.5.0+12**.
+Migration 016. (The owner's fourth item, "a gift code needs no agent approval", is **on hold** —
+today a gift code already links, approves and publishes at once, §9.23 B; nothing changed.)
+
+#### A. Agents no longer add profiles
+
+- Every profile now comes from a family: the Wedbook Matrimony app (§9.23 C) or the agent's
+  registration form (§9.3 B). Wedbook Agent has **no Add profile** anywhere (no button on
+  Profiles or My uploads, no "add your first profile" empty states; the *Fill from bio-data* import lived only in the Add form and goes with it). Agents and
+  admins still **edit** the profiles they own (their clients' profiles) as before.
+- `POST /api/profiles` answers `403 add_profile_disabled` ("Profiles are added by families in
+  the Wedbook Matrimony app") — also for admins and for older app versions that still show the
+  button. Env `AGENT_PROFILE_UPLOADS=true` switches it back on (the test suite and
+  `test/seed-demo.mjs` use it; production leaves it unset).
+
+#### B. Filters use the profile form's pickers (Wedbook Matrimony)
+
+- Browse → Filters: every multi-choice list that has more than 8 values (community, subcaste,
+  education, profession, occupation type, mother tongue, religion, star, rasi, countries,
+  languages known, …) is a **picker field** exactly like the profile form's (§9.23 E): one row
+  showing "Any" or the chosen values (chips, removable); tapping it opens the picker sheet with a
+  search box, checkboxes and **Done**. Short lists (≤ 8, e.g. marital status, food habit) stay as
+  chips. The sheet itself no longer grows with the master lists, so it scrolls a screen or two at
+  most. Subcastes are offered only for the chosen communities (as before); the filter values and
+  the API query are unchanged.
+
+#### C. Customer passwords (Wedbook Matrimony)
+
+- `customers.password_hash` (bcrypt), `customers.password_set_at`. Migration 016 gives every
+  existing customer the password **123456** (first run only; owner's choice — no forced change).
+- **Create account**: mobile → OTP (once) → name + **password + confirm** + terms → in.
+- **Log in**: mobile + password. No SMS.
+- **Forgot password?** (login screen): mobile → OTP → new password + confirm → logged in.
+- More → **Change password** (current + new + confirm); an account without a password (see
+  below) sees **Set a password** instead (new + confirm, no current one).
+- A customer with no password yet (registered through the agent's web form, §9.3 B, or created by
+  an app older than 3.5.0) who tries to log in is told "Set a password for this number first" and
+  goes straight into the Forgot-password OTP flow.
+- Rules for passwords as for agents: 6–100 characters.
+
+API (`/api/customer/auth`, all rate-limited like agent login):
+- `POST /login {phone, password}` → `{token, customer}`; `401 bad_credentials` ("Mobile number or
+  password is incorrect"); `409 password_not_set` (the number is a customer without a password).
+  Pending / rejected / suspended customers get a token as before (their routes are gated).
+- `POST /otp/send {phone, purpose?, firebase?}` — `purpose`: `signup` → `409 phone_taken` ("This
+  number is already registered — log in with your password") before any SMS; `reset` → `404
+  account_not_found` ("No account with this mobile number") before any SMS; absent = the old
+  login-or-signup OTP of apps before 3.5.0 (still works).
+- `POST /otp/verify {phone, code | firebase_id_token, purpose?}` — `signup` →
+  `{verification_token}` (`409 phone_taken`); `reset` → `{verification_token}` (`404
+  account_not_found`); absent = the old behaviour (an existing number logs in).
+- `POST /signup {full_name, phone, password, phone_verification_token, accepted_terms}` →
+  `201 {token, customer}` — `password` required by the 3.5.0 app (optional on the server for older
+  apps).
+- `POST /reset-password {phone, phone_verification_token, new_password}` → `{token, customer}`
+  (the reset token, from verify with `purpose: reset`; `400 phone_not_verified`).
+- `POST /change-password {current_password?, new_password}` (customer token) → `{ok: true}`;
+  `current_password` is required when the account has a password (`401 bad_credentials`).
+- The customer's own account object (`/customer/auth/me`, login, signup, reset, gift code …) adds
+  `has_password` (bool).
+- OTP purposes stored: `customer_login` (signup and the old login), `customer_reset`.
+- The store-review customer (§9.19 F) logs in with its password like everyone else; its fixed
+  review OTP still works for signup-purpose codes only, never for a reset.
+
+#### D. Forgot password by OTP (both apps)
+
+Self-service, through the same SMS provider as signups (StartMessaging in production; mock /
+Firebase / Fast2SMS / MSG91 work the same way).
+
+- **Wedbook Agent**: Login → **Forgot password?** → mobile → OTP → new password + confirm →
+  logged in (`must_change_password` is cleared). Below the code field: *Can't get the code? Ask the
+  admin* → the old request (`POST /auth/forgot-password`, the admin's Password resets screen,
+  §9 screen 9) — admins can still reset any agent's password by hand.
+- API (`/api/auth`): `POST /otp/send {phone, purpose: 'reset'}` → `404 account_not_found` for a
+  number that is not an agent, else the usual send response; `POST /otp/verify {phone, code |
+  firebase_id_token, purpose: 'reset'}` → `{verification_token}`; `POST /reset-password {phone,
+  phone_verification_token, new_password}` → `{token, agent}` like login (pending admin
+  password-reset requests of that agent are closed as approved). Without `purpose` both OTP routes
+  keep the signup behaviour. OTP purpose stored: `agent_reset`.
+- Wedbook Matrimony: §C.
+- Same limits as every OTP: 5 codes per number per hour, 30 s between codes, 5 tries per code,
+  5-minute codes, 15-minute verification tokens.
 
 ## 8. Explicit v2 (do NOT build now)
 iOS build, Telugu/Hindi UI, horoscope matching/compatibility scores, in-app chat, AI import of old WhatsApp chat exports, OTP providers other than mock / msg91 / firebase (§9.19).

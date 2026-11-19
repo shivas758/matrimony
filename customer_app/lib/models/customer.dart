@@ -207,12 +207,19 @@ class Customer {
     this.paymentProvider = 'mock',
     this.unlock = const UnlockChecklist(),
     this.customerCode,
+    this.hasPassword = true,
   });
 
   final int id;
   final String fullName;
   final String phone;
   final CustomerStatus status;
+
+  /// The account has a password (SPEC §9.24 C) — More offers *Change
+  /// password*; without one (registered through the agent's web form, or by
+  /// an app older than 3.5.0) *Set a password*. True when the server did not
+  /// say (older than v2.14: no passwords to set there).
+  final bool hasPassword;
 
   /// My ID, e.g. `GN-KA1A-A001` — the ID of my profile (SPEC §9.18 C); null
   /// until I have a profile and its agent has a code.
@@ -310,6 +317,31 @@ class Customer {
         paymentProvider: '${j['payment_provider'] ?? 'mock'}',
         unlock: UnlockChecklist.fromJson(j['unlock'] as Map<String, dynamic>?),
         customerCode: AgentCard._code(j['customer_code']),
+        hasPassword: j['has_password'] is bool ? j['has_password'] as bool : true,
+      );
+
+  /// This customer with [hasPassword] changed — after *Set a password*.
+  Customer copyWith({bool? hasPassword}) => Customer(
+        id: id,
+        fullName: fullName,
+        phone: phone,
+        status: status,
+        source: source,
+        phoneVerifiedAt: phoneVerifiedAt,
+        approvedAt: approvedAt,
+        createdAt: createdAt,
+        agent: agent,
+        profileId: profileId,
+        hasProfile: hasProfile,
+        pendingAgentChange: pendingAgentChange,
+        access: access,
+        profiles: profiles,
+        maxProfiles: maxProfiles,
+        profileFeeInr: profileFeeInr,
+        paymentProvider: paymentProvider,
+        unlock: unlock,
+        customerCode: customerCode,
+        hasPassword: hasPassword ?? this.hasPassword,
       );
 
   static DateTime? _date(dynamic v) => v == null ? null : DateTime.tryParse('$v')?.toLocal();
